@@ -1,0 +1,8 @@
+{
+  "name": "SWARAKU",
+  "description": "Platform VRM strategis untuk akuisisi hingga mobilisasi pemilih, penyerapan aspirasi warga, misi poin \u0026 reward, serta navigasi dan pemantauan TPS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

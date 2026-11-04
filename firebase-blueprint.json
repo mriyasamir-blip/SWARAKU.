@@ -1,0 +1,80 @@
+{
+  "entities": {
+    "Voter": {
+      "title": "Voter",
+      "description": "Data pemilih hasil pendaftaran kader atau sinkronisasi DPT KPU",
+      "type": "object",
+      "properties": {
+        "nik": { "type": "string" },
+        "nama": { "type": "string" },
+        "tps": { "type": "string" },
+        "kelurahan": { "type": "string" },
+        "kecamatan": { "type": "string" },
+        "kabupatenKota": { "type": "string" },
+        "provinsi": { "type": "string" },
+        "jenisKelamin": { "type": "string" },
+        "noHp": { "type": "string" },
+        "statusDpt": { "type": "string" },
+        "statusPendukung": { "type": "string" },
+        "waktuDaftar": { "type": "string" },
+        "terdaftarOleh": { "type": "string" }
+      },
+      "required": ["nik", "nama", "tps"]
+    },
+    "FormC1": {
+      "title": "FormC1",
+      "description": "Formulir C1 Plano hasil scan OCR atau upload saksi TPS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tps": { "type": "string" },
+        "kelurahan": { "type": "string" },
+        "kecamatan": { "type": "string" },
+        "saksiNama": { "type": "string" },
+        "waktuUpload": { "type": "string" },
+        "suaraPaslon1": { "type": "number" },
+        "suaraPaslon2": { "type": "number" },
+        "suaraPaslon3": { "type": "number" },
+        "suaraTidakSah": { "type": "number" },
+        "totalSuaraSah": { "type": "number" },
+        "statusVerifikasi": { "type": "string" }
+      },
+      "required": ["id", "tps", "suaraPaslon1"]
+    },
+    "FormB1": {
+      "title": "FormB1",
+      "description": "Formulir Model B1-KWK rekapitulasi tingkat kecamatan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "kecamatan": { "type": "string" },
+        "kelurahan": { "type": "string" },
+        "dapil": { "type": "string" },
+        "koordinatorNama": { "type": "string" },
+        "waktuUpload": { "type": "string" },
+        "suaraPaslon1": { "type": "number" },
+        "suaraPaslon2": { "type": "number" },
+        "suaraPaslon3": { "type": "number" },
+        "suaraTidakSah": { "type": "number" },
+        "totalSuaraSah": { "type": "number" },
+        "totalTpsTercakup": { "type": "number" },
+        "statusVerifikasi": { "type": "string" }
+      },
+      "required": ["id", "kecamatan", "suaraPaslon1"]
+    }
+  },
+  "firestore": {
+    "/voters/{voterId}": {
+      "schema": { "$ref": "#/entities/Voter" },
+      "description": "Daftar pemilih tetap dan rujukan kader"
+    },
+    "/c1_records/{c1Id}": {
+      "schema": { "$ref": "#/entities/FormC1" },
+      "description": "Dokumen C1 Plano tabulasi quick count"
+    },
+    "/b1_records/{b1Id}": {
+      "schema": { "$ref": "#/entities/FormB1" },
+      "description": "Dokumen B1 rekapitulasi kecamatan"
+    }
+  }
+}
