@@ -37,6 +37,7 @@ import {
   Camera,
   Menu,
   X,
+  ChevronDown,
 } from 'lucide-react';
 import { APP_IMAGES } from '../../assets/images';
 import { SwarakuLogo } from '../common/SwarakuLogo';
@@ -78,6 +79,7 @@ export const LandingWebsiteView: React.FC<LandingWebsiteViewProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [proposalModalOpen, setProposalModalOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [openDropdownMenu, setOpenDropdownMenu] = useState<'tentang_kami' | 'tentang_produk' | null>(null);
   const [selectedPreviewImage, setSelectedPreviewImage] = useState<{
     url: string;
     title: string;
@@ -175,47 +177,125 @@ export const LandingWebsiteView: React.FC<LandingWebsiteViewProps> = ({
           {/* Pembatas vertikal untuk layar lg (sebelum xl) */}
           <div className="hidden lg:block xl:hidden h-6 w-[2px] bg-slate-300/80 mx-6 shrink-0" aria-hidden="true" />
 
-          {/* Zone 2: Navigation Links including Beranda with generous spacing */}
-          <nav className="hidden lg:flex items-center gap-5 xl:gap-6 ml-4 lg:ml-6 text-sm font-medium text-slate-600">
+          {/* Zone 2: Navigation Links with 'Tentang Kami' & 'Tentang Product Kami' Submenus */}
+          <nav className="hidden lg:flex items-center gap-4 xl:gap-5 ml-4 lg:ml-6 text-sm font-medium text-slate-600">
             <button
-              onClick={() => scrollToSection('beranda')}
-              className="text-slate-800 hover:text-cyan-600 font-bold transition-colors cursor-pointer px-3 py-1.5 rounded-lg hover:bg-slate-100/60"
+              onClick={() => {
+                setOpenDropdownMenu(null);
+                scrollToSection('beranda');
+              }}
+              className="text-slate-800 hover:text-cyan-600 font-bold transition-colors cursor-pointer px-2.5 py-1.5 rounded-lg hover:bg-slate-100/60"
             >
               Beranda
             </button>
-            <button
-              onClick={() => scrollToSection('profil-swaraku')}
-              className="text-cyan-800 hover:text-cyan-600 font-bold transition-colors cursor-pointer"
+
+            {/* Sub Menu 1: Tentang Kami (Profil SWARAKU & Keunggulan) */}
+            <div
+              className="relative"
+              onMouseEnter={() => setOpenDropdownMenu('tentang_kami')}
+              onMouseLeave={() => setOpenDropdownMenu(null)}
             >
-              Profil SWARAKU
-            </button>
-            <button
-              onClick={() => scrollToSection('fitur')}
-              className="hover:text-cyan-700 transition-colors cursor-pointer"
+              <button
+                type="button"
+                onClick={() => setOpenDropdownMenu(openDropdownMenu === 'tentang_kami' ? null : 'tentang_kami')}
+                className="flex items-center gap-1 text-slate-700 hover:text-cyan-700 font-bold transition-colors cursor-pointer px-2.5 py-1.5 rounded-lg hover:bg-slate-100/60"
+              >
+                <span>Tentang Kami</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${openDropdownMenu === 'tentang_kami' ? 'rotate-180 text-cyan-600' : 'text-slate-400'}`} />
+              </button>
+
+              {openDropdownMenu === 'tentang_kami' && (
+                <div className="absolute top-full left-0 mt-1 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-50 animate-in fade-in slide-in-from-top-1 duration-150">
+                  <button
+                    onClick={() => {
+                      scrollToSection('profil-swaraku');
+                      setOpenDropdownMenu(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-xs font-bold text-slate-800 hover:text-cyan-700 hover:bg-cyan-50/70 transition-colors flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-600"></span>
+                    <span>Profil SWARAKU</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      scrollToSection('komparasi');
+                      setOpenDropdownMenu(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:text-cyan-700 hover:bg-cyan-50/70 transition-colors flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                    <span>Keunggulan Sistem</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Sub Menu 2: Tentang Product Kami (Fitur Sistem, Paket Layanan, Inquire Product) */}
+            <div
+              className="relative"
+              onMouseEnter={() => setOpenDropdownMenu('tentang_produk')}
+              onMouseLeave={() => setOpenDropdownMenu(null)}
             >
-              Fitur Sistem
-            </button>
+              <button
+                type="button"
+                onClick={() => setOpenDropdownMenu(openDropdownMenu === 'tentang_produk' ? null : 'tentang_produk')}
+                className="flex items-center gap-1 text-slate-700 hover:text-cyan-700 font-bold transition-colors cursor-pointer px-2.5 py-1.5 rounded-lg hover:bg-slate-100/60"
+              >
+                <span>Tentang Product Kami</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${openDropdownMenu === 'tentang_produk' ? 'rotate-180 text-cyan-600' : 'text-slate-400'}`} />
+              </button>
+
+              {openDropdownMenu === 'tentang_produk' && (
+                <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-50 animate-in fade-in slide-in-from-top-1 duration-150">
+                  <button
+                    onClick={() => {
+                      scrollToSection('fitur');
+                      setOpenDropdownMenu(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:text-cyan-700 hover:bg-cyan-50/70 transition-colors flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                    <span>Fitur Sistem</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      scrollToSection('paket');
+                      setOpenDropdownMenu(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-xs font-bold text-slate-800 hover:text-cyan-700 hover:bg-cyan-50/70 transition-colors flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-600"></span>
+                    <span>Paket Layanan</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      scrollToSection('inquire');
+                      setOpenDropdownMenu(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-700 hover:text-cyan-700 hover:bg-cyan-50/70 transition-colors flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    <span>Inquire Product</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
             <button
-              onClick={() => scrollToSection('komparasi')}
-              className="hover:text-cyan-700 transition-colors cursor-pointer"
-            >
-              Keunggulan
-            </button>
-            <button
-              onClick={() => scrollToSection('kalkulator')}
-              className="hover:text-cyan-700 transition-colors cursor-pointer"
+              onClick={() => {
+                setOpenDropdownMenu(null);
+                scrollToSection('kalkulator');
+              }}
+              className="hover:text-cyan-700 transition-colors cursor-pointer px-2 py-1.5"
             >
               Kalkulator Suara
             </button>
             <button
-              onClick={() => scrollToSection('paket')}
-              className="hover:text-cyan-700 transition-colors cursor-pointer"
-            >
-              Paket Layanan
-            </button>
-            <button
-              onClick={() => scrollToSection('faq')}
-              className="hover:text-cyan-700 transition-colors cursor-pointer"
+              onClick={() => {
+                setOpenDropdownMenu(null);
+                scrollToSection('faq');
+              }}
+              className="hover:text-cyan-700 transition-colors cursor-pointer px-2 py-1.5"
             >
               FAQ
             </button>
@@ -258,71 +338,101 @@ export const LandingWebsiteView: React.FC<LandingWebsiteViewProps> = ({
                 scrollToSection('beranda');
                 setMobileMenuOpen(false);
               }}
-              className="w-full text-left py-2.5 px-3 text-sm font-bold text-cyan-900 bg-cyan-50/60 rounded-xl transition-colors flex items-center gap-2.5"
+              className="w-full text-left py-2 px-3 text-sm font-bold text-cyan-900 bg-cyan-50/60 rounded-xl transition-colors flex items-center gap-2.5"
             >
               <span>🏠</span>
               <span>Beranda</span>
             </button>
-            <button
-              onClick={() => {
-                scrollToSection('profil-swaraku');
-                setMobileMenuOpen(false);
-              }}
-              className="w-full text-left py-2.5 px-3 text-sm font-bold text-cyan-800 hover:bg-slate-50 rounded-xl transition-colors flex items-center gap-2.5"
-            >
-              <span>⭐</span>
-              <span>Profil SWARAKU</span>
-            </button>
-            <button
-              onClick={() => {
-                scrollToSection('fitur');
-                setMobileMenuOpen(false);
-              }}
-              className="w-full text-left py-2.5 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-xl transition-colors flex items-center gap-2.5"
-            >
-              <span>⚡</span>
-              <span>Fitur Sistem</span>
-            </button>
-            <button
-              onClick={() => {
-                scrollToSection('komparasi');
-                setMobileMenuOpen(false);
-              }}
-              className="w-full text-left py-2.5 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-xl transition-colors flex items-center gap-2.5"
-            >
-              <span>🏆</span>
-              <span>Keunggulan</span>
-            </button>
+
+            {/* Mobile Submenu 1: Tentang Kami */}
+            <div className="pt-2 pb-1">
+              <div className="px-3 text-[11px] font-black uppercase tracking-wider text-slate-400">
+                Tentang Kami
+              </div>
+              <div className="mt-1 pl-2 space-y-0.5 border-l-2 border-cyan-200 ml-3">
+                <button
+                  onClick={() => {
+                    scrollToSection('profil-swaraku');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full text-left py-2 px-3 text-xs font-bold text-cyan-800 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <span>⭐</span>
+                  <span>Profil SWARAKU</span>
+                </button>
+                <button
+                  onClick={() => {
+                    scrollToSection('komparasi');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full text-left py-2 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <span>🏆</span>
+                  <span>Keunggulan Sistem</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Mobile Submenu 2: Tentang Product Kami */}
+            <div className="pt-2 pb-1">
+              <div className="px-3 text-[11px] font-black uppercase tracking-wider text-slate-400">
+                Tentang Product Kami
+              </div>
+              <div className="mt-1 pl-2 space-y-0.5 border-l-2 border-teal-200 ml-3">
+                <button
+                  onClick={() => {
+                    scrollToSection('fitur');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full text-left py-2 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <span>⚡</span>
+                  <span>Fitur Sistem</span>
+                </button>
+                <button
+                  onClick={() => {
+                    scrollToSection('paket');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full text-left py-2 px-3 text-xs font-bold text-slate-800 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <span>📦</span>
+                  <span>Paket Layanan</span>
+                </button>
+                <button
+                  onClick={() => {
+                    scrollToSection('inquire');
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full text-left py-2 px-3 text-xs font-semibold text-emerald-800 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <span>📩</span>
+                  <span>Inquire Product</span>
+                </button>
+              </div>
+            </div>
+
             <button
               onClick={() => {
                 scrollToSection('kalkulator');
                 setMobileMenuOpen(false);
               }}
-              className="w-full text-left py-2.5 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-xl transition-colors flex items-center gap-2.5"
+              className="w-full text-left py-2 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-xl transition-colors flex items-center gap-2.5"
             >
               <span>🧮</span>
               <span>Kalkulator Suara</span>
             </button>
             <button
               onClick={() => {
-                scrollToSection('paket');
-                setMobileMenuOpen(false);
-              }}
-              className="w-full text-left py-2.5 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-xl transition-colors flex items-center gap-2.5"
-            >
-              <span>📦</span>
-              <span>Paket Layanan</span>
-            </button>
-            <button
-              onClick={() => {
                 scrollToSection('faq');
                 setMobileMenuOpen(false);
               }}
-              className="w-full text-left py-2.5 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-xl transition-colors flex items-center gap-2.5"
+              className="w-full text-left py-2 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-xl transition-colors flex items-center gap-2.5"
             >
               <span>❓</span>
               <span>FAQ</span>
             </button>
+
             <div className="pt-2 border-t border-slate-100 flex gap-2">
               <button
                 onClick={() => {
@@ -1301,80 +1411,65 @@ export const LandingWebsiteView: React.FC<LandingWebsiteViewProps> = ({
             </p>
           </div>
 
-          {/* 3 Main Package Cards */}
+          {/* 3 Main Package Cards - Fokus Ringkasan & Rekomendasi (Rincian & Harga Lengkap pada Matriks di Bawah) */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
             {/* Paket 1: Starter */}
-            <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-xs space-y-6 flex flex-col justify-between">
+            <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-xs space-y-6 flex flex-col justify-between hover:shadow-md transition-shadow">
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-md bg-slate-100 text-slate-700">
-                    Dapil Kecil
+                    Paket Pemula
                   </span>
-                  <span className="text-xs text-slate-400 font-semibold">12 Bulan Kontrak</span>
+                  <span className="text-xs text-slate-400 font-semibold">Tingkat Dasar</span>
                 </div>
 
                 <div>
-                  <h3 className="text-2xl font-black text-slate-900">Starter</h3>
-                  <div className="mt-2 flex items-baseline gap-1">
-                    <span className="text-3xl font-black text-slate-900 font-mono">Rp 150.000.000</span>
-                    <span className="text-xs text-slate-500 font-medium">/ 12 bulan</span>
-                  </div>
+                  <h3 className="text-2xl font-black text-slate-900">Paket Starter</h3>
+                  <p className="text-xs text-cyan-800 font-bold mt-1">Dapil Ringkas &amp; Tim Inti</p>
                 </div>
 
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-600 leading-relaxed">
-                  <strong>Ringkasan:</strong> Paket dasar: survei online, monitoring peta sampai kecamatan, relawan terbatas, dukungan email.
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-700 leading-relaxed">
+                  <strong>Ringkasan Layanan:</strong> Paket dasar terfokus untuk survei online berkala, pemantauan sebaran suara tingkat kecamatan, koordinasi relawan terpusat, dan asistensi teknis via email.
                 </div>
 
-                <div className="text-xs text-slate-700">
-                  <span className="font-bold text-slate-900 block mb-1">Sasaran Pengguna:</span>
-                  <span className="text-slate-600">Caleg DPRD kab/kota dengan dapil kecil</span>
-                </div>
-
-                <div className="pt-3 border-t border-slate-100 space-y-2.5 text-xs text-slate-700">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Akun Relawan:</span>
-                    <span className="font-bold text-slate-900 font-mono">20 akun</span>
+                <div className="p-3.5 bg-cyan-50/50 rounded-xl border border-cyan-100 text-xs text-slate-700 space-y-1.5">
+                  <div className="font-bold text-cyan-950 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-600" />
+                    <span>Rekomendasi Kontestasi:</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">WhatsApp Blast:</span>
-                    <span className="font-semibold text-slate-600">Tidak termasuk (top-up)</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Survei Online:</span>
-                    <span className="font-semibold text-slate-900">1 survei per bulan</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Peta Suara:</span>
-                    <span className="font-semibold text-slate-900">Sampai kecamatan</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Rekap C1:</span>
-                    <span className="font-semibold text-slate-400">Tidak termasuk</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Storage &amp; SLA:</span>
-                    <span className="font-semibold text-slate-900">20 GB • Best effort</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Kanal Dukungan:</span>
-                    <span className="font-semibold text-slate-700">Email, jam kerja</span>
-                  </div>
+                  <p className="text-slate-600 leading-relaxed">
+                    Sangat direkomendasikan untuk <strong>Calon Anggota DPRD Kabupaten/Kota</strong> dengan cakupan wilayah dapil kecil dan kebutuhan operasional tim sukses yang ringkas.
+                  </p>
                 </div>
               </div>
 
-              <button
-                onClick={() => {
-                  setFormData((prev) => ({ ...prev, kontestasi: 'Paket Starter (Rp 150.000.000)' }));
-                  scrollToSection('inquire');
-                }}
-                className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-900 font-bold text-xs rounded-xl transition-colors cursor-pointer"
-              >
-                Inquire Paket Starter (Rp 150 Jt)
-              </button>
+              <div className="space-y-2 pt-2">
+                <button
+                  onClick={() => {
+                    setFormData((prev) => ({ ...prev, kontestasi: 'Paket Starter' }));
+                    scrollToSection('inquire');
+                  }}
+                  className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-900 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  Inquire Paket Starter
+                </button>
+                <div className="text-center">
+                  <a
+                    href="#matriks-komparasi"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      document.getElementById('matriks-komparasi')?.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="text-[11px] text-cyan-700 hover:underline font-semibold"
+                  >
+                    Lihat rincian 14 aspek pada matriks ↓
+                  </a>
+                </div>
+              </div>
             </div>
 
-            {/* Paket 2: Pro (Paling Diminati) */}
-            <div className="bg-white p-7 rounded-2xl border-2 border-cyan-600 shadow-xl space-y-6 flex flex-col justify-between relative">
+            {/* Paket 2: Pro (Rekomendasi Utama) */}
+            <div className="bg-white p-7 rounded-2xl border-2 border-cyan-600 shadow-xl space-y-6 flex flex-col justify-between relative hover:shadow-2xl transition-shadow">
               <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-gradient-to-r from-teal-600 to-cyan-600 text-white text-[10px] font-black px-3.5 py-1 rounded-full uppercase tracking-wider shadow-md">
                 Paling Diminati • Rekomendasi Utama
               </div>
@@ -1382,144 +1477,114 @@ export const LandingWebsiteView: React.FC<LandingWebsiteViewProps> = ({
               <div className="space-y-4">
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-md bg-cyan-100 text-cyan-900">
-                    Provinsi &amp; DPR RI
+                    Paket Standar Lengkap
                   </span>
-                  <span className="text-xs text-cyan-700 font-bold">12 Bulan Kontrak</span>
+                  <span className="text-xs text-cyan-700 font-bold">Paling Populer</span>
                 </div>
 
                 <div>
-                  <h3 className="text-2xl font-black text-slate-900">Pro</h3>
-                  <div className="mt-2 flex items-baseline gap-1">
-                    <span className="text-3xl font-black text-cyan-800 font-mono">Rp 250.000.000</span>
-                    <span className="text-xs text-slate-500 font-medium">/ 12 bulan</span>
-                  </div>
+                  <h3 className="text-2xl font-black text-slate-900">Paket Pro</h3>
+                  <p className="text-xs text-cyan-800 font-bold mt-1">Dapil Menengah &amp; Rekap C1 Hari H</p>
                 </div>
 
-                <div className="p-3 bg-cyan-50/70 rounded-xl border border-cyan-100 text-xs text-slate-700 leading-relaxed">
-                  <strong>Ringkasan:</strong> Paket standar: survei tanpa batas, peta sampai desa, rekap C1 saat Hari H, dukungan WhatsApp.
+                <div className="p-4 bg-cyan-50/70 rounded-xl border border-cyan-100 text-xs text-slate-700 leading-relaxed">
+                  <strong>Ringkasan Layanan:</strong> Paket standar pemenangan menyeluruh: survei elektabilitas tanpa batas, pemetaan suara presisi hingga tingkat desa/kelurahan, tabulasi rekap C1 saat Hari H, serta dukungan respons cepat via WhatsApp.
                 </div>
 
-                <div className="text-xs text-slate-700">
-                  <span className="font-bold text-slate-900 block mb-1">Sasaran Pengguna:</span>
-                  <span className="text-slate-600">Caleg DPRD provinsi, DPR RI, calon bupati/walikota</span>
-                </div>
-
-                <div className="pt-3 border-t border-slate-100 space-y-2.5 text-xs text-slate-700">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Akun Relawan:</span>
-                    <span className="font-bold text-cyan-800 font-mono">100 akun</span>
+                <div className="p-3.5 bg-emerald-50/70 rounded-xl border border-emerald-200 text-xs text-slate-700 space-y-1.5">
+                  <div className="font-bold text-emerald-950 flex items-center gap-1.5">
+                    <CheckCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Rekomendasi Kontestasi:</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">WhatsApp Blast:</span>
-                    <span className="font-bold text-emerald-700">2.000 pesan</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Survei Online:</span>
-                    <span className="font-bold text-slate-900">Tanpa batas</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Peta Suara:</span>
-                    <span className="font-semibold text-slate-900">Sampai kecamatan &amp; desa</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Rekap C1:</span>
-                    <span className="font-bold text-emerald-700">Saat Hari H</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Storage &amp; SLA:</span>
-                    <span className="font-semibold text-slate-900">50 GB • SLA 99%</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Kanal Dukungan:</span>
-                    <span className="font-semibold text-slate-700">WhatsApp, jam kerja</span>
-                  </div>
+                  <p className="text-slate-600 leading-relaxed">
+                    Sangat direkomendasikan untuk <strong>Caleg DPRD Provinsi, DPR RI, serta Calon Bupati / Walikota</strong> yang memerlukan kontrol suara menyeluruh lintas kecamatan dan rekapitulasi C1 instan.
+                  </p>
                 </div>
               </div>
 
-              <button
-                onClick={() => {
-                  setFormData((prev) => ({ ...prev, kontestasi: 'Paket Pro (Rp 250.000.000)' }));
-                  scrollToSection('inquire');
-                }}
-                className="w-full py-3 bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer active:scale-98"
-              >
-                Inquire Paket Pro (Rp 250 Jt)
-              </button>
+              <div className="space-y-2 pt-2">
+                <button
+                  onClick={() => {
+                    setFormData((prev) => ({ ...prev, kontestasi: 'Paket Pro' }));
+                    scrollToSection('inquire');
+                  }}
+                  className="w-full py-3 bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer active:scale-98"
+                >
+                  Inquire Paket Pro (Rekomendasi)
+                </button>
+                <div className="text-center">
+                  <a
+                    href="#matriks-komparasi"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      document.getElementById('matriks-komparasi')?.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="text-[11px] text-cyan-800 hover:underline font-bold"
+                  >
+                    Lihat rincian 14 aspek pada matriks ↓
+                  </a>
+                </div>
+              </div>
             </div>
 
             {/* Paket 3: Enterprise */}
-            <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-xs space-y-6 flex flex-col justify-between">
+            <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-xs space-y-6 flex flex-col justify-between hover:shadow-md transition-shadow">
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-md bg-slate-900 text-white">
-                    Pilkada &amp; Multi-Wilayah
+                    Paket Premium
                   </span>
-                  <span className="text-xs text-slate-400 font-semibold">12 Bulan Kontrak</span>
+                  <span className="text-xs text-slate-400 font-semibold">Tingkat Tertinggi</span>
                 </div>
 
                 <div>
-                  <h3 className="text-2xl font-black text-slate-900">Enterprise</h3>
-                  <div className="mt-2 flex items-baseline gap-1">
-                    <span className="text-3xl font-black text-slate-900 font-mono">Rp 300.000.000</span>
-                    <span className="text-xs text-slate-500 font-medium">/ 12 bulan</span>
-                  </div>
+                  <h3 className="text-2xl font-black text-slate-900">Paket Enterprise</h3>
+                  <p className="text-xs text-cyan-800 font-bold mt-1">War Room 3 Hari &amp; Data TPS Lengkap</p>
                 </div>
 
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-600 leading-relaxed">
-                  <strong>Ringkasan:</strong> Paket lengkap: peta sampai data TPS, war room Hari H, dukungan telepon prioritas, SLA 99,5%.
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-600 leading-relaxed">
+                  <strong>Ringkasan Layanan:</strong> Paket terlengkap tanpa kompromi: pemetaan suara detail hingga tingkat data TPS, fasilitas War Room intensif 3 hari saat Hari H, kanal dukungan telepon &amp; WhatsApp prioritas, serta jaminan SLA 99,5%.
                 </div>
 
-                <div className="text-xs text-slate-700">
-                  <span className="font-bold text-slate-900 block mb-1">Sasaran Pengguna:</span>
-                  <span className="text-slate-600">Calon gubernur, partai, tim multi-wilayah</span>
-                </div>
-
-                <div className="pt-3 border-t border-slate-100 space-y-2.5 text-xs text-slate-700">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Akun Relawan:</span>
-                    <span className="font-bold text-slate-900 font-mono">300 akun</span>
+                <div className="p-3.5 bg-indigo-50/60 rounded-xl border border-indigo-100 text-xs text-slate-700 space-y-1.5">
+                  <div className="font-bold text-indigo-950 flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Rekomendasi Kontestasi:</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">WhatsApp Blast:</span>
-                    <span className="font-bold text-emerald-700">5.000 pesan</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Survei Online:</span>
-                    <span className="font-bold text-slate-900">Tanpa batas + sampling khusus</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Peta Suara:</span>
-                    <span className="font-semibold text-slate-900">Sampai kec, desa &amp; TPS</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Rekap C1:</span>
-                    <span className="font-bold text-indigo-700">Dengan war room 3 hari</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Storage &amp; SLA:</span>
-                    <span className="font-semibold text-slate-900">100 GB • SLA 99,5%</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Kanal Dukungan:</span>
-                    <span className="font-semibold text-slate-900">WA &amp; telepon, prioritas</span>
-                  </div>
+                  <p className="text-slate-600 leading-relaxed">
+                    Sangat direkomendasikan untuk <strong>Calon Gubernur, Dewan Pimpinan Partai Politik, Tim Kampanye Gabungan Koalisi, dan Kontestasi Multi-Wilayah</strong> dengan jaringan saksi ribuan TPS.
+                  </p>
                 </div>
               </div>
 
-              <button
-                onClick={() => {
-                  setFormData((prev) => ({ ...prev, kontestasi: 'Paket Enterprise (Rp 300.000.000)' }));
-                  scrollToSection('inquire');
-                }}
-                className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
-              >
-                Inquire Paket Enterprise (Rp 300 Jt)
-              </button>
+              <div className="space-y-2 pt-2">
+                <button
+                  onClick={() => {
+                    setFormData((prev) => ({ ...prev, kontestasi: 'Paket Enterprise' }));
+                    scrollToSection('inquire');
+                  }}
+                  className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  Inquire Paket Enterprise
+                </button>
+                <div className="text-center">
+                  <a
+                    href="#matriks-komparasi"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      document.getElementById('matriks-komparasi')?.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="text-[11px] text-cyan-700 hover:underline font-semibold"
+                  >
+                    Lihat rincian 14 aspek pada matriks ↓
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
 
           {/* Full Comparison Table - Sesuai Informasi pada Gambar */}
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-md overflow-hidden">
+          <div id="matriks-komparasi" className="bg-white rounded-3xl border border-slate-200 shadow-md overflow-hidden scroll-mt-24">
             <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-cyan-950 to-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-base sm:text-lg font-black tracking-tight flex items-center gap-2">
