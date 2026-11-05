@@ -61,6 +61,44 @@
         "statusVerifikasi": { "type": "string" }
       },
       "required": ["id", "kecamatan", "suaraPaslon1"]
+    },
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Akun login pengguna multi-perangkat (Super Admin, Admin, Tim Sukses, Kader)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "role": { "type": "string" },
+        "nama": { "type": "string" },
+        "username": { "type": "string" },
+        "email": { "type": "string" },
+        "jabatan": { "type": "string" },
+        "wilayah": { "type": "string" },
+        "tps": { "type": "string" },
+        "noHp": { "type": "string" },
+        "password": { "type": "string" },
+        "status": { "type": "string" },
+        "dibuatPada": { "type": "string" },
+        "fotoUrl": { "type": "string" }
+      },
+      "required": ["id", "role", "nama", "username"]
+    },
+    "TimSukses": {
+      "title": "TimSukses",
+      "description": "Data penugasan wilayah dan koordinat tim sukses di peta suara",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nama": { "type": "string" },
+        "noHp": { "type": "string" },
+        "jabatan": { "type": "string" },
+        "kota": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "status": { "type": "string" },
+        "waktuDaftar": { "type": "string" }
+      },
+      "required": ["id", "nama", "kota"]
     }
   },
   "firestore": {
@@ -75,6 +113,14 @@
     "/b1_records/{b1Id}": {
       "schema": { "$ref": "#/entities/FormB1" },
       "description": "Dokumen B1 rekapitulasi kecamatan"
+    },
+    "/user_accounts/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Penyimpanan akun pengguna real-time multi-device"
+    },
+    "/tim_sukses_members/{tsId}": {
+      "schema": { "$ref": "#/entities/TimSukses" },
+      "description": "Struktur tim sukses dan titik koordinat peta suara"
     }
   }
 }

@@ -88,6 +88,9 @@ import {
   subscribeToCloudTimSukses,
   subscribeToCloudC1,
   subscribeToCloudB1,
+  subscribeToCloudUserAccounts,
+  saveUserAccountToCloud,
+  deleteUserAccountFromCloud,
   migrateLocalDataToCloud,
   subscribeCloudSyncStatus,
   getCloudSyncState,
@@ -250,13 +253,15 @@ export default function App() {
 
   const handleAddUser = (newUser: UserAccount) => {
     setUserAccounts((prev) => {
-      const updated = [newUser, ...prev];
+      const updated = [newUser, ...prev.filter((u) => u.id !== newUser.id)];
       if (typeof window !== 'undefined') {
         localStorage.setItem('swaraku_user_accounts', JSON.stringify(updated));
       }
       return updated;
     });
-    showToast(`✅ Akun "${newUser.nama}" (${newUser.role === 'tim_sukses' ? 'Tim Sukses' : newUser.role === 'kader' ? 'Kader Lapangan' : newUser.role === 'super_admin' ? 'Super Admin' : 'Admin'}) berhasil ditambahkan!`);
+    // Simpan ke Firestore Real-Time agar langsung tersinkron ke semua device & browser lain
+    saveUserAccountToCloud(newUser);
+    showToast(`✅ Akun "${newUser.nama}" (${newUser.role === 'tim_sukses' ? 'Tim Sukses' : newUser.role === 'kader' ? 'Kader Lapangan' : newUser.role === 'super_admin' ? 'Super Admin' : 'Admin'}) berhasil didaftarkan & disinkronkan ke Cloud!`);
   };
 
   const handleDeleteUser = (userId: string) => {
@@ -267,22 +272,31 @@ export default function App() {
       }
       return updated;
     });
-    showToast('🗑️ Akun berhasil dihapus dari sistem.');
+    // Hapus dari Firestore
+    deleteUserAccountFromCloud(userId);
+    showToast('🗑️ Akun berhasil dihapus dari sistem & cloud.');
   };
 
   const handleToggleUserStatus = (userId: string) => {
     setUserAccounts((prev) => {
-      const updated = prev.map((u) =>
-        u.id === userId
-          ? { ...u, status: (u.status === 'Nonaktif' ? 'Aktif' : 'Nonaktif') as 'Aktif' | 'Nonaktif' }
-          : u
-      );
+      let targetUser: UserAccount | null = null;
+      const updated = prev.map((u) => {
+        if (u.id === userId) {
+          const nextStatus = (u.status === 'Nonaktif' ? 'Aktif' : 'Nonaktif') as 'Aktif' | 'Nonaktif';
+          targetUser = { ...u, status: nextStatus };
+          return targetUser;
+        }
+        return u;
+      });
       if (typeof window !== 'undefined') {
         localStorage.setItem('swaraku_user_accounts', JSON.stringify(updated));
       }
+      if (targetUser) {
+        saveUserAccountToCloud(targetUser);
+      }
       return updated;
     });
-    showToast('🔄 Status akun berhasil diubah.');
+    showToast('🔄 Status akun berhasil diubah & disinkronkan.');
   };
 
   const handleUpdateUser = (updatedUser: UserAccount) => {
@@ -299,7 +313,9 @@ export default function App() {
         localStorage.setItem('swaraku_current_user', JSON.stringify(updatedUser));
       }
     }
-    showToast(`✅ Akun "${updatedUser.nama}" (@${updatedUser.username}) berhasil diperbarui!`);
+    // Update ke Firestore
+    saveUserAccountToCloud(updatedUser);
+    showToast(`✅ Akun "${updatedUser.nama}" (@${updatedUser.username}) berhasil diperbarui di seluruh perangkat!`);
   };
 
   // Kader Lapangan State
@@ -372,7 +388,21 @@ export default function App() {
       setB1Records(cloudB1);
     });
 
-    // 6. Migrasikan data lokal ke Cloud Firestore
+    // 6. Real-time User Accounts sync (Super Admin akun pool multi-device)
+    const unsubUsers = subscribeToCloudUserAccounts((cloudUsers) => {
+      if (cloudUsers.length > 0) {
+        setUserAccounts((prev) => {
+          // Gabungkan akun cloud dengan preset default agar tidak kehilangan superadmin default
+          const map = new Map<string, UserAccount>();
+          PRESET_ACCOUNTS.forEach((a) => map.set(a.id, a));
+          prev.forEach((a) => map.set(a.id, a));
+          cloudUsers.forEach((a) => map.set(a.id, a));
+          return Array.from(map.values());
+        });
+      }
+    });
+
+    // 7. Migrasikan data lokal ke Cloud Firestore
     migrateLocalDataToCloud()
       .then((res) => {
         if (res.votersMigrated > 0 || res.timSuksesMigrated > 0) {
@@ -387,6 +417,7 @@ export default function App() {
       unsubTimSukses();
       unsubC1();
       unsubB1();
+      unsubUsers();
     };
   }, []);
 

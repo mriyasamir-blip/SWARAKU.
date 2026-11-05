@@ -5,6 +5,7 @@ import {
   collection,
   doc,
   setDoc,
+  deleteDoc,
   getDocs,
   onSnapshot,
   Unsubscribe,
@@ -15,6 +16,7 @@ import {
   FormC1Upload,
   FormB1Upload,
   DptVoterRecord,
+  UserAccount,
 } from '../types/vore';
 import { TimSuksesWilayahRecord } from '../data/petaSuaraData';
 import { resolveAccurateCoordinates, lookupSmartCoordinates } from '../utils/geocoding';
@@ -24,6 +26,7 @@ export const CLOUD_COLLECTIONS = {
   TIM_SUKSES: 'tim_sukses_members',
   C1_RECORDS: 'c1_records',
   B1_RECORDS: 'b1_records',
+  USER_ACCOUNTS: 'user_accounts',
   SYNC_METADATA: 'sync_metadata',
 } as const;
 
@@ -34,6 +37,7 @@ export const LOCAL_CACHE_KEYS = {
   C1: 'swaraku_c1_records',
   B1: 'swaraku_b1_records',
   DPT: 'swaraku_dpt_list',
+  USER_ACCOUNTS: 'swaraku_user_accounts',
 } as const;
 
 // Track active listeners and sync status
@@ -421,6 +425,52 @@ export function subscribeToCloudB1(
 }
 
 // -------------------------------------------------------------
+// 4b. MULTI-DEVICE USER ACCOUNTS SYNC (SUPER ADMIN ACCOUNTS POOL)
+// -------------------------------------------------------------
+export function subscribeToCloudUserAccounts(
+  onUpdate: (accounts: UserAccount[]) => void
+): Unsubscribe {
+  const usersRef = collection(firestore, CLOUD_COLLECTIONS.USER_ACCOUNTS);
+
+  return onSnapshot(
+    usersRef,
+    (snapshot) => {
+      const list: UserAccount[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          id: d.id || docSnap.id,
+          role: d.role || 'kader',
+          nama: d.nama || '',
+          username: d.username || '',
+          email: d.email || `${d.username || 'user'}@swaraku.com`,
+          jabatan: d.jabatan || '',
+          wilayah: d.wilayah || '',
+          tps: d.tps || undefined,
+          noHp: d.noHp || '',
+          fotoUrl: d.fotoUrl || '',
+          password: d.password || '123456',
+          status: (d.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif') as 'Aktif' | 'Nonaktif',
+          dibuatPada: d.dibuatPada || '',
+        });
+      });
+
+      // Update cache lokal
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(LOCAL_CACHE_KEYS.USER_ACCOUNTS, JSON.stringify(list));
+        } catch {
+          // ignore
+        }
+      }
+
+      onUpdate(list);
+    },
+    (err) => console.warn('[CloudSync] User Accounts listener notice:', err)
+  );
+}
+
+// -------------------------------------------------------------
 // 5. WRITE ACTIONS: SAVE RECORD DIRECTLY TO CLOUD FIRESTORE
 // -------------------------------------------------------------
 export async function saveVoterToCloud(
@@ -579,6 +629,55 @@ export async function saveB1ToCloud(b1: FormB1Upload): Promise<void> {
   }
 }
 
+export async function saveUserAccountToCloud(user: UserAccount): Promise<void> {
+  try {
+    const docRef = doc(firestore, CLOUD_COLLECTIONS.USER_ACCOUNTS, user.id);
+    await setDoc(
+      docRef,
+      {
+        ...user,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (e) {
+    console.warn('[CloudSync] User account save notice:', e);
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const current = JSON.parse(
+        localStorage.getItem(LOCAL_CACHE_KEYS.USER_ACCOUNTS) || '[]'
+      ) as UserAccount[];
+      const updated = [user, ...current.filter((i) => i.id !== user.id)];
+      localStorage.setItem(LOCAL_CACHE_KEYS.USER_ACCOUNTS, JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export async function deleteUserAccountFromCloud(userId: string): Promise<void> {
+  try {
+    const docRef = doc(firestore, CLOUD_COLLECTIONS.USER_ACCOUNTS, userId);
+    await deleteDoc(docRef);
+  } catch (e) {
+    console.warn('[CloudSync] User account delete notice:', e);
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const current = JSON.parse(
+        localStorage.getItem(LOCAL_CACHE_KEYS.USER_ACCOUNTS) || '[]'
+      ) as UserAccount[];
+      const updated = current.filter((i) => i.id !== userId);
+      localStorage.setItem(LOCAL_CACHE_KEYS.USER_ACCOUNTS, JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
+  }
+}
+
 // -------------------------------------------------------------
 // 6. AUTO-MIGRATION: MERGE SEMUA DATA LOCALSTORAGE KE CLOUD
 // -------------------------------------------------------------
@@ -675,9 +774,25 @@ export async function migrateLocalDataToCloud(): Promise<{
       }
     }
 
+    // 6. Migrasi Akun Pengguna Super Admin (Multi-Device Login)
+    const rawLocalUsers = JSON.parse(
+      localStorage.getItem(LOCAL_CACHE_KEYS.USER_ACCOUNTS) || '[]'
+    ) as UserAccount[];
+    const cloudUsersSnapshot = await getDocs(collection(firestore, CLOUD_COLLECTIONS.USER_ACCOUNTS));
+    const cloudUserIdSet = new Set<string>();
+    cloudUsersSnapshot.forEach((d) => cloudUserIdSet.add(d.id));
+
+    let usersMigrated = 0;
+    for (const u of rawLocalUsers) {
+      if (!cloudUserIdSet.has(u.id)) {
+        await saveUserAccountToCloud(u);
+        usersMigrated++;
+      }
+    }
+
     updateSyncState({
       isConnected: true,
-      statusText: `🟢 Migrasi Cloud Selesai (+${votersMigrated} Voter Baru)`,
+      statusText: `🟢 Migrasi Cloud Selesai (+${votersMigrated} Voter, +${usersMigrated} Akun)`,
     });
   } catch (err) {
     console.warn('[CloudSync] Migrasi data lokal notice:', err);
