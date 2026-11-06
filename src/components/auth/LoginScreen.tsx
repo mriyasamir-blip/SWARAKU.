@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UserAccount, UserRole, DeviceOS } from '../../types/vore';
 import { PRESET_ACCOUNTS } from '../../data/accountsData';
+import { authenticateCloudUser } from '../../utils/storageSync';
 import {
   ShieldCheck,
   UserCheck,
@@ -64,7 +65,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!usernameOrEmail.trim() || !password.trim()) {
       setErrorMessage('Harap isi Username/Email dan Password.');
@@ -74,8 +75,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     setIsLoading(true);
     setErrorMessage(null);
 
-    // Verifikasi kredensial akun terintegrasi Super Admin secara ketat
-    setTimeout(() => {
+    try {
+      // 1. Validasi langsung ke Cloud Firestore (Multi-device terpusat)
+      const cloudResult = await authenticateCloudUser(usernameOrEmail, password);
+      if (cloudResult.success && cloudResult.user) {
+        onLogin(cloudResult.user);
+        setIsLoading(false);
+        return;
+      }
+
+      // 2. Jika cloud mengembalikan error eksplisit password salah atau nonaktif
+      if (cloudResult.error && (cloudResult.error.includes('Password salah') || cloudResult.error.includes('dinonaktifkan'))) {
+        setErrorMessage(cloudResult.error);
+        setIsLoading(false);
+        return;
+      }
+
+      // 3. Fallback ke pool akun lokal (untuk preset default seperti superadmin atau saat offline)
       const cleanInput = usernameOrEmail.trim().toLowerCase();
       const match = accountsPool.find(
         (acc) =>
@@ -85,13 +101,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
       if (!match) {
         setErrorMessage(
-          'Username atau Email tidak ditemukan. Hubungi Super Admin untuk pendaftaran akun baru.'
+          cloudResult.error || 'Username atau Email tidak ditemukan. Hubungi Super Admin untuk pendaftaran akun baru.'
         );
         setIsLoading(false);
         return;
       }
 
-      // Verifikasi password persis dengan data di Super Admin (tidak ada backdoor)
       const expectedPassword = match.password || '123456';
       if (password !== expectedPassword) {
         setErrorMessage(
@@ -101,7 +116,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         return;
       }
 
-      // Verifikasi status akun aktif
       if (match.status === 'Nonaktif') {
         setErrorMessage(
           'Akun ini berstatus NONAKTIF oleh Super Admin. Silakan hubungi administrator.'
@@ -112,7 +126,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
       onLogin(match);
       setIsLoading(false);
-    }, 450);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Gagal memproses login.');
+      setIsLoading(false);
+    }
   };
 
   return (

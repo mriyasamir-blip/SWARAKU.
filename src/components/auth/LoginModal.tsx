@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UserAccount, UserRole } from '../../types/vore';
 import { PRESET_ACCOUNTS } from '../../data/accountsData';
+import { authenticateCloudUser } from '../../utils/storageSync';
 import {
   ShieldCheck,
   UserCheck,
@@ -66,12 +67,28 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg(null);
 
-    setTimeout(() => {
+    try {
+      // 1. Validasi cloud langsung
+      const cloudResult = await authenticateCloudUser(emailOrUsername, password);
+      if (cloudResult.success && cloudResult.user) {
+        onLogin(cloudResult.user);
+        setLoading(false);
+        if (onClose) onClose();
+        return;
+      }
+
+      if (cloudResult.error && (cloudResult.error.includes('Password salah') || cloudResult.error.includes('dinonaktifkan'))) {
+        setErrorMsg(cloudResult.error);
+        setLoading(false);
+        return;
+      }
+
+      // 2. Fallback ke accountsPool lokal
       const cleanInput = emailOrUsername.trim().toLowerCase();
       const match = accountsPool.find(
         (acc) =>
@@ -80,7 +97,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       );
 
       if (!match) {
-        setErrorMsg('Username atau Email tidak ditemukan. Hubungi Super Admin.');
+        setErrorMsg(cloudResult.error || 'Username atau Email tidak ditemukan. Hubungi Super Admin.');
         setLoading(false);
         return;
       }
@@ -101,7 +118,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       onLogin(match);
       setLoading(false);
       if (onClose) onClose();
-    }, 400);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Gagal memproses login.');
+      setLoading(false);
+    }
   };
 
   return (

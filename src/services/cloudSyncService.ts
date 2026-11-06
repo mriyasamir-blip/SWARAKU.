@@ -19,6 +19,7 @@ import {
   UserAccount,
 } from '../types/vore';
 import { TimSuksesWilayahRecord } from '../data/petaSuaraData';
+import { PRESET_ACCOUNTS } from '../data/accountsData';
 import { resolveAccurateCoordinates, lookupSmartCoordinates } from '../utils/geocoding';
 
 export const CLOUD_COLLECTIONS = {
@@ -446,12 +447,15 @@ export function subscribeToCloudUserAccounts(
           email: d.email || `${d.username || 'user'}@swaraku.com`,
           jabatan: d.jabatan || '',
           wilayah: d.wilayah || '',
+          idPegawai: d.idPegawai || undefined,
+          divisi: d.divisi || undefined,
           tps: d.tps || undefined,
           noHp: d.noHp || '',
           fotoUrl: d.fotoUrl || '',
           password: d.password || '123456',
           status: (d.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif') as 'Aktif' | 'Nonaktif',
           dibuatPada: d.dibuatPada || '',
+          updatedAt: d.updatedAt || undefined,
         });
       });
 
@@ -468,6 +472,85 @@ export function subscribeToCloudUserAccounts(
     },
     (err) => console.warn('[CloudSync] User Accounts listener notice:', err)
   );
+}
+
+/**
+ * Validasi login user langsung ke Cloud Firestore lintas perangkat / browser
+ */
+export async function authenticateCloudUser(
+  usernameOrEmail: string,
+  plainPassword: string
+): Promise<{ success: boolean; user?: UserAccount; error?: string }> {
+  try {
+    const cleanInput = usernameOrEmail.trim().toLowerCase();
+    const cleanPass = plainPassword.trim();
+
+    // 1. Ambil dokumen langsung dari Cloud Firestore (source of truth)
+    const snapshot = await getDocs(collection(firestore, CLOUD_COLLECTIONS.USER_ACCOUNTS));
+    const cloudUsers: UserAccount[] = [];
+
+    snapshot.forEach((docSnap) => {
+      const d = docSnap.data();
+      cloudUsers.push({
+        id: d.id || docSnap.id,
+        role: d.role || 'kader',
+        nama: d.nama || '',
+        username: d.username || '',
+        email: d.email || `${d.username || 'user'}@swaraku.com`,
+        jabatan: d.jabatan || '',
+        wilayah: d.wilayah || '',
+        idPegawai: d.idPegawai || undefined,
+        divisi: d.divisi || undefined,
+        tps: d.tps || undefined,
+        noHp: d.noHp || '',
+        fotoUrl: d.fotoUrl || '',
+        password: d.password || '123456',
+        status: (d.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif') as 'Aktif' | 'Nonaktif',
+        dibuatPada: d.dibuatPada || '',
+        updatedAt: d.updatedAt || undefined,
+      });
+    });
+
+    // 2. Cari kecocokan username atau email
+    const matched = cloudUsers.find(
+      (u) =>
+        (u.username && u.username.toLowerCase() === cleanInput) ||
+        (u.email && u.email.toLowerCase() === cleanInput)
+    );
+
+    if (!matched) {
+      return {
+        success: false,
+        error: 'Akun tidak terdaftar di server cloud. Hubungi Super Admin.',
+      };
+    }
+
+    if (matched.status === 'Nonaktif') {
+      return {
+        success: false,
+        error: 'Akun Anda dinonaktifkan oleh Super Admin. Hubungi administrator.',
+      };
+    }
+
+    const expectedPass = matched.password || '123456';
+    if (cleanPass !== expectedPass) {
+      return {
+        success: false,
+        error: 'Password salah! Pastikan password sesuai yang didaftarkan Super Admin.',
+      };
+    }
+
+    return {
+      success: true,
+      user: matched,
+    };
+  } catch (err: any) {
+    console.warn('[CloudAuth] Cloud check notice, fallback to local pool:', err);
+    return {
+      success: false,
+      error: 'Terjadi kendala saat memvalidasi ke server. Periksa koneksi internet.',
+    };
+  }
 }
 
 // -------------------------------------------------------------
@@ -782,8 +865,13 @@ export async function migrateLocalDataToCloud(): Promise<{
     const cloudUserIdSet = new Set<string>();
     cloudUsersSnapshot.forEach((d) => cloudUserIdSet.add(d.id));
 
+    // Gabungkan akun lokal dan akun preset sistem
+    const accountsToSeed = new Map<string, UserAccount>();
+    PRESET_ACCOUNTS.forEach((acc) => accountsToSeed.set(acc.id, acc));
+    rawLocalUsers.forEach((acc) => accountsToSeed.set(acc.id, acc));
+
     let usersMigrated = 0;
-    for (const u of rawLocalUsers) {
+    for (const [, u] of accountsToSeed.entries()) {
       if (!cloudUserIdSet.has(u.id)) {
         await saveUserAccountToCloud(u);
         usersMigrated++;

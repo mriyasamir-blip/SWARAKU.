@@ -76,7 +76,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             <SwarakuLogo size={28} />
             <span className="text-[11px] font-bold text-cyan-800 bg-cyan-50 border border-cyan-200 px-2 py-0.5 rounded-full flex items-center gap-1 ml-1">
               <Smartphone className="w-3 h-3 text-cyan-600" />
-              <span>{currentUser?.role === 'tim_sukses' ? 'Tim Sukses' : 'Kader Lapangan'}</span>
+              <span>
+                {currentUser?.role === 'super_admin'
+                  ? 'Super Admin'
+                  : currentUser?.role === 'admin'
+                  ? 'Admin'
+                  : currentUser?.role === 'tim_sukses'
+                  ? 'Tim Sukses'
+                  : 'Kader Lapangan'}
+              </span>
             </span>
           </div>
 
@@ -150,13 +158,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                   className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-800 text-xs font-bold rounded-lg border border-slate-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
                   title="Ganti Akun"
                 >
-                  {currentUser.role === 'tim_sukses' ? (
+                  {currentUser.role === 'super_admin' || currentUser.role === 'admin' ? (
+                    <Shield className="w-3.5 h-3.5 text-purple-600" />
+                  ) : currentUser.role === 'tim_sukses' ? (
                     <Building2 className="w-3.5 h-3.5 text-cyan-600" />
                   ) : (
                     <UserCheck className="w-3.5 h-3.5 text-teal-600" />
                   )}
-                  <span className="hidden sm:inline">
-                    {currentUser.role === 'tim_sukses' ? 'Tim Sukses' : 'Kader'}
+                  <span className="hidden sm:inline font-bold">
+                    {currentUser.nama || (currentUser.role === 'tim_sukses' ? 'Tim Sukses' : 'Kader')}
                   </span>
                   <span className="text-[10px] font-semibold text-slate-400">
                     (Ganti)
@@ -307,11 +317,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <div
                   className={`w-2 h-2 rounded-full ${
-                    currentUser.role === 'tim_sukses' ? 'bg-cyan-600' : 'bg-teal-600'
+                    currentUser.role === 'super_admin'
+                      ? 'bg-purple-600'
+                      : currentUser.role === 'admin'
+                      ? 'bg-teal-600'
+                      : currentUser.role === 'tim_sukses'
+                      ? 'bg-cyan-600'
+                      : 'bg-emerald-600'
                   }`}
                 />
-                <span className="hidden sm:inline">
-                  {currentUser.role === 'tim_sukses' ? 'Tim Sukses' : 'Kader'}
+                <span className="hidden sm:inline font-bold">
+                  {currentUser.nama || (currentUser.role === 'tim_sukses' ? 'Tim Sukses' : 'Kader')}
                 </span>
                 <span className="text-[10px] text-slate-400 font-semibold">(Ganti)</span>
               </button>

@@ -19,6 +19,13 @@ import {
   Smartphone,
   UserPlus,
   LogOut,
+  Building2,
+  Shield,
+  MapPin,
+  Phone,
+  Briefcase,
+  Sparkles,
+  Check,
 } from 'lucide-react';
 
 interface ProfileScreenProps {
@@ -39,11 +46,39 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [showFullNik, setShowFullNik] = useState(false);
   const [privacyConsentActive, setPrivacyConsentActive] = useState(true);
 
+  // Dynamic values prioritizing the authenticated user from Cloud Database / Super Admin
+  const displayName = currentUser?.nama || profile.nama;
+  const displayUsername = currentUser?.username ? `@${currentUser.username}` : profile.username;
+  const displayRoleLabel =
+    currentUser?.role === 'super_admin'
+      ? 'Super Admin'
+      : currentUser?.role === 'admin'
+      ? 'Administrator'
+      : currentUser?.role === 'tim_sukses'
+      ? 'Tim Sukses'
+      : 'Kader Relawan TPS';
+  const displayJabatan = currentUser?.jabatan || 'Koordinator TPS Lapangan';
+  const displayIdPegawai =
+    currentUser?.idPegawai || (currentUser?.id ? `ID-${currentUser.id.slice(-6)}` : 'KAD-048');
+  const displayDivisi =
+    currentUser?.divisi ||
+    (currentUser?.role === 'tim_sukses' ? 'Divisi Bappilu & Peta Suara' : 'Divisi Saksi & Relawan');
+  const displayWilayah = currentUser?.wilayah || profile.dapil;
+  const displayTps = currentUser?.tps || profile.tps;
+  const displayNoHp = currentUser?.noHp || '0812-8821-9901';
+  const displayStatus = currentUser?.status || 'Aktif';
+  const displayAvatar = currentUser?.fotoUrl || APP_IMAGES.voterAvatar;
+
   return (
     <div className="flex flex-col space-y-4 pb-12">
       {/* Top Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold tracking-tight text-slate-900">Profil</h1>
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">Profil Pengguna</h1>
+          <span className="text-[11px] text-slate-500">
+            {currentUser ? 'Akun Resmi Terverifikasi Cloud' : 'Data Pemilih Terverifikasi'}
+          </span>
+        </div>
         <button
           className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors"
           aria-label="Pengaturan"
@@ -52,13 +87,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         </button>
       </div>
 
-      {/* User Identity Card (Slide 13) */}
-      <div className="p-4 bg-white rounded-3xl border border-slate-200/80 shadow-xs flex flex-col items-center text-center relative space-y-2">
+      {/* User Identity Card (Slide 13 & Cloud Auth Profile) */}
+      <div className="p-4 bg-white rounded-3xl border border-slate-200/80 shadow-xs flex flex-col items-center text-center relative space-y-3">
         <div className="relative">
           <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-cyan-500 shadow-sm bg-slate-100 flex items-center justify-center">
             <img
-              src={APP_IMAGES.voterAvatar}
-              alt={profile.nama}
+              src={displayAvatar}
+              alt={displayName}
               className="w-full h-full object-cover"
               referrerPolicy="no-referrer"
               onError={(e) => {
@@ -67,28 +102,82 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             />
           </div>
           <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-cyan-600 rounded-full flex items-center justify-center text-white border-2 border-white shadow-xs">
-            <ShieldCheck className="w-3.5 h-3.5" />
+            {currentUser?.role === 'tim_sukses' ? (
+              <Building2 className="w-3.5 h-3.5" />
+            ) : currentUser?.role === 'super_admin' || currentUser?.role === 'admin' ? (
+              <Shield className="w-3.5 h-3.5" />
+            ) : (
+              <ShieldCheck className="w-3.5 h-3.5" />
+            )}
           </div>
         </div>
 
-        <div>
-          <h2 className="text-base font-bold text-slate-900">{profile.nama}</h2>
-          <span className="text-xs text-slate-400 font-mono">{profile.username}</span>
-          <div className="mt-1 flex items-center justify-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 mx-auto w-fit">
-            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-            <span>Terverifikasi e-KTP</span>
+        <div className="w-full space-y-1">
+          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+            <h2 className="text-base font-black text-slate-900">{displayName}</h2>
+            {displayStatus === 'Aktif' ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                <span>Aktif</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-800 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                <span>Nonaktif</span>
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center justify-center gap-2 text-xs">
+            <span className="text-slate-500 font-mono font-medium">{displayUsername}</span>
+            <span className="text-slate-300">•</span>
+            <span className="font-mono font-semibold text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded text-[10px] border border-indigo-200">
+              {displayIdPegawai}
+            </span>
+          </div>
+
+          <div className="pt-1 flex items-center justify-center gap-1.5 flex-wrap">
+            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-cyan-800 bg-cyan-50 px-2.5 py-0.5 rounded-full border border-cyan-200">
+              <Sparkles className="w-3 h-3 text-cyan-600" />
+              <span>{displayRoleLabel}</span>
+            </span>
+            <span className="text-xs text-slate-600 font-semibold">{displayJabatan}</span>
           </div>
         </div>
 
-        {/* Region & TPS Info */}
+        {/* Region, TPS, & Penugasan Grid */}
         <div className="w-full pt-3 mt-1 border-t border-slate-100 grid grid-cols-2 gap-2 text-left text-xs">
-          <div className="p-2 bg-slate-50 rounded-xl">
-            <span className="text-[10px] text-slate-400 block font-semibold">Wilayah DAPIL</span>
-            <span className="font-bold text-slate-800 line-clamp-1">{profile.dapil}</span>
+          <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-100">
+            <div className="flex items-center gap-1 text-slate-400 mb-0.5">
+              <MapPin className="w-3 h-3 text-cyan-600" />
+              <span className="text-[10px] font-semibold">Wilayah / Dapil</span>
+            </div>
+            <span className="font-bold text-slate-900 block truncate">{displayWilayah}</span>
           </div>
-          <div className="p-2 bg-slate-50 rounded-xl">
-            <span className="text-[10px] text-slate-400 block font-semibold">TPS Terdaftar</span>
-            <span className="font-bold text-slate-800 line-clamp-1">{profile.tps} · {profile.kelurahan}</span>
+
+          <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-100">
+            <div className="flex items-center gap-1 text-slate-400 mb-0.5">
+              <Building2 className="w-3 h-3 text-teal-600" />
+              <span className="text-[10px] font-semibold">TPS &amp; Kelurahan</span>
+            </div>
+            <span className="font-bold text-slate-900 block truncate">
+              {displayTps ? `${displayTps} · ${profile.kelurahan || 'Kelurahan DPT'}` : profile.kelurahan || 'TPS Terdaftar'}
+            </span>
+          </div>
+
+          <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-100">
+            <div className="flex items-center gap-1 text-slate-400 mb-0.5">
+              <Briefcase className="w-3 h-3 text-indigo-600" />
+              <span className="text-[10px] font-semibold">Divisi Penugasan</span>
+            </div>
+            <span className="font-bold text-slate-900 block truncate">{displayDivisi}</span>
+          </div>
+
+          <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-100">
+            <div className="flex items-center gap-1 text-slate-400 mb-0.5">
+              <Phone className="w-3 h-3 text-emerald-600" />
+              <span className="text-[10px] font-semibold">Kontak WhatsApp</span>
+            </div>
+            <span className="font-bold font-mono text-slate-900 block truncate">{displayNoHp}</span>
           </div>
         </div>
       </div>

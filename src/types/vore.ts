@@ -197,12 +197,15 @@ export interface UserAccount {
   email: string;
   jabatan: string;
   wilayah: string;
+  idPegawai?: string;
+  divisi?: string;
   tps?: string;
   noHp?: string;
   fotoUrl?: string;
   password?: string;
   status?: 'Aktif' | 'Nonaktif';
   dibuatPada?: string;
+  updatedAt?: string;
 }
 
 export interface VoterOcrRecord {

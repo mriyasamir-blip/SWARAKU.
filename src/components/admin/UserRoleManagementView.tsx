@@ -58,6 +58,8 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
   const [editUsername, setEditUsername] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editJabatan, setEditJabatan] = useState('');
+  const [editIdPegawai, setEditIdPegawai] = useState('');
+  const [editDivisi, setEditDivisi] = useState('');
   const [editWilayah, setEditWilayah] = useState('');
   const [editTps, setEditTps] = useState('');
   const [editNoHp, setEditNoHp] = useState('');
@@ -76,6 +78,8 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
   const [formUsername, setFormUsername] = useState('');
   const [formPassword, setFormPassword] = useState('123456');
   const [formJabatan, setFormJabatan] = useState('');
+  const [formIdPegawai, setFormIdPegawai] = useState('');
+  const [formDivisi, setFormDivisi] = useState('');
   const [formWilayah, setFormWilayah] = useState('DAPIL DKI JAKARTA II');
   const [formTps, setFormTps] = useState('TPS 048');
   const [formNoHp, setFormNoHp] = useState('');
@@ -99,12 +103,15 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
       user.wilayah.toLowerCase().includes(q) ||
       (user.tps && user.tps.toLowerCase().includes(q)) ||
       (user.jabatan && user.jabatan.toLowerCase().includes(q)) ||
+      (user.idPegawai && user.idPegawai.toLowerCase().includes(q)) ||
+      (user.divisi && user.divisi.toLowerCase().includes(q)) ||
       (user.noHp && user.noHp.includes(q));
     return matchesRole && matchesSearch;
   });
 
   const handleOpenAddModal = (defaultRole?: 'tim_sukses' | 'kader' | 'admin') => {
     const targetRole = defaultRole || 'tim_sukses';
+    const randomCode = Math.floor(1000 + Math.random() * 9000);
     setFormRole(targetRole);
     setFormNama('');
     setFormUsername('');
@@ -116,6 +123,20 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
         ? 'Relawan Saksi TPS'
         : 'Staf Admin Operasional'
     );
+    setFormIdPegawai(
+      targetRole === 'tim_sukses'
+        ? `TS-${randomCode}`
+        : targetRole === 'kader'
+        ? `KAD-${randomCode}`
+        : `ADM-${randomCode}`
+    );
+    setFormDivisi(
+      targetRole === 'tim_sukses'
+        ? 'Divisi Bappilu & Teritori'
+        : targetRole === 'kader'
+        ? 'Divisi Saksi & Penggalangan'
+        : 'Divisi Administrasi & IT'
+    );
     setFormWilayah('DAPIL DKI JAKARTA II');
     setFormTps('TPS 048');
     setFormNoHp('');
@@ -125,6 +146,21 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
 
   const handleRoleSelection = (role: 'tim_sukses' | 'kader' | 'admin') => {
     setFormRole(role);
+    const randomCode = Math.floor(1000 + Math.random() * 9000);
+    setFormIdPegawai(
+      role === 'tim_sukses'
+        ? `TS-${randomCode}`
+        : role === 'kader'
+        ? `KAD-${randomCode}`
+        : `ADM-${randomCode}`
+    );
+    setFormDivisi(
+      role === 'tim_sukses'
+        ? 'Divisi Bappilu & Teritori'
+        : role === 'kader'
+        ? 'Divisi Saksi & Penggalangan'
+        : 'Divisi Administrasi & IT'
+    );
     if (!formJabatan || formJabatan === 'Koordinator Pemenangan Wilayah' || formJabatan === 'Relawan Saksi TPS' || formJabatan === 'Staf Admin Operasional') {
       setFormJabatan(
         role === 'tim_sukses'
@@ -160,6 +196,8 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
       username: cleanUsername,
       email: `${cleanUsername}@swaraku.com`,
       password: formPassword || '123456',
+      idPegawai: formIdPegawai.trim() || `ID-${Date.now().toString().slice(-4)}`,
+      divisi: formDivisi.trim() || (formRole === 'tim_sukses' ? 'Divisi Bappilu' : 'Divisi Saksi'),
       jabatan:
         formJabatan.trim() ||
         (formRole === 'tim_sukses' ? 'Tim Sukses Pemenangan' : 'Relawan Saksi TPS'),
@@ -231,6 +269,8 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
     setEditNama(user.nama);
     setEditUsername(user.username);
     setEditPassword(user.password || '123456');
+    setEditIdPegawai(user.idPegawai || '');
+    setEditDivisi(user.divisi || '');
     setEditJabatan(user.jabatan || '');
     setEditWilayah(user.wilayah || 'DAPIL DKI JAKARTA II');
     setEditTps(user.tps || 'TPS 048');
@@ -268,6 +308,8 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
       username: cleanUsername,
       email: `${cleanUsername}@swaraku.com`,
       password: editPassword.trim() || targetUser.password || '123456',
+      idPegawai: editIdPegawai.trim() || targetUser.idPegawai,
+      divisi: editDivisi.trim() || targetUser.divisi,
       jabatan: editJabatan.trim() || targetUser.jabatan,
       wilayah: editWilayah.trim() || targetUser.wilayah,
       tps: editRole === 'kader' ? (editTps.trim() || 'TPS 048') : undefined,
@@ -598,10 +640,22 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                         </div>
                       </td>
 
-                      {/* Jabatan */}
+                      {/* Jabatan & Divisi */}
                       <td className="p-3.5">
-                        <span className="font-semibold text-slate-800 block">{user.jabatan}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-slate-800">{user.jabatan}</span>
+                          {user.idPegawai && (
+                            <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              {user.idPegawai}
+                            </span>
+                          )}
+                        </div>
+                        {user.divisi && (
+                          <span className="text-[10px] text-cyan-800 font-semibold block mt-0.5">
+                            {user.divisi}
+                          </span>
+                        )}
+                        <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
                           Dibuat: {user.dibuatPada || 'Sistem'}
                         </span>
                       </td>
@@ -867,6 +921,34 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 </div>
               </div>
 
+              {/* ID Pegawai & Divisi */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                    ID Pegawai / NIK Tim
+                  </label>
+                  <input
+                    type="text"
+                    value={formIdPegawai}
+                    onChange={(e) => setFormIdPegawai(e.target.value)}
+                    placeholder="Contoh: TS-4821"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono font-semibold focus:outline-hidden focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                    Divisi / Bagian
+                  </label>
+                  <input
+                    type="text"
+                    value={formDivisi}
+                    onChange={(e) => setFormDivisi(e.target.value)}
+                    placeholder="Contoh: Divisi Bappilu & Teritori"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:outline-hidden focus:border-cyan-500"
+                  />
+                </div>
+              </div>
+
               {/* Jabatan & Wilayah */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -1108,6 +1190,34 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                     />
                     <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
                   </div>
+                </div>
+              </div>
+
+              {/* ID Pegawai & Divisi */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                    ID Pegawai / NIK Tim
+                  </label>
+                  <input
+                    type="text"
+                    value={editIdPegawai}
+                    onChange={(e) => setEditIdPegawai(e.target.value)}
+                    placeholder="Contoh: TS-4821"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono font-semibold focus:outline-hidden focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                    Divisi / Bagian
+                  </label>
+                  <input
+                    type="text"
+                    value={editDivisi}
+                    onChange={(e) => setEditDivisi(e.target.value)}
+                    placeholder="Contoh: Divisi Bappilu & Teritori"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:outline-hidden focus:border-cyan-500"
+                  />
                 </div>
               </div>
 
