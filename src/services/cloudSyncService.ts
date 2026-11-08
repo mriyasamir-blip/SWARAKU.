@@ -456,6 +456,11 @@ export function subscribeToCloudUserAccounts(
           status: (d.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif') as 'Aktif' | 'Nonaktif',
           dibuatPada: d.dibuatPada || '',
           updatedAt: d.updatedAt || undefined,
+          timSuksesId: d.timSuksesId || undefined,
+          timSuksesNama: d.timSuksesNama || undefined,
+          didaftarkanOlehTimSukses: d.didaftarkanOlehTimSukses || undefined,
+          kaderList: Array.isArray(d.kaderList) ? d.kaderList : undefined,
+          kaderIds: Array.isArray(d.kaderIds) ? d.kaderIds : undefined,
         });
       });
 
@@ -500,6 +505,11 @@ export async function authenticateCloudUser(
         status: (d.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif') as 'Aktif' | 'Nonaktif',
         dibuatPada: d.dibuatPada || '',
         updatedAt: d.updatedAt || undefined,
+        timSuksesId: d.timSuksesId || undefined,
+        timSuksesNama: d.timSuksesNama || undefined,
+        didaftarkanOlehTimSukses: d.didaftarkanOlehTimSukses || undefined,
+        kaderList: Array.isArray(d.kaderList) ? d.kaderList : undefined,
+        kaderIds: Array.isArray(d.kaderIds) ? d.kaderIds : undefined,
       });
     });
 

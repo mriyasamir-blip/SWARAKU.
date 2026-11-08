@@ -1,35 +1,57 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, doc, getDoc } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleAuthProvider = new GoogleAuthProvider();
 
-export const firestore =
-  firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-    ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-    : getFirestore(app);
+// Gunakan initializeFirestore dengan experimentalAutoDetectLongPolling agar koneksi Firestore
+// selalu stabil di berbagai browser, device mobile, container iframe, maupun saat koneksi beralih jaringan
+let dbInstance;
+try {
+  dbInstance = initializeFirestore(
+    app,
+    {
+      experimentalAutoDetectLongPolling: true,
+      ignoreUndefinedProperties: true,
+    },
+    firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
+      ? firebaseConfig.firestoreDatabaseId
+      : undefined
+  );
+} catch {
+  dbInstance =
+    firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
+      ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+      : getFirestore(app);
+}
 
-// Validasi koneksi langsung ke Firestore Cloud pada saat aplikasi boot
-import { doc, getDocFromServer } from 'firebase/firestore';
+export const firestore = dbInstance;
 
+/**
+ * Validasi koneksi non-blocking ke Cloud Firestore.
+ * Menggunakan getDoc (dengan cache offline fallback) sehingga tidak memicu error unhandled jika jaringan lambat saat booting.
+ */
 export async function testFirestoreConnection(): Promise<boolean> {
   try {
-    await getDocFromServer(doc(firestore, 'test', 'connection'));
+    await getDoc(doc(firestore, 'test', 'connection'));
     console.log('[Firebase] Cloud Firestore terhubung sukses (Localhost & Cloud)');
     return true;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('[Firebase] Client offline atau periksa konfigurasi Firebase.');
-      return false;
-    }
-    // Jika dokumen tidak ada tetapi koneksi server tercapai
-    return true;
+  } catch (error: any) {
+    console.warn('[Firebase] Mode jaringan / cache aktif:', error?.message || error);
+    return false;
   }
 }
 
-testFirestoreConnection().catch(() => {});
+// Jalankan validasi secara asinkron setelah window load agar tidak memblokir render awal
+if (typeof window !== 'undefined') {
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      testFirestoreConnection().catch(() => {});
+    }, 1200);
+  });
+}
 
 
