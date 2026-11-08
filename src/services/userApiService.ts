@@ -66,6 +66,27 @@ async function fetchGoogleScript(action: string, payload: any = {}): Promise<any
   }
 }
 
+function normalizeUserAccount(u: any): UserAccount {
+  if (!u) return u;
+  if (typeof u.kaderList === 'string') {
+    try {
+      const parsed = JSON.parse(u.kaderList);
+      u.kaderList = Array.isArray(parsed) ? parsed : [u.kaderList];
+    } catch {
+      u.kaderList = u.kaderList.split(',').map((s: string) => s.trim()).filter(Boolean);
+    }
+  }
+  if (typeof u.kaderIds === 'string') {
+    try {
+      const parsed = JSON.parse(u.kaderIds);
+      u.kaderIds = Array.isArray(parsed) ? parsed : [u.kaderIds];
+    } catch {
+      u.kaderIds = u.kaderIds.split(',').map((s: string) => s.trim()).filter(Boolean);
+    }
+  }
+  return u as UserAccount;
+}
+
 /**
  * 1. Ambil seluruh data user langsung dari Cloud Server (Google Sheets / Firestore).
  * TIDAK MENYIMPAN KE LOCALSTORAGE!
@@ -81,7 +102,7 @@ export async function fetchUsersFromCloud(): Promise<UserAccount[]> {
     const snap = await getDocs(colRef);
     if (!snap.empty) {
       snap.forEach((d) => {
-        const u = d.data() as UserAccount;
+        const u = normalizeUserAccount(d.data());
         if (u && u.id) {
           accountsMap.set(u.id, u);
         }
@@ -106,7 +127,8 @@ export async function fetchUsersFromCloud(): Promise<UserAccount[]> {
     try {
       const data = await fetchGoogleScript('getUsers');
       if (data && data.success && Array.isArray(data.users)) {
-        data.users.forEach((u: UserAccount) => {
+        data.users.forEach((rawUser: any) => {
+          const u = normalizeUserAccount(rawUser);
           if (u && u.id) accountsMap.set(u.id, u);
         });
       }
@@ -162,6 +184,37 @@ export async function createUserOnCloud(
     message: savedOnGoogleScript
       ? serverMessage
       : 'Akun berhasil disimpan ke Cloud Database Firestore (Siap digunakan di semua device)!',
+  };
+}
+
+/**
+ * Simpan multiple user (misalnya saat Tim Sukses dibuat beserta seluruh kader binaannya)
+ */
+export async function createMultipleUsersOnCloud(
+  users: UserAccount[]
+): Promise<{ success: boolean; count: number; failed: number; message?: string }> {
+  let successCount = 0;
+  let failedCount = 0;
+
+  for (const user of users) {
+    try {
+      const res = await createUserOnCloud(user);
+      if (res.success) {
+        successCount++;
+      } else {
+        failedCount++;
+      }
+    } catch (e) {
+      console.error('[UserApi] Error creating user:', user.username, e);
+      failedCount++;
+    }
+  }
+
+  return {
+    success: successCount > 0,
+    count: successCount,
+    failed: failedCount,
+    message: `${successCount} akun berhasil disimpan ke Cloud Database Firestore.`,
   };
 }
 
@@ -317,6 +370,39 @@ export async function updateUserOnCloud(user: UserAccount): Promise<boolean> {
     return true;
   } catch (e) {
     console.error('[UserApi] Update Firestore error:', e);
+    return false;
+  }
+}
+
+/**
+ * Update foto profil user ke Firestore Cloud Database (Multi-Device)
+ */
+export async function updateUserPhotoOnCloud(userId: string, fotoUrl: string): Promise<boolean> {
+  if (!userId) return false;
+
+  try {
+    const docRef = doc(firestore, FIRESTORE_USERS_COLLECTION, userId);
+    await setDoc(
+      docRef,
+      {
+        fotoUrl,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+
+    // Sync juga ke Google Apps Script jika aktif
+    if (isScriptUrlConfigured()) {
+      try {
+        await fetchGoogleScript('updateUser', { user: { id: userId, fotoUrl } });
+      } catch (e) {
+        console.warn('[UserApi] Notice: Google Script photo update skipped:', e);
+      }
+    }
+
+    return true;
+  } catch (e) {
+    console.error('[UserApi] Update foto profil Firestore error:', e);
     return false;
   }
 }

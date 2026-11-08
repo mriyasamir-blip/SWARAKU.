@@ -247,6 +247,28 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               <span className="sm:hidden font-mono text-[10px]">AI</span>
             </button>
 
+            {/* User Avatar & Name Pill */}
+            <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-100/80 rounded-xl border border-slate-200">
+              {currentUser.fotoUrl ? (
+                <img
+                  src={currentUser.fotoUrl}
+                  alt={currentUser.nama}
+                  className="w-6 h-6 rounded-lg object-cover border border-slate-200 shadow-2xs"
+                />
+              ) : (
+                <div
+                  className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] text-white shadow-2xs ${
+                    isSuperAdmin ? 'bg-purple-600' : 'bg-teal-600'
+                  }`}
+                >
+                  {(currentUser.nama || 'AD').slice(0, 2).toUpperCase()}
+                </div>
+              )}
+              <span className="text-xs font-bold text-slate-800 hidden xl:inline truncate max-w-[140px]">
+                {currentUser.nama}
+              </span>
+            </div>
+
             {/* Switch Account */}
             <button
               onClick={onSwitchAccount}

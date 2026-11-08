@@ -27,6 +27,7 @@ import {
   Shield,
   Radio,
   Check,
+  Building2,
 } from 'lucide-react';
 import { SwarakuLogo } from '../common/SwarakuLogo';
 
@@ -97,14 +98,22 @@ export const KaderDashboardScreen: React.FC<KaderDashboardScreenProps> = ({
       {/* Top Header: Halo, Ahmad Rizky (Slide 8 & 9) */}
       <div className="flex items-start justify-between pb-3 border-b border-slate-200/80">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-teal-600 to-cyan-600 text-white flex items-center justify-center font-black text-lg shadow-md shadow-cyan-600/20">
-            {(userAccount.nama || 'Ahmad Rizky')
-              .split(' ')
-              .map((n) => n[0])
-              .join('')
-              .slice(0, 2)
-              .toUpperCase()}
-          </div>
+          {userAccount.fotoUrl ? (
+            <img
+              src={userAccount.fotoUrl}
+              alt={userAccount.nama}
+              className="w-12 h-12 rounded-2xl object-cover border border-slate-200 shadow-md shrink-0"
+            />
+          ) : (
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-teal-600 to-cyan-600 text-white flex items-center justify-center font-black text-lg shadow-md shadow-cyan-600/20 shrink-0">
+              {(userAccount.nama || 'Ahmad Rizky')
+                .split(' ')
+                .map((n) => n[0])
+                .join('')
+                .slice(0, 2)
+                .toUpperCase()}
+            </div>
+          )}
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-black uppercase text-teal-800 bg-teal-100 px-2 py-0.5 rounded-full font-mono">
@@ -123,6 +132,14 @@ export const KaderDashboardScreen: React.FC<KaderDashboardScreenProps> = ({
             <p className="text-xs text-slate-500 font-medium">
               {userAccount.jabatan || (userAccount.role === 'tim_sukses' ? 'Direktur Bappilu & Tim Sukses' : 'Relawan Kel. Sukamaju • TPS 047')}
             </p>
+            {userAccount.role === 'kader' && (userAccount.timSuksesNama || userAccount.didaftarkanOlehTimSukses) && (
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="text-[10px] font-bold text-cyan-800 bg-cyan-50 border border-cyan-200 px-2 py-0.5 rounded-md inline-flex items-center gap-1">
+                  <Building2 className="w-3 h-3 text-cyan-600" />
+                  <span>Koordinator: {userAccount.timSuksesNama || userAccount.didaftarkanOlehTimSukses}</span>
+                </span>
+              </div>
+            )}
           </div>
         </div>
 

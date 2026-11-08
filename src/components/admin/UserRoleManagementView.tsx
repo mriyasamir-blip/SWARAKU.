@@ -107,6 +107,21 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
   const [formNoHp, setFormNoHp] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Opsi Tambah Kader Binaan Otomatis saat Mendaftarkan Tim Sukses
+  interface KaderInputItem {
+    id: string;
+    nama: string;
+    noHp: string;
+    tps: string;
+    username: string;
+    password?: string;
+  }
+  const [kaderInputs, setKaderInputs] = useState<KaderInputItem[]>([]);
+  const [createdSummaryModal, setCreatedSummaryModal] = useState<{
+    timSukses: UserAccount;
+    kaders: UserAccount[];
+  } | null>(null);
+
   // Statistics
   const totalUsers = userAccounts.length;
   const superAdminCount = userAccounts.filter((u) => u.role === 'super_admin').length;
@@ -127,9 +142,46 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
       (user.jabatan && user.jabatan.toLowerCase().includes(q)) ||
       (user.idPegawai && user.idPegawai.toLowerCase().includes(q)) ||
       (user.divisi && user.divisi.toLowerCase().includes(q)) ||
-      (user.noHp && user.noHp.includes(q));
+      (user.noHp && user.noHp.includes(q)) ||
+      (user.timSuksesNama && user.timSuksesNama.toLowerCase().includes(q)) ||
+      (user.kaderList && user.kaderList.some((k) => k.toLowerCase().includes(q)));
     return matchesRole && matchesSearch;
   });
+
+  const handleAddKaderRow = () => {
+    const newId = `kd-item-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    setKaderInputs((prev) => [
+      ...prev,
+      {
+        id: newId,
+        nama: '',
+        noHp: '',
+        tps: formTps || 'TPS 048',
+        username: '',
+        password: '123456',
+      },
+    ]);
+  };
+
+  const handleUpdateKaderRow = (id: string, field: keyof KaderInputItem, value: string) => {
+    setKaderInputs((prev) =>
+      prev.map((item) => {
+        if (item.id === id) {
+          const updated = { ...item, [field]: value };
+          if (field === 'nama' && (!item.username || item.username.startsWith('kader_'))) {
+            const slug = value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+            updated.username = slug ? `kader_${slug.slice(0, 10)}` : '';
+          }
+          return updated;
+        }
+        return item;
+      })
+    );
+  };
+
+  const handleRemoveKaderRow = (id: string) => {
+    setKaderInputs((prev) => prev.filter((item) => item.id !== id));
+  };
 
   const handleOpenAddModal = (defaultRole?: 'tim_sukses' | 'kader' | 'admin') => {
     const targetRole = defaultRole || 'tim_sukses';
@@ -138,6 +190,7 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
     setFormNama('');
     setFormUsername('');
     setFormPassword('123456');
+    setKaderInputs([]);
     setFormJabatan(
       targetRole === 'tim_sukses'
         ? 'Koordinator Pemenangan Wilayah'
@@ -211,14 +264,19 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
       return;
     }
 
+    const validKaders = formRole === 'tim_sukses'
+      ? kaderInputs.filter((k) => k.nama.trim().length > 0)
+      : [];
+
+    const nowTs = Date.now();
     const newAccount: UserAccount = {
-      id: `acc-${Date.now()}`,
+      id: `acc-${nowTs}`,
       role: formRole,
       nama: formNama.trim(),
       username: cleanUsername,
       email: `${cleanUsername}@swaraku.com`,
       password: formPassword || '123456',
-      idPegawai: formIdPegawai.trim() || `ID-${Date.now().toString().slice(-4)}`,
+      idPegawai: formIdPegawai.trim() || `ID-${nowTs.toString().slice(-4)}`,
       divisi: formDivisi.trim() || (formRole === 'tim_sukses' ? 'Divisi Bappilu' : 'Divisi Saksi'),
       jabatan:
         formJabatan.trim() ||
@@ -232,24 +290,76 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
         month: 'short',
         year: 'numeric',
       }),
-      fotoUrl:
-        formRole === 'tim_sukses'
-          ? 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=250&q=80'
-          : formRole === 'kader'
-          ? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=250&q=80'
-          : 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=250&q=80',
+      fotoUrl: '', // Tanpa foto bawaan sistem, user dapat upload foto sendiri nanti
+      kaderList: validKaders.map((k) => k.nama.trim()),
+      kaderIds: validKaders.map((_, idx) => `acc-kader-${nowTs}-${idx + 1}`),
     };
 
     setIsSavingUser(true);
     setFormError(null);
 
     try {
-      // WAJIB panggil fungsi simpan ke Cloud Database
+      // 1. Simpan Akun Utama (Tim Sukses / Admin / Kader) ke Cloud Database
       const res = await onAddUser(newAccount);
       if (res === false) {
         setFormError('Gagal menyimpan ke Database Server. Silakan periksa koneksi.');
         setIsSavingUser(false);
         return;
+      }
+
+      // 2. OTOMATIS BUAT AKUN KADER BINAAN JIKA DITAMBAHKAN PADA PENDAFTARAN TIM SUKSES
+      const createdKaders: UserAccount[] = [];
+      if (formRole === 'tim_sukses' && validKaders.length > 0) {
+        for (let i = 0; i < validKaders.length; i++) {
+          const k = validKaders[i];
+          const kCleanNama = k.nama.trim();
+          let baseKUsername = (k.username || '').trim().toLowerCase().replace(/\s+/g, '');
+          if (!baseKUsername) {
+            const slug = kCleanNama.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+            baseKUsername = `kader_${slug || 'user'}_${Math.floor(100 + Math.random() * 900)}`;
+          }
+
+          // Pastikan username unik
+          let finalUsername = baseKUsername;
+          let counter = 1;
+          while (
+            userAccounts.some((u) => u.username.toLowerCase() === finalUsername) ||
+            createdKaders.some((u) => u.username.toLowerCase() === finalUsername) ||
+            finalUsername === cleanUsername
+          ) {
+            finalUsername = `${baseKUsername}${counter}`;
+            counter++;
+          }
+
+          const kaderAcc: UserAccount = {
+            id: `acc-kader-${nowTs}-${i + 1}`,
+            role: 'kader',
+            nama: kCleanNama,
+            username: finalUsername,
+            email: `${finalUsername}@swaraku.com`,
+            password: (k.password || '123456').trim(),
+            idPegawai: `KD-${Math.floor(1000 + Math.random() * 9000)}`,
+            divisi: 'Divisi Saksi & Penggalangan',
+            jabatan: 'Kader Lapangan / Saksi TPS',
+            wilayah: formWilayah.trim() || 'Dapil Terkait',
+            tps: k.tps.trim() || formTps.trim() || 'TPS 048',
+            noHp: k.noHp.trim() || '0813' + Math.floor(10000000 + Math.random() * 90000000),
+            status: 'Aktif',
+            dibuatPada: new Date().toLocaleDateString('id-ID', {
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric',
+            }),
+            fotoUrl: '',
+            timSuksesId: newAccount.id,
+            timSuksesNama: newAccount.nama,
+            didaftarkanOlehTimSukses: newAccount.nama,
+          };
+
+          // Simpan akun kader otomatis ke Cloud Database
+          await onAddUser(kaderAcc);
+          createdKaders.push(kaderAcc);
+        }
       }
 
       // Otomatis terhubung ke Peta Suara Swaraku jika role Tim Sukses
@@ -293,6 +403,15 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
       }
 
       setIsAddModalOpen(false);
+      setKaderInputs([]);
+
+      // Tampilkan ringkasan kredensial akun kader jika ada kader yang dibuat otomatis
+      if (createdKaders.length > 0) {
+        setCreatedSummaryModal({
+          timSukses: newAccount,
+          kaders: createdKaders,
+        });
+      }
     } catch (err: any) {
       setFormError(err?.message || 'Gagal menyimpan akun ke server Cloud Database.');
     } finally {
@@ -647,14 +766,27 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                       {/* Name & Identitas */}
                       <td className="p-3.5">
                         <div className="flex items-center gap-3">
-                          <img
-                            src={
-                              user.fotoUrl ||
-                              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80'
-                            }
-                            alt={user.nama}
-                            className="w-9 h-9 rounded-xl object-cover border border-slate-200 shrink-0"
-                          />
+                          {user.fotoUrl ? (
+                            <img
+                              src={user.fotoUrl}
+                              alt={user.nama}
+                              className="w-9 h-9 rounded-xl object-cover border border-slate-200 shrink-0"
+                            />
+                          ) : (
+                            <div
+                              className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs text-white shrink-0 shadow-2xs ${
+                                user.role === 'super_admin'
+                                  ? 'bg-purple-600'
+                                  : user.role === 'admin'
+                                  ? 'bg-teal-600'
+                                  : user.role === 'tim_sukses'
+                                  ? 'bg-cyan-600'
+                                  : 'bg-slate-800'
+                              }`}
+                            >
+                              {(user.nama || 'SW').slice(0, 2).toUpperCase()}
+                            </div>
+                          )}
                           <div>
                             <div className="flex items-center gap-1.5">
                               <span className="font-bold text-slate-900">{user.nama}</span>
@@ -732,6 +864,27 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                             {user.divisi}
                           </span>
                         )}
+
+                        {/* Indikator Relasi Tim Sukses & Kader */}
+                        {user.role === 'kader' && (user.timSuksesNama || user.didaftarkanOlehTimSukses) && (
+                          <div className="flex items-center gap-1 text-[10px] font-bold text-cyan-800 bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-200 mt-1 max-w-[220px]" title={`Didaftarkan oleh Tim Sukses: ${user.timSuksesNama || user.didaftarkanOlehTimSukses}`}>
+                            <Building2 className="w-3 h-3 text-cyan-600 shrink-0" />
+                            <span className="truncate">TS: {user.timSuksesNama || user.didaftarkanOlehTimSukses}</span>
+                          </div>
+                        )}
+
+                        {user.role === 'tim_sukses' && user.kaderList && user.kaderList.length > 0 && (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                              <Users className="w-3 h-3 text-emerald-600 shrink-0" />
+                              <span>{user.kaderList.length} Kader Binaan</span>
+                            </span>
+                            <span className="block text-[10px] text-slate-500 font-medium truncate max-w-[210px] mt-0.5" title={user.kaderList.join(', ')}>
+                              {user.kaderList.join(', ')}
+                            </span>
+                          </div>
+                        )}
+
                         <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
                           Dibuat: {user.dibuatPada || 'Sistem'}
                         </span>
@@ -1070,6 +1223,123 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 </div>
               )}
 
+              {/* Opsi Tambah Kader Binaan Otomatis (Khusus Pendaftaran Tim Sukses) */}
+              {formRole === 'tim_sukses' && (
+                <div className="p-4 bg-gradient-to-br from-cyan-50/70 via-teal-50/40 to-slate-50 rounded-2xl border-2 border-dashed border-cyan-300 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-cyan-600 text-white flex items-center justify-center shrink-0">
+                        <UserCheck className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-cyan-950 flex items-center gap-1.5">
+                          <span>Sebutkan Nama Kader Binaan (Opsional)</span>
+                          <span className="text-[9px] font-bold bg-cyan-200/80 text-cyan-900 px-1.5 py-0.2 rounded-full uppercase">
+                            Auto Akun
+                          </span>
+                        </h4>
+                        <p className="text-[10px] text-slate-600 leading-tight mt-0.5">
+                          Setiap kader yang ditambahkan di sini akan <b>otomatis dibuatkan akun Kader</b> di server cloud dan langsung terhubung ke profil Tim Sukses ini.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleAddKaderRow}
+                      className="px-2.5 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-xl text-xs flex items-center gap-1 cursor-pointer transition-colors shrink-0 shadow-2xs active:scale-95"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>+ Tambah Kader</span>
+                    </button>
+                  </div>
+
+                  {kaderInputs.length === 0 ? (
+                    <div className="p-3 bg-white/70 rounded-xl border border-slate-200 text-center text-slate-500 text-[11px] space-y-1">
+                      <span>Belum ada kader binaan ditambahkan.</span>
+                      <p className="text-[10px] text-slate-400">
+                        Klik tombol <b>"+ Tambah Kader"</b> di atas jika ingin mendaftarkan kader yang dibawahi oleh Tim Sukses ini.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
+                      {kaderInputs.map((kader, idx) => (
+                        <div
+                          key={kader.id}
+                          className="p-3 bg-white rounded-xl border border-cyan-200 shadow-2xs space-y-2"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold font-mono text-cyan-800 bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-200">
+                              Kader Binaan #{idx + 1}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveKaderRow(kader.id)}
+                              className="text-slate-400 hover:text-rose-600 p-1 rounded-md transition-colors cursor-pointer"
+                              title="Hapus baris kader ini"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-700 block mb-0.5">
+                                Nama Lengkap Kader <span className="text-rose-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={kader.nama}
+                                onChange={(e) => handleUpdateKaderRow(kader.id, 'nama', e.target.value)}
+                                placeholder="Contoh: Ahmad Fauzi"
+                                required={kaderInputs.length > 0}
+                                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-hidden focus:border-cyan-500 text-slate-900"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-700 block mb-0.5">
+                                TPS Penugasan Saksi
+                              </label>
+                              <input
+                                type="text"
+                                value={kader.tps}
+                                onChange={(e) => handleUpdateKaderRow(kader.id, 'tps', e.target.value)}
+                                placeholder="TPS 048"
+                                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-900 focus:outline-hidden focus:border-cyan-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-700 block mb-0.5">
+                                Nomor WhatsApp / HP
+                              </label>
+                              <input
+                                type="tel"
+                                value={kader.noHp}
+                                onChange={(e) => handleUpdateKaderRow(kader.id, 'noHp', e.target.value)}
+                                placeholder="0812XXXXXXXX"
+                                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900 focus:outline-hidden focus:border-cyan-500"
+                              />
+                            </div>
+
+                            <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 flex flex-col justify-center text-[10px]">
+                              <span className="text-slate-400 font-bold uppercase text-[9px]">Kredensial Login Otomatis:</span>
+                              <div className="flex items-center justify-between text-slate-800 font-mono font-bold mt-0.5">
+                                <span>@{kader.username || 'kader_auto'}</span>
+                                <span className="text-purple-700">Pass: 123456</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Submit Buttons */}
               <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
                 <button
@@ -1092,7 +1362,11 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                   ) : (
                     <>
                       <Check className="w-4 h-4" />
-                      <span>Daftarkan Akun ke Server</span>
+                      <span>
+                        {formRole === 'tim_sukses' && kaderInputs.filter((k) => k.nama.trim().length > 0).length > 0
+                          ? `Daftarkan Tim Sukses & ${kaderInputs.filter((k) => k.nama.trim().length > 0).length} Kader ke Server`
+                          : 'Daftarkan Akun ke Server'}
+                      </span>
                     </>
                   )}
                 </button>
@@ -1604,6 +1878,157 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                   <span>Simpan &amp; Uji Server</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Ringkasan Akun Tim Sukses & Kader yang Baru Saja Dibuat */}
+      {createdSummaryModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 my-auto animate-in fade-in zoom-in-95 duration-200 text-left">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-600 text-white flex items-center justify-center shadow-xs">
+                  <CheckCircle2 className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
+                    Akun Berhasil Didaftarkan ke Server!
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    1 Akun Tim Sukses &amp; {createdSummaryModal.kaders.length} Akun Kader Binaan telah aktif di Cloud Database
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCreatedSummaryModal(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Tim Sukses Info Card */}
+            <div className="p-3.5 bg-cyan-50/70 rounded-2xl border border-cyan-200 space-y-1.5 text-xs">
+              <span className="text-[10px] font-black uppercase text-cyan-900 tracking-wider">
+                Akun Tim Sukses Pembina:
+              </span>
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="font-bold text-slate-900 block text-sm">{createdSummaryModal.timSukses.nama}</span>
+                  <span className="text-slate-500 font-mono text-[11px]">@{createdSummaryModal.timSukses.username}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] text-slate-400 block font-mono">Password:</span>
+                  <span className="font-mono font-bold text-cyan-950 bg-white px-2 py-0.5 rounded border border-cyan-200">
+                    {createdSummaryModal.timSukses.password || '123456'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Kaders List */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Kredensial Login Kader Binaan ({createdSummaryModal.kaders.length}):</span>
+                </span>
+                <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  Tersimpan di Cloud Database
+                </span>
+              </div>
+
+              <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                {createdSummaryModal.kaders.map((k) => (
+                  <div
+                    key={k.id}
+                    className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                  >
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-slate-900">{k.nama}</span>
+                        {k.tps && (
+                          <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/70 px-1.5 py-0.2 rounded font-mono">
+                            {k.tps}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        User: <b className="text-slate-800">@{k.username}</b> · Pass: <b className="text-purple-700">{k.password}</b>
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyText(`User: ${k.username}\nPass: ${k.password}`, `sum-${k.id}`)}
+                        className="px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded-lg border border-slate-200 font-medium text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                        title="Salin Kredensial"
+                      >
+                        {copiedId === `sum-${k.id}` ? (
+                          <>
+                            <CheckCheck className="w-3 h-3 text-emerald-600" />
+                            <span className="text-emerald-700 font-bold">Tersalin</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            <span>Salin</span>
+                          </>
+                        )}
+                      </button>
+
+                      {k.noHp && (
+                        <a
+                          href={generateWhatsAppShareLink(k)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="p-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors"
+                          title="Kirim ke WhatsApp"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Modal Bottom Actions */}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const allText = `=== KREDENSIAL LOGIN TIM SUKSES & KADER SWARAKU ===\n` +
+                    `TIM SUKSES: ${createdSummaryModal.timSukses.nama} (@${createdSummaryModal.timSukses.username})\n` +
+                    `Pass: ${createdSummaryModal.timSukses.password}\n\n` +
+                    `DAFTAR KADER BINAAN:\n` +
+                    createdSummaryModal.kaders
+                      .map((k, i) => `${i + 1}. ${k.nama} (TPS: ${k.tps || '-'}) -> Username: @${k.username} | Pass: ${k.password}`)
+                      .join('\n');
+                  handleCopyText(allText, 'copy-all-kaders');
+                }}
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+              >
+                {copiedId === 'copy-all-kaders' ? (
+                  <CheckCheck className="w-3.5 h-3.5 text-emerald-600" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+                <span>Salin Semua Kredensial</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCreatedSummaryModal(null)}
+                className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold rounded-xl text-xs cursor-pointer shadow-md active:scale-95 transition-all"
+              >
+                Selesai
+              </button>
             </div>
           </div>
         </div>

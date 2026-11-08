@@ -79,7 +79,12 @@
         "password": { "type": "string" },
         "status": { "type": "string" },
         "dibuatPada": { "type": "string" },
-        "fotoUrl": { "type": "string" }
+        "fotoUrl": { "type": "string" },
+        "timSuksesId": { "type": "string" },
+        "timSuksesNama": { "type": "string" },
+        "didaftarkanOlehTimSukses": { "type": "string" },
+        "kaderList": { "type": "array" },
+        "kaderIds": { "type": "array" }
       },
       "required": ["id", "role", "nama", "username"]
     },

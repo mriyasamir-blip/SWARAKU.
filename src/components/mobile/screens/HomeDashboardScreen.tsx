@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { VoterProfile, NewsItem, MissionItem, FormC1Upload, FormB1Upload } from '../../../types/vore';
+import { VoterProfile, NewsItem, MissionItem, FormC1Upload, FormB1Upload, UserAccount } from '../../../types/vore';
 import { APP_IMAGES } from '../../../assets/images';
 import { SwarakuLogo } from '../../common/SwarakuLogo';
 import {
@@ -46,12 +46,14 @@ interface HomeDashboardScreenProps {
   onOpenSurvey?: () => void;
   onOpenMonitoringPendukung?: () => void;
   onOpenTambahNikModal?: () => void;
+  currentUser?: UserAccount | null;
 }
 
 export const HomeDashboardScreen: React.FC<HomeDashboardScreenProps> = ({
   profile,
   missions,
   news,
+  currentUser,
   onNavigateTab,
   onOpenReferralModal,
   onOpenNewsDetail,
@@ -136,14 +138,23 @@ export const HomeDashboardScreen: React.FC<HomeDashboardScreenProps> = ({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-white/20 border-2 border-white/40 overflow-hidden flex items-center justify-center shrink-0">
-              <img
-                src={APP_IMAGES.voterAvatar}
-                alt={profile.nama}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  e.currentTarget.src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80';
-                }}
-              />
+              {currentUser?.fotoUrl ? (
+                <img
+                  src={currentUser.fotoUrl}
+                  alt={currentUser?.nama || profile.nama}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full bg-white/20 flex items-center justify-center font-black text-white text-sm select-none">
+                  {(currentUser?.nama || profile.nama)
+                    .split(' ')
+                    .filter(Boolean)
+                    .map((n: string) => n[0])
+                    .join('')
+                    .slice(0, 2)
+                    .toUpperCase()}
+                </div>
+              )}
             </div>
             <div>
               <div className="flex items-center gap-2">

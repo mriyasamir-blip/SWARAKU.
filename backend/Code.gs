@@ -41,7 +41,11 @@ const HEADERS = [
   'status',
   'fotoUrl',
   'dibuatPada',
-  'updatedAt'
+  'updatedAt',
+  'timSuksesId',
+  'timSuksesNama',
+  'didaftarkanOlehTimSukses',
+  'kaderList'
 ];
 
 /**
@@ -237,7 +241,11 @@ function doPost(e) {
         user.status || 'Aktif',
         user.fotoUrl || '',
         dibuatPada,
-        updatedAt
+        updatedAt,
+        user.timSuksesId || '',
+        user.timSuksesNama || '',
+        user.didaftarkanOlehTimSukses || '',
+        Array.isArray(user.kaderList) ? JSON.stringify(user.kaderList) : (user.kaderList || '')
       ];
 
       sheet.appendRow(newRow);

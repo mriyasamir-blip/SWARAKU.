@@ -206,6 +206,12 @@ export interface UserAccount {
   status?: 'Aktif' | 'Nonaktif';
   dibuatPada?: string;
   updatedAt?: string;
+  // Relasi Tim Sukses & Kader Binaan
+  timSuksesId?: string;
+  timSuksesNama?: string;
+  didaftarkanOlehTimSukses?: string;
+  kaderList?: string[];
+  kaderIds?: string[];
 }
 
 export interface VoterOcrRecord {

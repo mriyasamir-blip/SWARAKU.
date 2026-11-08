@@ -103,6 +103,7 @@ import {
   toggleUserStatusOnCloud,
   fetchUsersFromCloud,
   fetchUserProfileById,
+  updateUserPhotoOnCloud,
 } from './services/userApiService';
 import {
   TimSuksesWilayahRecord,
@@ -334,6 +335,31 @@ export default function App() {
       }
     } catch (err: any) {
       showToast('⚠️ Gagal sinkronisasi profil: ' + (err?.message || 'Error'));
+    }
+  };
+
+  const handleUpdateProfilePhoto = async (newFotoUrl: string): Promise<boolean> => {
+    if (!currentUser?.id) return false;
+    try {
+      const success = await updateUserPhotoOnCloud(currentUser.id, newFotoUrl);
+      if (success) {
+        const updated = { ...currentUser, fotoUrl: newFotoUrl };
+        setCurrentUser(updated);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('swaraku_current_user_session', JSON.stringify(updated));
+        }
+        setUserAccounts((prev) =>
+          prev.map((u) => (u.id === currentUser.id ? { ...u, fotoUrl: newFotoUrl } : u))
+        );
+        showToast('✅ Foto profil berhasil disimpan & disinkronkan ke Cloud Database!');
+        return true;
+      } else {
+        showToast('❌ Gagal menyimpan foto profil ke Cloud Database');
+        return false;
+      }
+    } catch (err: any) {
+      showToast('❌ Error: ' + (err?.message || 'Gagal menyimpan foto'));
+      return false;
     }
   };
 
@@ -1158,6 +1184,7 @@ export default function App() {
                     />
                   ) : (
                     <HomeDashboardScreen
+                      currentUser={currentUser}
                       profile={profile}
                       missions={missions}
                       news={news}
@@ -1220,6 +1247,7 @@ export default function App() {
                     currentUser={currentUser}
                     onLogout={handleLogout}
                     onRefreshProfile={handleRefreshProfile}
+                    onUpdatePhoto={handleUpdateProfilePhoto}
                   />
                 )}
               </MobileFrame>
