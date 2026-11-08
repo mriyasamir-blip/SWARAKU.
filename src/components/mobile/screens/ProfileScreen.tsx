@@ -26,6 +26,7 @@ import {
   Briefcase,
   Sparkles,
   Check,
+  RefreshCw,
 } from 'lucide-react';
 
 interface ProfileScreenProps {
@@ -34,6 +35,7 @@ interface ProfileScreenProps {
   onOpenTambahNikModal?: () => void;
   currentUser?: UserAccount | null;
   onLogout?: () => void;
+  onRefreshProfile?: () => Promise<void>;
 }
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({
@@ -42,9 +44,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   onOpenTambahNikModal,
   currentUser,
   onLogout,
+  onRefreshProfile,
 }) => {
   const [showFullNik, setShowFullNik] = useState(false);
   const [privacyConsentActive, setPrivacyConsentActive] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Dynamic values prioritizing the authenticated user from Cloud Database / Super Admin
   const displayName = currentUser?.nama || profile.nama;
@@ -69,6 +73,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const displayStatus = currentUser?.status || 'Aktif';
   const displayAvatar = currentUser?.fotoUrl || APP_IMAGES.voterAvatar;
 
+  const handleManualRefresh = async () => {
+    if (!onRefreshProfile) return;
+    setIsRefreshing(true);
+    try {
+      await onRefreshProfile();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   return (
     <div className="flex flex-col space-y-4 pb-12">
       {/* Top Header */}
@@ -79,12 +93,25 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             {currentUser ? 'Akun Resmi Terverifikasi Cloud' : 'Data Pemilih Terverifikasi'}
           </span>
         </div>
-        <button
-          className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors"
-          aria-label="Pengaturan"
-        >
-          <Settings className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          {onRefreshProfile && (
+            <button
+              onClick={handleManualRefresh}
+              disabled={isRefreshing}
+              className="px-2.5 py-1.5 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 text-xs font-bold rounded-xl border border-cyan-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95 disabled:opacity-50"
+              title="Sinkronkan ulang data profil langsung dari Server Cloud"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-cyan-600 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span className="text-[11px]">{isRefreshing ? 'Sinkron...' : 'Sync Server'}</span>
+            </button>
+          )}
+          <button
+            className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors cursor-pointer"
+            aria-label="Pengaturan"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* User Identity Card (Slide 13 & Cloud Auth Profile) */}

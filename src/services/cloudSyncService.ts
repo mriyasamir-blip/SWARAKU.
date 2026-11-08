@@ -459,15 +459,7 @@ export function subscribeToCloudUserAccounts(
         });
       });
 
-      // Update cache lokal
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem(LOCAL_CACHE_KEYS.USER_ACCOUNTS, JSON.stringify(list));
-        } catch {
-          // ignore
-        }
-      }
-
+      // Notify state listeners directly from cloud
       onUpdate(list);
     },
     (err) => console.warn('[CloudSync] User Accounts listener notice:', err)
@@ -726,18 +718,6 @@ export async function saveUserAccountToCloud(user: UserAccount): Promise<void> {
   } catch (e) {
     console.warn('[CloudSync] User account save notice:', e);
   }
-
-  if (typeof window !== 'undefined') {
-    try {
-      const current = JSON.parse(
-        localStorage.getItem(LOCAL_CACHE_KEYS.USER_ACCOUNTS) || '[]'
-      ) as UserAccount[];
-      const updated = [user, ...current.filter((i) => i.id !== user.id)];
-      localStorage.setItem(LOCAL_CACHE_KEYS.USER_ACCOUNTS, JSON.stringify(updated));
-    } catch {
-      // ignore
-    }
-  }
 }
 
 export async function deleteUserAccountFromCloud(userId: string): Promise<void> {
@@ -746,18 +726,6 @@ export async function deleteUserAccountFromCloud(userId: string): Promise<void> 
     await deleteDoc(docRef);
   } catch (e) {
     console.warn('[CloudSync] User account delete notice:', e);
-  }
-
-  if (typeof window !== 'undefined') {
-    try {
-      const current = JSON.parse(
-        localStorage.getItem(LOCAL_CACHE_KEYS.USER_ACCOUNTS) || '[]'
-      ) as UserAccount[];
-      const updated = current.filter((i) => i.id !== userId);
-      localStorage.setItem(LOCAL_CACHE_KEYS.USER_ACCOUNTS, JSON.stringify(updated));
-    } catch {
-      // ignore
-    }
   }
 }
 
@@ -876,6 +844,13 @@ export async function migrateLocalDataToCloud(): Promise<{
         await saveUserAccountToCloud(u);
         usersMigrated++;
       }
+    }
+
+    // Hapus penyimpanan lokal akun pengguna agar hanya mengandalkan Cloud Database
+    try {
+      localStorage.removeItem(LOCAL_CACHE_KEYS.USER_ACCOUNTS);
+    } catch {
+      // ignore
     }
 
     updateSyncState({

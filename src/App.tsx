@@ -97,6 +97,14 @@ import {
   CloudSyncState,
 } from './utils/storageSync';
 import {
+  createUserOnCloud,
+  updateUserOnCloud,
+  deleteUserOnCloud,
+  toggleUserStatusOnCloud,
+  fetchUsersFromCloud,
+  fetchUserProfileById,
+} from './services/userApiService';
+import {
   TimSuksesWilayahRecord,
   INITIAL_TIM_SUKSES_LIST,
 } from './data/petaSuaraData';
@@ -106,11 +114,13 @@ export default function App() {
   const isStandalone = checkIsStandalone();
   const detectedOS = detectActualDevice();
 
-  // Authentication & Role Account State (1. Tim Sukses, 2. Kader)
-  // When user opens the app, display Username & Password Login screen
+  // Authentication & Role Account State
+  // Sesi aktif user tersimpan di localStorage (HANYA sesi user yang sedang login, BUKAN database user)
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('swaraku_current_user');
+      const saved =
+        localStorage.getItem('swaraku_current_user_session') ||
+        localStorage.getItem('swaraku_current_user');
       if (saved) {
         try {
           return JSON.parse(saved);
@@ -119,7 +129,7 @@ export default function App() {
         }
       }
     }
-    return null; // Show Login screen by default on app launch
+    return null;
   });
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [voterOcrRecords, setVoterOcrRecords] = useState<VoterOcrRecord[]>(() =>
@@ -237,85 +247,94 @@ export default function App() {
   const [invitedFriends, setInvitedFriends] = useState<InvitedFriendRecord[]>(INITIAL_INVITED_FRIENDS);
 
   // User Accounts State (Super Admin can add/edit/delete roles for Tim Sukses and Kader)
-  const [userAccounts, setUserAccounts] = useState<UserAccount[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('swaraku_user_accounts');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch (e) {
-          // ignore
-        }
+  // User Accounts State (Stored on Central Cloud Server - NOT in browser localStorage)
+  const [userAccounts, setUserAccounts] = useState<UserAccount[]>(PRESET_ACCOUNTS);
+
+  const handleAddUser = async (newUser: UserAccount): Promise<boolean> => {
+    try {
+      const res = await createUserOnCloud(newUser);
+      if (res.success) {
+        setUserAccounts((prev) => [newUser, ...prev.filter((u) => u.id !== newUser.id)]);
+        showToast(
+          `✅ Akun "${newUser.nama}" (${
+            newUser.role === 'tim_sukses'
+              ? 'Tim Sukses'
+              : newUser.role === 'kader'
+              ? 'Kader Lapangan'
+              : newUser.role === 'super_admin'
+              ? 'Super Admin'
+              : 'Admin'
+          }) berhasil disimpan ke Server Cloud Database!`
+        );
+        return true;
+      } else {
+        showToast(`❌ Gagal: ${res.message || 'Gagal menyimpan ke server'}`);
+        return false;
       }
+    } catch (err: any) {
+      showToast(`❌ Error: ${err?.message || 'Gagal menyimpan ke server'}`);
+      return false;
     }
-    return PRESET_ACCOUNTS;
-  });
-
-  const handleAddUser = (newUser: UserAccount) => {
-    setUserAccounts((prev) => {
-      const updated = [newUser, ...prev.filter((u) => u.id !== newUser.id)];
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('swaraku_user_accounts', JSON.stringify(updated));
-      }
-      return updated;
-    });
-    // Simpan ke Firestore Real-Time agar langsung tersinkron ke semua device & browser lain
-    saveUserAccountToCloud(newUser);
-    showToast(`✅ Akun "${newUser.nama}" (${newUser.role === 'tim_sukses' ? 'Tim Sukses' : newUser.role === 'kader' ? 'Kader Lapangan' : newUser.role === 'super_admin' ? 'Super Admin' : 'Admin'}) berhasil didaftarkan & disinkronkan ke Cloud!`);
   };
 
-  const handleDeleteUser = (userId: string) => {
-    setUserAccounts((prev) => {
-      const updated = prev.filter((u) => u.id !== userId);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('swaraku_user_accounts', JSON.stringify(updated));
-      }
-      return updated;
-    });
-    // Hapus dari Firestore
-    deleteUserAccountFromCloud(userId);
-    showToast('🗑️ Akun berhasil dihapus dari sistem & cloud.');
+  const handleDeleteUser = async (userId: string) => {
+    setUserAccounts((prev) => prev.filter((u) => u.id !== userId));
+    await deleteUserOnCloud(userId);
+    showToast('🗑️ Akun berhasil dihapus dari Cloud Database.');
   };
 
-  const handleToggleUserStatus = (userId: string) => {
-    setUserAccounts((prev) => {
-      let targetUser: UserAccount | null = null;
-      const updated = prev.map((u) => {
+  const handleToggleUserStatus = async (userId: string) => {
+    setUserAccounts((prev) =>
+      prev.map((u) => {
         if (u.id === userId) {
           const nextStatus = (u.status === 'Nonaktif' ? 'Aktif' : 'Nonaktif') as 'Aktif' | 'Nonaktif';
-          targetUser = { ...u, status: nextStatus };
-          return targetUser;
+          return { ...u, status: nextStatus };
         }
         return u;
-      });
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('swaraku_user_accounts', JSON.stringify(updated));
-      }
-      if (targetUser) {
-        saveUserAccountToCloud(targetUser);
-      }
-      return updated;
-    });
-    showToast('🔄 Status akun berhasil diubah & disinkronkan.');
+      })
+    );
+    await toggleUserStatusOnCloud(userId);
+    showToast('🔄 Status akun berhasil diubah & disinkronkan ke server.');
   };
 
-  const handleUpdateUser = (updatedUser: UserAccount) => {
-    setUserAccounts((prev) => {
-      const updated = prev.map((u) => (u.id === updatedUser.id ? updatedUser : u));
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('swaraku_user_accounts', JSON.stringify(updated));
-      }
-      return updated;
-    });
+  const handleUpdateUser = async (updatedUser: UserAccount) => {
+    setUserAccounts((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
     if (currentUser && currentUser.id === updatedUser.id) {
       setCurrentUser(updatedUser);
       if (typeof window !== 'undefined') {
-        localStorage.setItem('swaraku_current_user', JSON.stringify(updatedUser));
+        localStorage.setItem('swaraku_current_user_session', JSON.stringify(updatedUser));
       }
     }
-    // Update ke Firestore
-    saveUserAccountToCloud(updatedUser);
-    showToast(`✅ Akun "${updatedUser.nama}" (@${updatedUser.username}) berhasil diperbarui di seluruh perangkat!`);
+    await updateUserOnCloud(updatedUser);
+    showToast(`✅ Akun "${updatedUser.nama}" (@${updatedUser.username}) berhasil diperbarui di server cloud!`);
+  };
+
+  const handleRefreshUsers = async () => {
+    try {
+      const cloudUsers = await fetchUsersFromCloud();
+      if (cloudUsers && cloudUsers.length > 0) {
+        setUserAccounts(cloudUsers);
+        showToast('🔄 Daftar akun berhasil dimuat ulang langsung dari Server Cloud.');
+      }
+    } catch (err: any) {
+      showToast('⚠️ Gagal memuat data dari server: ' + (err?.message || 'Error'));
+    }
+  };
+
+  const handleRefreshProfile = async () => {
+    if (!currentUser?.id) return;
+    try {
+      const freshUser = await fetchUserProfileById(currentUser.id);
+      if (freshUser) {
+        setCurrentUser(freshUser);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('swaraku_current_user_session', JSON.stringify(freshUser));
+        }
+        showToast('✅ Data profil terbaru Anda berhasil disinkronkan dari server.');
+      }
+    } catch (err: any) {
+      showToast('⚠️ Gagal sinkronisasi profil: ' + (err?.message || 'Error'));
+    }
   };
 
   // Kader Lapangan State
@@ -333,7 +352,8 @@ export default function App() {
   const handleLogin = (account: UserAccount) => {
     setCurrentUser(account);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('swaraku_current_user', JSON.stringify(account));
+      // HANYA menyimpan sesi user aktif pada perangkat ini
+      localStorage.setItem('swaraku_current_user_session', JSON.stringify(account));
       localStorage.setItem('swaraku_main_view_mode', 'app');
     }
     setMainViewMode('app');
@@ -358,13 +378,37 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     if (typeof window !== 'undefined') {
+      localStorage.removeItem('swaraku_current_user_session');
       localStorage.removeItem('swaraku_current_user');
     }
     showToast('🔒 Anda telah keluar dari aplikasi SWARAKU');
   };
 
-  // Real-Time Multi-Device Cloud Listeners (Firebase Firestore onSnapshot)
+  // Real-Time Multi-Device Cloud Listeners
   useEffect(() => {
+    // 0. Fetch initial users list from Cloud Server on mount
+    fetchUsersFromCloud()
+      .then((cloudUsers) => {
+        if (cloudUsers && cloudUsers.length > 0) {
+          setUserAccounts(cloudUsers);
+        }
+      })
+      .catch((e) => console.warn('[App] Fetch initial users notice:', e));
+
+    // 0b. Auto-fetch fresh profile for active logged-in user on refresh
+    if (currentUser?.id) {
+      fetchUserProfileById(currentUser.id)
+        .then((fresh) => {
+          if (fresh) {
+            setCurrentUser(fresh);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('swaraku_current_user_session', JSON.stringify(fresh));
+            }
+          }
+        })
+        .catch((e) => console.warn('[App] Refresh profile notice:', e));
+    }
+
     // 1. Subscribe to Cloud Sync status changes
     const unsubStatus = subscribeCloudSyncStatus(setCloudSyncState);
 
@@ -391,11 +435,9 @@ export default function App() {
     // 6. Real-time User Accounts sync (Super Admin akun pool multi-device)
     const unsubUsers = subscribeToCloudUserAccounts((cloudUsers) => {
       if (cloudUsers.length > 0) {
-        setUserAccounts((prev) => {
-          // Gabungkan akun cloud dengan preset default agar tidak kehilangan superadmin default
+        setUserAccounts(() => {
           const map = new Map<string, UserAccount>();
           PRESET_ACCOUNTS.forEach((a) => map.set(a.id, a));
-          prev.forEach((a) => map.set(a.id, a));
           cloudUsers.forEach((a) => map.set(a.id, a));
           return Array.from(map.values());
         });
@@ -1074,6 +1116,7 @@ export default function App() {
             onResetDataToZero={handleResetPetaSuaraToZero}
             onTriggerCloudSync={handleManualCloudSync}
             isSyncingCloud={isManualSyncing}
+            onRefreshUsers={handleRefreshUsers}
           />
         ) : (
           /* Halaman Aplikasi Setelah Login (Sesuai Akun Tim Sukses atau Kader) */
@@ -1176,6 +1219,7 @@ export default function App() {
                     onOpenTambahNikModal={() => setTambahNikModalOpen(true)}
                     currentUser={currentUser}
                     onLogout={handleLogout}
+                    onRefreshProfile={handleRefreshProfile}
                   />
                 )}
               </MobileFrame>

@@ -107,6 +107,7 @@ interface AdminDashboardViewProps {
   onResetDataToZero?: () => void;
   onTriggerCloudSync?: () => Promise<void>;
   isSyncingCloud?: boolean;
+  onRefreshUsers?: () => Promise<void>;
 }
 
 export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
@@ -123,6 +124,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   profile,
   kaderPoints,
   onUpdateAspirasiStatus,
+  onRefreshUsers,
   onSubmitAspirasi,
   onUpvoteAspirasi,
   onSubmitC1,
@@ -721,6 +723,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             onDeleteUser={onDeleteUser || (() => {})}
             onToggleUserStatus={onToggleUserStatus || (() => {})}
             onSaveTimSukses={onSaveTimSukses}
+            onRefreshUsers={onRefreshUsers}
           />
         )}
       </main>

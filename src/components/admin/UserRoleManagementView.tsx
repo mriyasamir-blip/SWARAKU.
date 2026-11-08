@@ -25,16 +25,29 @@ import {
   Lock,
   X,
   Check,
+  Database,
+  RefreshCw,
+  Cloud,
+  Globe,
+  ExternalLink,
+  Sliders,
 } from 'lucide-react';
+import {
+  getActiveScriptUrl,
+  isScriptUrlConfigured,
+  setCustomScriptUrl,
+  SCRIPT_URL,
+} from '../../config/apiConfig';
 
 interface UserRoleManagementViewProps {
   userAccounts: UserAccount[];
   currentUser: UserAccount;
-  onAddUser: (user: UserAccount) => void;
-  onUpdateUser?: (user: UserAccount) => void;
-  onDeleteUser: (userId: string) => void;
-  onToggleUserStatus: (userId: string) => void;
+  onAddUser: (user: UserAccount) => Promise<boolean | void> | void;
+  onUpdateUser?: (user: UserAccount) => Promise<boolean | void> | void;
+  onDeleteUser: (userId: string) => Promise<boolean | void> | void;
+  onToggleUserStatus: (userId: string) => Promise<boolean | void> | void;
   onSaveTimSukses?: (ts: TimSuksesWilayahRecord) => void;
+  onRefreshUsers?: () => Promise<void>;
 }
 
 export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
@@ -45,10 +58,19 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
   onDeleteUser,
   onToggleUserStatus,
   onSaveTimSukses,
+  onRefreshUsers,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | UserRole>('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isSavingUser, setIsSavingUser] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isRefreshingUsers, setIsRefreshingUsers] = useState(false);
+
+  // Cloud API Config Modal State
+  const [isApiConfigOpen, setIsApiConfigOpen] = useState(false);
+  const [customUrlInput, setCustomUrlInput] = useState(() => getActiveScriptUrl());
+  const [configToast, setConfigToast] = useState<string | null>(null);
 
   // Edit Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -172,7 +194,7 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
     }
   };
 
-  const handleSubmitNewUser = (e: React.FormEvent) => {
+  const handleSubmitNewUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formNama.trim() || !formUsername.trim()) {
       setFormError('Nama Lengkap dan Username wajib diisi.');
@@ -218,49 +240,64 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
           : 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=250&q=80',
     };
 
-    onAddUser(newAccount);
+    setIsSavingUser(true);
+    setFormError(null);
 
-    // Otomatis terhubung ke Peta Suara Swaraku jika role Tim Sukses
-    if (formRole === 'tim_sukses' && onSaveTimSukses) {
-      const parsedWilayah = formWilayah.trim();
-      let detectedKec = 'Kecamatan Penjaringan';
-      let detectedKota = 'Jakarta Utara';
-
-      if (parsedWilayah) {
-        if (parsedWilayah.toLowerCase().includes('penjaringan')) {
-          detectedKec = 'Kecamatan Penjaringan';
-          detectedKota = 'Jakarta Utara';
-        } else if (parsedWilayah.includes(',')) {
-          const parts = parsedWilayah.split(',').map((p) => p.trim());
-          detectedKec = parts[0] || 'Kecamatan Terdaftar';
-          detectedKota = parts[1] || 'DKI Jakarta';
-        } else {
-          detectedKec = parsedWilayah;
-          detectedKota = parsedWilayah.includes('Kota') || parsedWilayah.includes('Kab') ? parsedWilayah : 'DKI Jakarta';
-        }
+    try {
+      // WAJIB panggil fungsi simpan ke Cloud Database
+      const res = await onAddUser(newAccount);
+      if (res === false) {
+        setFormError('Gagal menyimpan ke Database Server. Silakan periksa koneksi.');
+        setIsSavingUser(false);
+        return;
       }
 
-      const smartCoords = lookupSmartCoordinates('', detectedKec, detectedKota) || {
-        lat: -6.1264,
-        lng: 106.7885,
-      };
+      // Otomatis terhubung ke Peta Suara Swaraku jika role Tim Sukses
+      if (formRole === 'tim_sukses' && onSaveTimSukses) {
+        const parsedWilayah = formWilayah.trim();
+        let detectedKec = 'Kecamatan Penjaringan';
+        let detectedKota = 'Jakarta Utara';
 
-      onSaveTimSukses({
-        id: `ts-${newAccount.id}`,
-        nama: newAccount.nama,
-        noHp: newAccount.noHp || '081288219901',
-        jabatan: newAccount.jabatan || 'Koordinator Tim Sukses',
-        kota: detectedKota,
-        kecamatanList: [detectedKec.toLowerCase().startsWith('kec') ? detectedKec : `Kecamatan ${detectedKec}`],
-        kelurahanList: ['Seluruh Kelurahan'],
-        lat: smartCoords.lat,
-        lng: smartCoords.lng,
-        waktuDaftar: newAccount.dibuatPada || 'Baru Didaftarkan',
-        status: 'Aktif',
-      });
+        if (parsedWilayah) {
+          if (parsedWilayah.toLowerCase().includes('penjaringan')) {
+            detectedKec = 'Kecamatan Penjaringan';
+            detectedKota = 'Jakarta Utara';
+          } else if (parsedWilayah.includes(',')) {
+            const parts = parsedWilayah.split(',').map((p) => p.trim());
+            detectedKec = parts[0] || 'Kecamatan Terdaftar';
+            detectedKota = parts[1] || 'DKI Jakarta';
+          } else {
+            detectedKec = parsedWilayah;
+            detectedKota = parsedWilayah.includes('Kota') || parsedWilayah.includes('Kab') ? parsedWilayah : 'DKI Jakarta';
+          }
+        }
+
+        const smartCoords = lookupSmartCoordinates('', detectedKec, detectedKota) || {
+          lat: -6.1264,
+          lng: 106.7885,
+        };
+
+        onSaveTimSukses({
+          id: `ts-${newAccount.id}`,
+          nama: newAccount.nama,
+          noHp: newAccount.noHp || '081288219901',
+          jabatan: newAccount.jabatan || 'Koordinator Tim Sukses',
+          kota: detectedKota,
+          kecamatanList: [detectedKec.toLowerCase().startsWith('kec') ? detectedKec : `Kecamatan ${detectedKec}`],
+          kelurahanList: ['Seluruh Kelurahan'],
+          lat: smartCoords.lat,
+          lng: smartCoords.lng,
+          waktuDaftar: newAccount.dibuatPada || 'Baru Didaftarkan',
+          status: 'Aktif',
+        });
+      }
+
+      setIsAddModalOpen(false);
+    } catch (err: any) {
+      setFormError(err?.message || 'Gagal menyimpan akun ke server Cloud Database.');
+    } finally {
+      setIsSavingUser(false);
     }
-
-    setIsAddModalOpen(false);
   };
 
   const handleOpenEditModal = (user: UserAccount) => {
@@ -280,7 +317,7 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
     setIsEditModalOpen(true);
   };
 
-  const handleSubmitEditUser = (e: React.FormEvent) => {
+  const handleSubmitEditUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUserId) return;
     if (!editNama.trim() || !editUsername.trim()) {
@@ -317,10 +354,19 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
       status: editStatus,
     };
 
-    if (onUpdateUser) {
-      onUpdateUser(updatedAccount);
+    setIsSavingEdit(true);
+    setEditError(null);
+
+    try {
+      if (onUpdateUser) {
+        await onUpdateUser(updatedAccount);
+      }
+      setIsEditModalOpen(false);
+    } catch (err: any) {
+      setEditError(err?.message || 'Gagal menyimpan perubahan ke server.');
+    } finally {
+      setIsSavingEdit(false);
     }
-    setIsEditModalOpen(false);
   };
 
   const handleOpenResetModal = (user: UserAccount) => {
@@ -420,20 +466,51 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {onRefreshUsers && (
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsRefreshingUsers(true);
+                  try {
+                    await onRefreshUsers();
+                  } finally {
+                    setIsRefreshingUsers(false);
+                  }
+                }}
+                disabled={isRefreshingUsers}
+                className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                title="Muat ulang seluruh daftar akun langsung dari Server Cloud Database"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-cyan-300 ${isRefreshingUsers ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Refresh Cloud</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsApiConfigOpen(true)}
+              className="px-3 py-2 bg-indigo-900/60 hover:bg-indigo-900 text-indigo-200 border border-indigo-400/30 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
+              title="Atur URL Web App Google Apps Script"
+            >
+              <Database className="w-3.5 h-3.5 text-indigo-300" />
+              <span className="hidden sm:inline">URL Cloud API</span>
+              <span className="sm:hidden">API</span>
+            </button>
+
             <button
               onClick={() => handleOpenAddModal('tim_sukses')}
-              className="px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-all active:scale-95"
+              className="px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
             >
               <Building2 className="w-4 h-4" />
-              <span>+ User Tim Sukses</span>
+              <span>+ Tim Sukses</span>
             </button>
             <button
               onClick={() => handleOpenAddModal('kader')}
-              className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-all active:scale-95"
+              className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
             >
               <UserCheck className="w-4 h-4" />
-              <span>+ User Kader</span>
+              <span>+ Kader</span>
             </button>
           </div>
         </div>
@@ -1004,10 +1081,20 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 text-white font-black rounded-xl text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
+                  disabled={isSavingUser}
+                  className="px-5 py-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 text-white font-black rounded-xl text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 disabled:opacity-60"
                 >
-                  <Check className="w-4 h-4" />
-                  <span>Daftarkan Akun</span>
+                  {isSavingUser ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Menyimpan ke Cloud Database...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Daftarkan Akun ke Server</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -1274,10 +1361,20 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-700 hover:to-teal-700 text-white font-black rounded-xl text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
+                  disabled={isSavingEdit}
+                  className="px-5 py-2 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-700 hover:to-teal-700 text-white font-black rounded-xl text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 disabled:opacity-60"
                 >
-                  <Check className="w-4 h-4" />
-                  <span>Simpan Perubahan</span>
+                  {isSavingEdit ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Menyimpan ke Cloud Database...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Simpan Perubahan ke Server</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -1380,6 +1477,134 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Konfigurasi Database Cloud (Google Apps Script Web App) */}
+      {isApiConfigOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 my-auto animate-in fade-in zoom-in-95 duration-200 text-left">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-cyan-600 text-white flex items-center justify-center shadow-xs">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 leading-tight">
+                    Pengaturan Cloud Database (Google Sheets API)
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Hubungkan database user terpusat via Google Apps Script Web App
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsApiConfigOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Status Info */}
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-600">Status Server:</span>
+                <span className={`inline-flex items-center gap-1 font-bold px-2 py-0.5 rounded-full text-[10px] ${
+                  isScriptUrlConfigured()
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-amber-100 text-amber-800'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${isScriptUrlConfigured() ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  <span>{isScriptUrlConfigured() ? 'Tersambung ke Google Sheets' : 'Menggunakan Cloud Firestore'}</span>
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-500 leading-relaxed">
+                URL ini digunakan untuk menyimpan seluruh akun user baru dan memvalidasi login secara lintas perangkat (multi-device) tanpa bergantung pada memori lokal browser.
+              </div>
+            </div>
+
+            {configToast && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{configToast}</span>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-slate-800 block mb-1">
+                  Google Apps Script Web App URL (SCRIPT_URL):
+                </label>
+                <div className="relative">
+                  <input
+                    type="url"
+                    value={customUrlInput}
+                    onChange={(e) => setCustomUrlInput(e.target.value)}
+                    placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900 focus:outline-hidden focus:border-cyan-600 focus:bg-white"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Atau edit langsung konstanta <code className="bg-slate-100 px-1 py-0.5 rounded text-indigo-700 font-bold">SCRIPT_URL</code> di file <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">src/config/apiConfig.ts</code>.
+                </p>
+              </div>
+
+              {/* Quick Guide */}
+              <div className="p-3 bg-indigo-50/60 rounded-2xl border border-indigo-100 text-[11px] text-indigo-900 space-y-1">
+                <span className="font-bold block text-indigo-950">Panduan Deploy Google Apps Script:</span>
+                <ol className="list-decimal pl-4 space-y-0.5 text-slate-600">
+                  <li>Buka Google Sheets baru di <a href="https://sheets.new" target="_blank" rel="noreferrer" className="text-cyan-700 underline font-semibold">sheets.new</a></li>
+                  <li>Buka <b>Extensions &gt; Apps Script</b> dan paste kode dari file <code className="text-purple-700 font-mono">/backend/Code.gs</code></li>
+                  <li>Klik <b>Deploy &gt; New Deployment &gt; Web app</b></li>
+                  <li>Atur <i>Who has access</i> menjadi: <b>Anyone</b></li>
+                  <li>Salin Web App URL dan tempelkan di kotak atas</li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-between border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomScriptUrl('');
+                  setCustomUrlInput('');
+                  setConfigToast('URL dikembalikan ke default.');
+                  setTimeout(() => setConfigToast(null), 2500);
+                  if (onRefreshUsers) onRefreshUsers();
+                }}
+                className="text-xs text-rose-600 hover:text-rose-800 font-bold cursor-pointer"
+              >
+                Reset ke Default
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsApiConfigOpen(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  Tutup
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setCustomScriptUrl(customUrlInput);
+                    setConfigToast('✅ URL Cloud API berhasil disimpan!');
+                    setTimeout(() => setConfigToast(null), 2500);
+                    if (onRefreshUsers) {
+                      await onRefreshUsers();
+                    }
+                  }}
+                  className="px-5 py-2 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-700 hover:to-cyan-700 text-white font-black rounded-xl text-xs shadow-md cursor-pointer flex items-center gap-1.5 active:scale-95"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Simpan &amp; Uji Server</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

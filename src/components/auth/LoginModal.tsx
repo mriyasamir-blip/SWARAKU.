@@ -1,22 +1,16 @@
 import React, { useState } from 'react';
-import { UserAccount, UserRole } from '../../types/vore';
-import { PRESET_ACCOUNTS } from '../../data/accountsData';
-import { authenticateCloudUser } from '../../utils/storageSync';
+import { UserAccount } from '../../types/vore';
+import { loginUserOnCloud } from '../../services/userApiService';
 import {
-  ShieldCheck,
-  UserCheck,
-  Users,
   Lock,
-  Mail,
-  ChevronRight,
-  Sparkles,
-  X,
-  CheckCircle2,
-  Building2,
-  MapPin,
+  User,
   Eye,
   EyeOff,
-  Shield,
+  X,
+  KeyRound,
+  ShieldAlert,
+  ArrowRight,
+  Sparkles,
 } from 'lucide-react';
 import { SwarakuLogo } from '../common/SwarakuLogo';
 
@@ -31,112 +25,59 @@ interface LoginModalProps {
 export const LoginModal: React.FC<LoginModalProps> = ({
   isOpen,
   onClose,
-  currentUser,
   onLogin,
-  userAccounts,
 }) => {
-  const accountsPool = userAccounts && userAccounts.length > 0 ? userAccounts : PRESET_ACCOUNTS;
-  const [selectedRole, setSelectedRole] = useState<UserRole>('super_admin');
-  const [emailOrUsername, setEmailOrUsername] = useState('superadmin@swaraku.com');
-  const [password, setPassword] = useState('123456');
+  const [emailOrUsername, setEmailOrUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleRoleSelect = (role: UserRole) => {
-    setSelectedRole(role);
-    setErrorMsg(null);
-    const firstAcc = accountsPool.find((acc) => acc.role === role && acc.status !== 'Nonaktif');
-    if (firstAcc) {
-      setEmailOrUsername(firstAcc.username);
-      setPassword(firstAcc.password || '');
-    } else if (role === 'super_admin') {
-      setEmailOrUsername('superadmin@swaraku.com');
-      setPassword('123456');
-    } else if (role === 'admin') {
-      setEmailOrUsername('admin@swaraku.com');
-      setPassword('123456');
-    } else if (role === 'tim_sukses') {
-      setEmailOrUsername('timsukses@swaraku.com');
-      setPassword('123456');
-    } else {
-      setEmailOrUsername('kader@swaraku.com');
-      setPassword('123456');
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    if (!emailOrUsername.trim() || !password.trim()) {
+      setErrorMsg('Harap masukkan Username/Email dan Kata Sandi.');
+      return;
+    }
+
     setErrorMsg(null);
+    setLoading(true);
 
     try {
-      // 1. Validasi cloud langsung
-      const cloudResult = await authenticateCloudUser(emailOrUsername, password);
-      if (cloudResult.success && cloudResult.user) {
-        onLogin(cloudResult.user);
+      // Validasi langsung ke Server Cloud Database (Firestore / Google Sheets)
+      const result = await loginUserOnCloud(emailOrUsername, password);
+
+      if (result.success && result.user) {
+        onLogin(result.user);
         setLoading(false);
         if (onClose) onClose();
-        return;
-      }
-
-      if (cloudResult.error && (cloudResult.error.includes('Password salah') || cloudResult.error.includes('dinonaktifkan'))) {
-        setErrorMsg(cloudResult.error);
+      } else {
+        setErrorMsg(
+          result.message || 'Username atau kata sandi tidak sesuai di Server Cloud Database.'
+        );
         setLoading(false);
-        return;
       }
-
-      // 2. Fallback ke accountsPool lokal
-      const cleanInput = emailOrUsername.trim().toLowerCase();
-      const match = accountsPool.find(
-        (acc) =>
-          acc.username.toLowerCase() === cleanInput ||
-          acc.email.toLowerCase() === cleanInput
-      );
-
-      if (!match) {
-        setErrorMsg(cloudResult.error || 'Username atau Email tidak ditemukan. Hubungi Super Admin.');
-        setLoading(false);
-        return;
-      }
-
-      const expectedPassword = match.password || '123456';
-      if (password !== expectedPassword) {
-        setErrorMsg('Password salah! Password tidak sesuai dengan data terdaftar di Super Admin.');
-        setLoading(false);
-        return;
-      }
-
-      if (match.status === 'Nonaktif') {
-        setErrorMsg('Akun ini berstatus NONAKTIF oleh Super Admin. Anda tidak dapat login.');
-        setLoading(false);
-        return;
-      }
-
-      onLogin(match);
-      setLoading(false);
-      if (onClose) onClose();
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Gagal memproses login.');
+      setErrorMsg(err?.message || 'Gagal menghubungi Server Cloud Database. Periksa koneksi.');
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-7 space-y-5 shadow-2xl border border-slate-200 my-auto text-slate-800 animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-7 space-y-4 shadow-2xl border border-slate-200 my-auto text-slate-800 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="flex items-start justify-between pb-3 border-b border-slate-100">
           <div className="flex items-center gap-3">
             <SwarakuLogo size={36} />
             <div>
               <h2 className="text-lg font-black text-slate-900 tracking-tight">
-                Pilih Akun Masuk
+                Masuk ke Akun SWARAKU
               </h2>
               <p className="text-xs text-slate-500">
-                Pilih Akun Super Admin, Admin, Tim Sukses, atau Kader
+                Akses akun Super Admin, Admin, Tim Sukses, atau Kader
               </p>
             </div>
           </div>
@@ -151,179 +92,57 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           )}
         </div>
 
-        {/* 4 Account Options Selection */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {/* 1. Akun Super Admin */}
-          <button
-            type="button"
-            onClick={() => handleRoleSelect('super_admin')}
-            className={`p-2.5 rounded-2xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
-              selectedRole === 'super_admin'
-                ? 'border-purple-600 bg-purple-50/80 shadow-sm ring-2 ring-purple-200'
-                : 'border-slate-200 hover:border-slate-300 bg-slate-50'
-            }`}
-          >
-            {selectedRole === 'super_admin' && (
-              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-purple-600"></span>
-            )}
-            <div className="w-7 h-7 rounded-xl bg-purple-600 text-white flex items-center justify-center mb-1.5 shadow-xs">
-              <Shield className="w-3.5 h-3.5" />
-            </div>
-            <span className="text-[8px] font-bold uppercase tracking-wider text-purple-800 block">
-              SUPER ADMIN
-            </span>
-            <h3 className="text-xs font-black text-slate-900 leading-tight">
-              Super Admin
-            </h3>
-          </button>
-
-          {/* 2. Akun Admin */}
-          <button
-            type="button"
-            onClick={() => handleRoleSelect('admin')}
-            className={`p-2.5 rounded-2xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
-              selectedRole === 'admin'
-                ? 'border-teal-600 bg-teal-50/70 shadow-sm ring-2 ring-teal-200'
-                : 'border-slate-200 hover:border-slate-300 bg-slate-50'
-            }`}
-          >
-            {selectedRole === 'admin' && (
-              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-teal-600"></span>
-            )}
-            <div className="w-7 h-7 rounded-xl bg-teal-600 text-white flex items-center justify-center mb-1.5 shadow-xs">
-              <ShieldCheck className="w-3.5 h-3.5" />
-            </div>
-            <span className="text-[8px] font-bold uppercase tracking-wider text-teal-800 block">
-              ADMIN
-            </span>
-            <h3 className="text-xs font-black text-slate-900 leading-tight">
-              Admin
-            </h3>
-          </button>
-
-          {/* 3. Akun Tim Sukses */}
-          <button
-            type="button"
-            onClick={() => handleRoleSelect('tim_sukses')}
-            className={`p-2.5 rounded-2xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
-              selectedRole === 'tim_sukses'
-                ? 'border-cyan-600 bg-cyan-50/70 shadow-sm ring-2 ring-cyan-200'
-                : 'border-slate-200 hover:border-slate-300 bg-slate-50'
-            }`}
-          >
-            {selectedRole === 'tim_sukses' && (
-              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-cyan-600"></span>
-            )}
-            <div className="w-7 h-7 rounded-xl bg-cyan-600 text-white flex items-center justify-center mb-1.5 shadow-xs">
-              <Building2 className="w-3.5 h-3.5" />
-            </div>
-            <span className="text-[8px] font-bold uppercase tracking-wider text-cyan-800 block">
-              TIM SUKSES
-            </span>
-            <h3 className="text-xs font-black text-slate-900 leading-tight">
-              Tim Sukses
-            </h3>
-          </button>
-
-          {/* 4. Akun Kader */}
-          <button
-            type="button"
-            onClick={() => handleRoleSelect('kader')}
-            className={`p-2.5 rounded-2xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
-              selectedRole === 'kader'
-                ? 'border-slate-800 bg-slate-100 shadow-sm ring-2 ring-slate-300'
-                : 'border-slate-200 hover:border-slate-300 bg-slate-50'
-            }`}
-          >
-            {selectedRole === 'kader' && (
-              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-slate-900"></span>
-            )}
-            <div className="w-7 h-7 rounded-xl bg-slate-900 text-white flex items-center justify-center mb-1.5 shadow-xs">
-              <UserCheck className="w-3.5 h-3.5" />
-            </div>
-            <span className="text-[8px] font-bold uppercase tracking-wider text-slate-800 block">
-              KADER
-            </span>
-            <h3 className="text-xs font-black text-slate-900 leading-tight">
-              Kader
-            </h3>
-          </button>
-        </div>
-
-        {/* Selected Role Info Summary */}
-        <div className="p-3 bg-slate-100/80 rounded-2xl border border-slate-200 flex items-center justify-between text-xs">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-white text-slate-700 flex items-center justify-center font-bold text-xs shadow-2xs">
-              {selectedRole === 'super_admin' ? 'SA' : selectedRole === 'admin' ? 'ADM' : selectedRole === 'tim_sukses' ? 'TS' : 'KD'}
-            </div>
-            <div>
-              <span className="text-[10px] text-slate-500 block">Login Sebagai:</span>
-              <span className="font-extrabold text-slate-900">
-                {selectedRole === 'super_admin'
-                  ? 'Super Admin Utama'
-                  : selectedRole === 'admin'
-                  ? 'Administrator (Admin)'
-                  : selectedRole === 'tim_sukses'
-                  ? 'Bambang Haryanto (Tim Sukses)'
-                  : 'Ahmad Rizky (Kader TPS 047)'}
-              </span>
-            </div>
-          </div>
-          <span className="text-[10px] font-semibold text-teal-800 bg-teal-100 px-2 py-0.5 rounded-md">
-            {selectedRole === 'super_admin'
-              ? 'Super Admin'
-              : selectedRole === 'admin'
-              ? 'Admin'
-              : selectedRole === 'tim_sukses'
-              ? 'Tim Sukses'
-              : 'Kader Lapangan'}
-          </span>
-        </div>
-
         {/* Form Login */}
-        <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
+        <form onSubmit={handleLoginSubmit} className="space-y-3.5 text-xs">
           {errorMsg && (
-            <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold">
-              {errorMsg}
+            <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{errorMsg}</span>
             </div>
           )}
 
           <div>
             <label className="font-bold text-slate-800 block mb-1">
-              Email atau Username
+              Username atau Email
             </label>
             <div className="relative">
-              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <User className="w-3.5 h-3.5" />
+              </div>
               <input
                 type="text"
                 value={emailOrUsername}
                 onChange={(e) => setEmailOrUsername(e.target.value)}
-                placeholder="nama@swaraku.com atau username"
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 text-xs font-medium"
                 required
+                autoFocus
+                className="w-full pl-9 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-hidden focus:border-purple-600 focus:bg-white text-xs"
+                placeholder="Masukkan username atau email..."
               />
             </div>
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="font-bold text-slate-800">Kata Sandi</label>
-            </div>
+            <label className="font-bold text-slate-800 block mb-1">
+              Kata Sandi / PIN
+            </label>
             <div className="relative">
-              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <Lock className="w-3.5 h-3.5" />
+              </div>
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-9 pr-9 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 text-xs font-medium"
                 required
+                className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:outline-hidden focus:border-purple-600 focus:bg-white text-xs"
+                placeholder="Masukkan kata sandi..."
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
               >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
               </button>
             </div>
           </div>
@@ -331,14 +150,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 text-white font-bold rounded-xl shadow-md shadow-teal-600/20 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98 disabled:opacity-60"
+            className="w-full mt-2 py-3 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 text-white font-black text-xs rounded-xl shadow-md transition-all active:scale-98 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
           >
             {loading ? (
-              <span>Memproses...</span>
+              <span className="flex items-center gap-2">
+                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>Memverifikasi Akun ke Server...</span>
+              </span>
             ) : (
               <>
+                <KeyRound className="w-4 h-4" />
                 <span>Masuk Sekarang</span>
-                <ChevronRight className="w-4 h-4" />
+                <ArrowRight className="w-4 h-4" />
               </>
             )}
           </button>
