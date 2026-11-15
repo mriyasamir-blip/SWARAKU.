@@ -11,7 +11,7 @@ import {
   InfoWindow,
   useMap,
 } from '@vis.gl/react-google-maps';
-import { SwarakuMapsProvider } from '../maps/SwarakuMapsProvider';
+import { SwarakuMapsProvider, SwarakuMapsDiagnosticNotice } from '../maps/SwarakuMapsProvider';
 import { lookupSmartCoordinates } from '../../utils/geocoding';
 import {
   Search,
@@ -19,7 +19,6 @@ import {
   Download,
   Users,
   CheckCircle2,
-  AlertTriangle,
   Building2,
   MapPin,
   TrendingUp,
@@ -729,12 +728,10 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
             <SwarakuMapsProvider
               fallback={
                 <div className="h-full w-full p-5 overflow-y-auto space-y-3 bg-slate-50">
-                  <div className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
-                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    <span>
-                      Peta interaktif Google Maps sedang tidak dapat dimuat pada domain/kuota saat ini. Daftar koordinat pemilih tetap tersedia di bawah:
-                    </span>
-                  </div>
+                  <SwarakuMapsDiagnosticNotice
+                    title="Peta interaktif Google Maps sedang tidak dapat dimuat"
+                    subtitle="Daftar koordinat pemilih tetap tersedia di bawah:"
+                  />
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {votersWithCoords.map((voter) => (
                       <div key={voter.id} className="p-3 rounded-xl bg-white border border-slate-200 text-xs space-y-1">

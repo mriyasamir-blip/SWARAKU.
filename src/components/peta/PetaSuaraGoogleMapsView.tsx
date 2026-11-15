@@ -6,7 +6,7 @@ import {
   useAdvancedMarkerRef,
   useMap,
 } from '@vis.gl/react-google-maps';
-import { SwarakuMapsProvider } from '../maps/SwarakuMapsProvider';
+import { SwarakuMapsProvider, SwarakuMapsDiagnosticNotice } from '../maps/SwarakuMapsProvider';
 import {
   TimSuksesWilayahRecord,
   PetaWilayahMarker,
@@ -21,7 +21,6 @@ import {
   MapPin,
   Building2,
   CheckCircle2,
-  AlertTriangle,
   UserPlus,
   Plus,
   Phone,
@@ -827,15 +826,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
           fallback={
             <div className="h-full w-full p-5 overflow-y-auto flex flex-col justify-between bg-slate-50">
               <div className="space-y-3">
-                <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-50 border border-amber-200">
-                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                  <div className="text-xs text-amber-900 space-y-1">
-                    <p className="font-bold">Tampilan Peta Google Maps sedang dialihkan ke Mode Ringkasan Wilayah</p>
-                    <p>
-                      Pastikan API Key Google Maps aktif (Maps JavaScript API, pembatasan HTTP referrer mengizinkan domain Anda, dan kuota/billing aktif). Data koordinat &amp; sebaran suara tetap aktif di bawah ini:
-                    </p>
-                  </div>
-                </div>
+                <SwarakuMapsDiagnosticNotice />
 
                 {filteredMarkers.length === 0 ? (
                   <div className="p-8 text-center text-sm text-slate-500 bg-white rounded-2xl border border-slate-200">

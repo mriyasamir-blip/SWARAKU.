@@ -4,10 +4,44 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
+export type MapsErrorCode =
+  | 'referer_not_allowed'
+  | 'billing_not_enabled'
+  | 'api_not_activated'
+  | 'invalid_key'
+  | 'expired_key'
+  | 'no_api_keys'
+  | 'project_error'
+  | 'quota_exceeded'
+  | 'auth_failure';
+
+interface GlobalMapsErrorState {
+  code: MapsErrorCode;
+  rawMessage: string;
+  hostname: string;
+}
+
+declare global {
+  interface Window {
+    gm_authFailure?: () => void;
+    __SWARAKU_MAPS_ERROR__?: GlobalMapsErrorState;
+  }
+}
+
+function recordMapsError(code: MapsErrorCode, rawMessage: string) {
+  const detail: GlobalMapsErrorState = {
+    code,
+    rawMessage,
+    hostname: typeof window !== 'undefined' ? window.location.hostname : '',
+  };
+  window.__SWARAKU_MAPS_ERROR__ = detail;
+  window.dispatchEvent(new CustomEvent('gmp-map-error', { detail }));
+}
+
 // Google Maps Platform Client-Side Quota & Auth Failure Listener (Demo/GHP Key Case A)
-(window as unknown as { gm_authFailure?: () => void }).gm_authFailure = () => {
+window.gm_authFailure = () => {
   window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
-  window.dispatchEvent(new CustomEvent('gmp-map-error', { detail: { reason: 'gm_authFailure' } }));
+  recordMapsError('auth_failure', 'gm_authFailure');
 };
 
 const origConsoleError = console.error;
@@ -16,17 +50,24 @@ console.error = (...args: unknown[]) => {
   const msg = args.map((a) => String(a)).join(' ');
   if (msg.includes('OverQuotaMapError') || msg.includes('QuotaExceededError')) {
     window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
-    window.dispatchEvent(new CustomEvent('gmp-map-error', { detail: { reason: 'quota' } }));
+    recordMapsError('quota_exceeded', msg);
+  } else if (msg.includes('RefererNotAllowedMapError')) {
+    recordMapsError('referer_not_allowed', msg);
+  } else if (msg.includes('BillingNotEnabledMapError')) {
+    recordMapsError('billing_not_enabled', msg);
   } else if (
-    msg.includes('InvalidKeyMapError') ||
-    msg.includes('RefererNotAllowedMapError') ||
-    msg.includes('BillingNotEnabledMapError') ||
     msg.includes('ApiNotActivatedMapError') ||
-    msg.includes('LegacyApiNotActivatedMapError') ||
-    msg.includes('ExpiredKeyMapError') ||
-    msg.includes('NoApiKeys')
+    msg.includes('LegacyApiNotActivatedMapError')
   ) {
-    window.dispatchEvent(new CustomEvent('gmp-map-error', { detail: { reason: msg } }));
+    recordMapsError('api_not_activated', msg);
+  } else if (msg.includes('InvalidKeyMapError')) {
+    recordMapsError('invalid_key', msg);
+  } else if (msg.includes('ExpiredKeyMapError')) {
+    recordMapsError('expired_key', msg);
+  } else if (msg.includes('NoApiKeys')) {
+    recordMapsError('no_api_keys', msg);
+  } else if (msg.includes('ApiProjectMapError')) {
+    recordMapsError('project_error', msg);
   }
 };
 
