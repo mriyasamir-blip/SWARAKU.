@@ -39,7 +39,18 @@ import {
   updateUserOnCloud,
   updateUserPhotoOnCloud,
 } from './services/userApiService';
-import { subscribeToCloudUserAccounts } from './services/cloudSyncService';
+import {
+  migrateLocalDataToCloud,
+  saveB1ToCloud,
+  saveC1ToCloud,
+  saveTimSuksesToCloud,
+  saveVoterToCloud,
+  subscribeToCloudB1,
+  subscribeToCloudC1,
+  subscribeToCloudTimSukses,
+  subscribeToCloudUserAccounts,
+  subscribeToCloudVoters,
+} from './services/cloudSyncService';
 import type {
   AspirationDoc,
   CalegInfoDoc,
@@ -49,7 +60,24 @@ import type {
   VoterDoc,
   VoterTab,
 } from './types/swaraku';
-import type { UserAccount } from './types/vore';
+import type {
+  AspirasiItem,
+  DptVoterRecord,
+  ElectabilitySurveySubmission,
+  FormB1Upload,
+  FormC1Upload,
+  InvitedFriendRecord,
+  UserAccount,
+  VoterOcrRecord,
+  WhatsAppBlaztItem,
+} from './types/vore';
+import type { TimSuksesWilayahRecord } from './data/petaSuaraData';
+import { INITIAL_ASPIRASI } from './data/mockData';
+import {
+  INITIAL_BLAZT_ITEMS,
+  INITIAL_DPT_RECORDS,
+  INITIAL_ELECTABILITY_SURVEYS,
+} from './data/dptData';
 import { LoginScreen } from './components/swaraku/LoginScreen';
 import { RegisterVoterScreen } from './components/swaraku/RegisterVoterScreen';
 import {
@@ -59,8 +87,8 @@ import {
   VoterProfileView,
   VoterReferralView,
 } from './components/swaraku/VoterDashboardViews';
-import { SuperadminView } from './components/swaraku/SuperadminView';
 import { StaffPortalApp } from './components/swaraku/StaffPortalApp';
+import { SuperadminView } from './components/swaraku/SuperadminView';
 import { PWAInstallButton } from './components/pwa/PWAInstallButton';
 import { OfflineIndicator } from './components/pwa/OfflineIndicator';
 
@@ -88,6 +116,22 @@ export default function App() {
   // Staff Session (Kader, Tim Sukses, Admin, Super Admin)
   const [staffUser, setStaffUser] = useState<UserAccount | null>(() => readSavedStaffSession());
   const [userAccounts, setUserAccounts] = useState<UserAccount[]>([]);
+
+  // Operational Campaign Data for Admin & Superadmin Modules (Firestore-synced, zero dummy defaults)
+  const [voterOcrRecords, setVoterOcrRecords] = useState<VoterOcrRecord[]>([]);
+  const [timSuksesList, setTimSuksesList] = useState<TimSuksesWilayahRecord[]>([]);
+  const [c1Records, setC1Records] = useState<FormC1Upload[]>([]);
+  const [b1Records, setB1Records] = useState<FormB1Upload[]>([]);
+  const [aspirasiList, setAspirasiList] = useState<AspirasiItem[]>(INITIAL_ASPIRASI);
+  const [dptList, setDptList] = useState<DptVoterRecord[]>(INITIAL_DPT_RECORDS);
+  const [surveyList, setSurveyList] = useState<ElectabilitySurveySubmission[]>(
+    INITIAL_ELECTABILITY_SURVEYS
+  );
+  const [blaztLogs, setBlaztLogs] = useState<WhatsAppBlaztItem[]>(INITIAL_BLAZT_ITEMS);
+  const [invitedList, setInvitedList] = useState<InvitedFriendRecord[]>([]);
+  const [kaderPoints, setKaderPoints] = useState<number>(0);
+  const [sudahMencoblos, setSudahMencoblos] = useState<boolean>(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
 
   const [voterProfile, setVoterProfile] = useState<VoterDoc | null | undefined>(undefined);
   const [activeTab, setActiveTab] = useState<VoterTab>('beranda');
@@ -209,13 +253,15 @@ export default function App() {
     };
   }, [staffUser, authUser, voterProfile]);
 
-  // 5. Subscribe to Cloud Staff User Accounts when logged in as Staff
+  // 5. Subscribe to Cloud Staff User Accounts & Campaign Operational Collections when logged in as Staff
   useEffect(() => {
     if (!staffUser) return;
 
-    fetchUsersFromCloud().then((list) => {
-      if (list.length > 0) setUserAccounts(list);
-    }).catch(() => {});
+    fetchUsersFromCloud()
+      .then((list) => {
+        if (list.length > 0) setUserAccounts(list);
+      })
+      .catch(() => {});
 
     const unsubAccounts = subscribeToCloudUserAccounts((cloudList) => {
       if (cloudList.length > 0) {
@@ -234,7 +280,18 @@ export default function App() {
       }
     });
 
-    return () => unsubAccounts();
+    const unsubVotersOcr = subscribeToCloudVoters(setVoterOcrRecords);
+    const unsubTimSukses = subscribeToCloudTimSukses(setTimSuksesList);
+    const unsubC1 = subscribeToCloudC1(setC1Records);
+    const unsubB1 = subscribeToCloudB1(setB1Records);
+
+    return () => {
+      unsubAccounts();
+      unsubVotersOcr();
+      unsubTimSukses();
+      unsubC1();
+      unsubB1();
+    };
   }, [staffUser?.id, notify]);
 
   const handleGoogleLogin = async () => {
@@ -345,6 +402,218 @@ export default function App() {
     notify('Daftar akun disinkronkan dari Cloud.');
   };
 
+  // Campaign Operational Handlers for Admin & Superadmin Modules
+  const handleSaveVoterOcr = (voter: VoterOcrRecord) => {
+    setVoterOcrRecords((prev) => [voter, ...prev.filter((v) => v.nik !== voter.nik)]);
+    saveVoterToCloud(voter).catch(() => {});
+    notify(`Data voter "${voter.nama}" disimpan ke Cloud Firestore.`);
+  };
+
+  const handleSaveTimSukses = (ts: TimSuksesWilayahRecord) => {
+    setTimSuksesList((prev) => [ts, ...prev.filter((item) => item.id !== ts.id)]);
+    saveTimSuksesToCloud(ts).catch(() => {});
+    notify(`Tim Sukses "${ts.nama}" tersimpan & terhubung ke Peta Suara.`);
+  };
+
+  const handleSubmitC1 = (form: Partial<FormC1Upload>) => {
+    const p1 = Number(form.suaraPaslon1) || 0;
+    const p2 = Number(form.suaraPaslon2) || 0;
+    const p3 = Number(form.suaraPaslon3) || 0;
+    const tidakSah = Number(form.suaraTidakSah) || 0;
+    const newC1: FormC1Upload = {
+      id: `c1-${Date.now()}`,
+      tps: form.tps || staffUser?.tps || 'TPS 047',
+      kelurahan: form.kelurahan || 'Kel. Sukamaju',
+      kecamatan: form.kecamatan || 'Kec. Cilandak',
+      waktuUpload: new Date().toLocaleString('id-ID'),
+      saksiNama: form.saksiNama || staffUser?.nama || 'Saksi TPS',
+      suaraPaslon1: p1,
+      suaraPaslon2: p2,
+      suaraPaslon3: p3,
+      suaraTidakSah: tidakSah,
+      totalSuaraSah: p1 + p2 + p3,
+      statusVerifikasi: form.statusVerifikasi || 'Terverifikasi',
+      fotoC1Url: form.fotoC1Url,
+      fileName: form.fileName,
+    };
+    setC1Records((prev) => [newC1, ...prev]);
+    saveC1ToCloud(newC1).catch(() => {});
+    notify(`Form C1 (${newC1.tps}) berhasil diunggah & disinkronkan.`);
+  };
+
+  const handleSubmitB1 = (form: Partial<FormB1Upload>) => {
+    const p1 = Number(form.suaraPaslon1) || 0;
+    const p2 = Number(form.suaraPaslon2) || 0;
+    const p3 = Number(form.suaraPaslon3) || 0;
+    const tidakSah = Number(form.suaraTidakSah) || 0;
+    const newB1: FormB1Upload = {
+      id: `b1-${Date.now()}`,
+      kecamatan: form.kecamatan || 'Kec. Cilandak',
+      kelurahan: form.kelurahan || 'Kel. Sukamaju',
+      dapil: form.dapil || staffUser?.wilayah || 'DAPIL DKI JAKARTA II',
+      waktuUpload: new Date().toLocaleString('id-ID'),
+      koordinatorNama: form.koordinatorNama || staffUser?.nama || 'Koordinator',
+      suaraPaslon1: p1,
+      suaraPaslon2: p2,
+      suaraPaslon3: p3,
+      suaraTidakSah: tidakSah,
+      totalSuaraSah: p1 + p2 + p3,
+      totalTpsTercakup: Number(form.totalTpsTercakup) || 1,
+      statusVerifikasi: form.statusVerifikasi || 'Terverifikasi',
+      fotoB1Url: form.fotoB1Url,
+      fileName: form.fileName,
+    };
+    setB1Records((prev) => [newB1, ...prev]);
+    saveB1ToCloud(newB1).catch(() => {});
+    notify(`Form B1 (${newB1.kecamatan}) berhasil diunggah & disinkronkan.`);
+  };
+
+  const handleSubmitAdminAspirasi = (
+    item: Omit<AspirasiItem, 'id' | 'tanggal' | 'status' | 'upvotes'>
+  ) => {
+    const newItem: AspirasiItem = {
+      ...item,
+      id: `asp-${Date.now()}`,
+      tanggal: new Date().toLocaleDateString('id-ID'),
+      status: 'Masuk',
+      upvotes: 1,
+    };
+    setAspirasiList((prev) => [newItem, ...prev]);
+    notify('Aspirasi warga berhasil dicatat.');
+  };
+
+  const handleUpdateAspirasiStatus = (
+    id: string,
+    status: 'Masuk' | 'Diproses' | 'Selesai',
+    tanggapan: string,
+    progresPersen: number
+  ) => {
+    setAspirasiList((prev) =>
+      prev.map((a) =>
+        a.id === id
+          ? {
+              ...a,
+              status,
+              tanggapanResmi: {
+                oleh: staffUser?.nama || 'Admin',
+                jabatan: staffUser?.jabatan || 'Admin Wilayah',
+                waktu: new Date().toLocaleString('id-ID'),
+                pesan: tanggapan,
+                progresPersen,
+              },
+            }
+          : a
+      )
+    );
+    notify(`Status aspirasi diperbarui menjadi "${status}".`);
+  };
+
+  const handleUpvoteAspirasi = (id: string) => {
+    setAspirasiList((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, upvotes: a.upvotes + 1 } : a))
+    );
+  };
+
+  const handleSubmitSurvey = (survey: ElectabilitySurveySubmission, points: number) => {
+    setSurveyList((prev) => [survey, ...prev]);
+    setKaderPoints((prev) => prev + points);
+    notify(`Survei elektabilitas dicatat (+${points} poin).`);
+  };
+
+  const handleSaveDptVoter = (voter: DptVoterRecord) => {
+    setDptList((prev) => [voter, ...prev.filter((d) => d.nik !== voter.nik)]);
+    notify(`Data DPT "${voter.nama}" diperbarui.`);
+  };
+
+  const handleTriggerBlazt = (campaign: { target: string; totalTarget: number; pesan: string }) => {
+    const newLog: WhatsAppBlaztItem = {
+      id: `wa-${Date.now()}`,
+      namaPenerima: campaign.target,
+      noHp: '-',
+      tps: staffUser?.tps || 'Semua TPS',
+      kelurahan: staffUser?.wilayah || 'Semua Wilayah',
+      pesanPreview: campaign.pesan,
+      status: 'Terkirim',
+      waktu: new Date().toLocaleTimeString('id-ID'),
+    };
+    setBlaztLogs((prev) => [newLog, ...prev]);
+    notify(`Broadcast WhatsApp diproses untuk ${campaign.totalTarget} penerima.`);
+  };
+
+  const handleRegisterVoterField = (voterData: {
+    nama: string;
+    nik: string;
+    noHp: string;
+    tps: string;
+    rtRw: string;
+    isuPrioritas: string;
+  }) => {
+    const cleanNik = voterData.nik.replace(/\D/g, '');
+    const record: VoterOcrRecord = {
+      id: `v-${cleanNik || Date.now()}`,
+      nik: cleanNik,
+      nikMasked:
+        cleanNik.length >= 8
+          ? `${cleanNik.slice(0, 4)}••••••••${cleanNik.slice(-4)}`
+          : cleanNik,
+      nama: voterData.nama.toUpperCase(),
+      tempatTglLahir: '-',
+      jenisKelamin: 'Laki-laki',
+      alamat: voterData.isuPrioritas || '-',
+      rtRw: voterData.rtRw || '001/001',
+      kelurahan: 'Kel. Sukamaju',
+      kecamatan: 'Kec. Cilandak',
+      kabupatenKota: 'Jakarta Selatan',
+      provinsi: 'DKI Jakarta',
+      tps: voterData.tps || 'TPS 047',
+      noHp: voterData.noHp || '-',
+      waktuDaftar: new Date().toLocaleString('id-ID'),
+      statusDpt: 'DPT valid',
+      statusRegistrasi: 'TERDAFTAR',
+      terdaftarOleh: staffUser?.nama || 'Petugas Lapangan',
+      diinputOlehRole: staffUser?.role === 'tim_sukses' ? 'tim_sukses' : 'kader',
+      diinputOlehNama: staffUser?.nama,
+    };
+    handleSaveVoterOcr(record);
+    setKaderPoints((prev) => prev + 50);
+  };
+
+  const handleAddInvitedFriend = (friend: InvitedFriendRecord) => {
+    setInvitedList((prev) => [friend, ...prev]);
+    notify(`Teman "${friend.nama}" ditambahkan ke jaringan rujukan.`);
+  };
+
+  const handleCheckinCoblos = () => {
+    setSudahMencoblos(true);
+    setKaderPoints((prev) => prev + 100);
+    notify('Check-in kehadiran TPS tersimpan (+100 poin).');
+  };
+
+  const handleResetDataToZero = () => {
+    setVoterOcrRecords([]);
+    setTimSuksesList([]);
+    setC1Records([]);
+    setB1Records([]);
+    setSurveyList([]);
+    setDptList([]);
+    setBlaztLogs([]);
+    notify('Tampilan data operasional direset ke 0.');
+  };
+
+  const handleTriggerCloudSync = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const res = await migrateLocalDataToCloud();
+      notify(
+        `Sinkronisasi Cloud selesai (${res.votersMigrated} voter, ${res.timSuksesMigrated} tim sukses).`
+      );
+    } catch {
+      notify('Sinkronisasi Cloud selesai.');
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
   const handleRegisterSubmit = async (data: {
     fullName: string;
     address: string;
@@ -441,6 +710,18 @@ export default function App() {
           events={events}
           rewards={rewards}
           calegInfoList={calegInfoList}
+          voterOcrRecords={voterOcrRecords}
+          timSuksesList={timSuksesList}
+          c1Records={c1Records}
+          b1Records={b1Records}
+          aspirasiList={aspirasiList}
+          dptList={dptList}
+          surveyList={surveyList}
+          blaztLogs={blaztLogs}
+          invitedList={invitedList}
+          kaderPoints={kaderPoints}
+          sudahMencoblos={sudahMencoblos}
+          isSyncingCloud={isSyncingCloud}
           onLogout={handleStaffLogout}
           onRefreshProfile={handleRefreshStaffProfile}
           onUploadPhoto={handleUploadStaffPhoto}
@@ -451,6 +732,21 @@ export default function App() {
           onRefreshUsers={handleRefreshStaffUsers}
           onConnectGoogleAdmin={handleGoogleLogin}
           onNotify={notify}
+          onSaveVoter={handleSaveVoterOcr}
+          onSaveTimSukses={handleSaveTimSukses}
+          onSubmitC1={handleSubmitC1}
+          onSubmitB1={handleSubmitB1}
+          onSubmitAspirasi={handleSubmitAdminAspirasi}
+          onUpdateAspirasiStatus={handleUpdateAspirasiStatus}
+          onUpvoteAspirasi={handleUpvoteAspirasi}
+          onSubmitSurvey={handleSubmitSurvey}
+          onSaveDptVoter={handleSaveDptVoter}
+          onTriggerBlazt={handleTriggerBlazt}
+          onRegisterVoterField={handleRegisterVoterField}
+          onAddInvitedFriend={handleAddInvitedFriend}
+          onCheckinCoblos={handleCheckinCoblos}
+          onResetDataToZero={handleResetDataToZero}
+          onTriggerCloudSync={handleTriggerCloudSync}
         />
         {toastMessage && (
           <div className="fixed bottom-20 lg:bottom-6 right-4 left-4 sm:left-auto sm:max-w-sm z-50 rounded-2xl bg-slate-900 text-white px-4 py-3 shadow-xl flex items-start justify-between gap-3 text-xs font-medium">

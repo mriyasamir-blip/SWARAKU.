@@ -67,6 +67,7 @@ export const WhatsAppBlaztModal: React.FC<WhatsAppBlaztModalProps> = ({
   const [progress, setProgress] = useState(0);
   const [sentSuccess, setSentSuccess] = useState(false);
   const [connectedNumber, setConnectedNumber] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -134,8 +135,9 @@ export const WhatsAppBlaztModal: React.FC<WhatsAppBlaztModalProps> = ({
     .replace('{kandidat}', 'Paslon 01');
 
   const handleStartBlazt = () => {
+    setFormError(null);
     if (phoneList.length === 0) {
-      alert('Mohon masukkan minimal 1 nomor telepon penerima terlebih dahulu.');
+      setFormError('Mohon masukkan minimal 1 nomor telepon penerima terlebih dahulu.');
       return;
     }
 
@@ -443,6 +445,13 @@ export const WhatsAppBlaztModal: React.FC<WhatsAppBlaztModalProps> = ({
                 style={{ width: `${progress}%` }}
               ></div>
             </div>
+          </div>
+        )}
+
+        {formError && (
+          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-bold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{formError}</span>
           </div>
         )}
 

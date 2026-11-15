@@ -54,6 +54,8 @@ export const TambahNikUndangTemanModal: React.FC<TambahNikUndangTemanModalProps>
 
   const [copiedLink, setCopiedLink] = useState(false);
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [waInviteHref, setWaInviteHref] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -105,12 +107,13 @@ export const TambahNikUndangTemanModal: React.FC<TambahNikUndangTemanModalProps>
 
   const handleSubmit = (e: React.FormEvent, sendViaWa: boolean = false) => {
     e.preventDefault();
+    setFormError(null);
     if (nikInput.length < 16) {
-      alert('Mohon masukkan 16 digit NIK secara lengkap.');
+      setFormError('Mohon masukkan 16 digit NIK secara lengkap.');
       return;
     }
     if (!namaInput.trim()) {
-      alert('Mohon isi nama teman.');
+      setFormError('Mohon isi nama teman.');
       return;
     }
 
@@ -136,7 +139,9 @@ export const TambahNikUndangTemanModal: React.FC<TambahNikUndangTemanModalProps>
     if (sendViaWa && noHpInput) {
       const cleanPhone = noHpInput.replace(/\D/g, '').replace(/^0/, '62');
       const waMsg = generateWaMessage(namaInput, tpsInput, kelurahanInput);
-      window.open(`https://wa.me/${cleanPhone}?text=${waMsg}`, '_blank');
+      setWaInviteHref(`https://wa.me/${cleanPhone}?text=${waMsg}`);
+    } else {
+      setWaInviteHref(null);
     }
 
     setTimeout(() => {
@@ -220,10 +225,29 @@ export const TambahNikUndangTemanModal: React.FC<TambahNikUndangTemanModalProps>
         {/* TAB 1: FORM INPUT MANUAL NIK */}
         {activeTab === 'input_nik' && (
           <form onSubmit={(e) => handleSubmit(e, false)} className="space-y-3.5 text-xs">
+            {formError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-rose-800 text-xs font-bold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{formError}</span>
+              </div>
+            )}
+
             {submittedSuccess && (
-              <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-800 text-xs font-bold flex items-center gap-2 animate-in fade-in">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Data teman berhasil ditambahkan ke jaringan rujukan Anda!</span>
+              <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-800 text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Data teman berhasil ditambahkan ke jaringan rujukan Anda!</span>
+                </div>
+                {waInviteHref && (
+                  <a
+                    href={waInviteHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-[11px] font-bold shrink-0"
+                  >
+                    Buka WA
+                  </a>
+                )}
               </div>
             )}
 
@@ -486,18 +510,17 @@ export const TambahNikUndangTemanModal: React.FC<TambahNikUndangTemanModalProps>
               </button>
             </div>
 
-            <button
-              onClick={() => {
-                const waUrl = `https://wa.me/?text=${encodeURIComponent(
-                  `Halo kawan! Yuk bergabung mengawal pemilu bersama di platform SWARAKU:\n${referralLink}\nKode Referral: ${profile.referralCode}`
-                )}`;
-                window.open(waUrl, '_blank');
-              }}
+            <a
+              href={`https://wa.me/?text=${encodeURIComponent(
+                `Halo kawan! Yuk bergabung mengawal pemilu bersama di platform SWARAKU:\n${referralLink}\nKode Referral: ${profile.referralCode}`
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Share2 className="w-3.5 h-3.5" />
               <span>Bagikan Link via WhatsApp</span>
-            </button>
+            </a>
           </div>
         )}
       </div>

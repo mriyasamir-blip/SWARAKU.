@@ -180,6 +180,35 @@ service cloud.firestore {
       allow delete: if isValidId(userId);
     }
 
+    // DATA VOTERS OCR & PETA SUARA (Tim Kampanye & Admin)
+    match /voter_ocr_records/{recordId} {
+      allow get: if isValidId(recordId);
+      allow list: if true;
+      allow create, update: if isValidId(recordId) && incoming().keys().hasAll(['nik', 'nama']);
+      allow delete: if isValidId(recordId);
+    }
+
+    match /tim_sukses_members/{memberId} {
+      allow get: if isValidId(memberId);
+      allow list: if true;
+      allow create, update: if isValidId(memberId) && incoming().keys().hasAll(['id', 'nama']);
+      allow delete: if isValidId(memberId);
+    }
+
+    match /c1_records/{recordId} {
+      allow get: if isValidId(recordId);
+      allow list: if true;
+      allow create, update: if isValidId(recordId) && incoming().keys().hasAll(['id', 'tps']);
+      allow delete: if isValidId(recordId);
+    }
+
+    match /b1_records/{recordId} {
+      allow get: if isValidId(recordId);
+      allow list: if true;
+      allow create, update: if isValidId(recordId) && incoming().keys().hasAll(['id', 'kecamatan']);
+      allow delete: if isValidId(recordId);
+    }
+
     // VOTERS (PII Isolated: Owner & Superadmin only)
     match /voters/{uid} {
       allow get: if isValidId(uid) && (isOwner(uid) || isSuperAdmin());

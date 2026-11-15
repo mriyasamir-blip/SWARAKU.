@@ -23,13 +23,21 @@ import { PRESET_ACCOUNTS } from '../data/accountsData';
 import { resolveAccurateCoordinates, lookupSmartCoordinates } from '../utils/geocoding';
 
 export const CLOUD_COLLECTIONS = {
-  VOTERS: 'voters',
+  VOTERS: 'voter_ocr_records',
   TIM_SUKSES: 'tim_sukses_members',
   C1_RECORDS: 'c1_records',
   B1_RECORDS: 'b1_records',
   USER_ACCOUNTS: 'user_accounts',
   SYNC_METADATA: 'sync_metadata',
 } as const;
+
+function cleanForFirestore<T extends Record<string, any>>(obj: T): Record<string, any> {
+  const out: Record<string, any> = {};
+  Object.keys(obj).forEach((k) => {
+    if (obj[k] !== undefined) out[k] = obj[k];
+  });
+  return out;
+}
 
 export const LOCAL_CACHE_KEYS = {
   VOTERS: 'swaraku_voter_ocr_records',
@@ -598,10 +606,10 @@ export async function saveVoterToCloud(
     const docRef = doc(firestore, CLOUD_COLLECTIONS.VOTERS, cleanNik);
     await setDoc(
       docRef,
-      {
+      cleanForFirestore({
         ...payload,
         updatedAt: new Date().toISOString(),
-      },
+      }),
       { merge: true }
     );
   } catch (firestoreErr) {
@@ -635,10 +643,10 @@ export async function saveTimSuksesToCloud(ts: TimSuksesWilayahRecord): Promise<
     const docRef = doc(firestore, CLOUD_COLLECTIONS.TIM_SUKSES, ts.id);
     await setDoc(
       docRef,
-      {
+      cleanForFirestore({
         ...ts,
         updatedAt: new Date().toISOString(),
-      },
+      }),
       { merge: true }
     );
   } catch (e) {
@@ -663,10 +671,10 @@ export async function saveC1ToCloud(c1: FormC1Upload): Promise<void> {
     const docRef = doc(firestore, CLOUD_COLLECTIONS.C1_RECORDS, c1.id);
     await setDoc(
       docRef,
-      {
+      cleanForFirestore({
         ...c1,
         updatedAt: new Date().toISOString(),
-      },
+      }),
       { merge: true }
     );
   } catch (e) {
@@ -691,10 +699,10 @@ export async function saveB1ToCloud(b1: FormB1Upload): Promise<void> {
     const docRef = doc(firestore, CLOUD_COLLECTIONS.B1_RECORDS, b1.id);
     await setDoc(
       docRef,
-      {
+      cleanForFirestore({
         ...b1,
         updatedAt: new Date().toISOString(),
-      },
+      }),
       { merge: true }
     );
   } catch (e) {

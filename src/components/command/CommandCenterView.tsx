@@ -163,6 +163,14 @@ export const CommandCenterView: React.FC<CommandCenterViewProps> = ({
   const pctPaslon2 = grandTotalSah > 0 ? ((totalPaslon2 / grandTotalSah) * 100).toFixed(1) : '0.0';
   const pctPaslon3 = grandTotalSah > 0 ? ((totalPaslon3 / grandTotalSah) * 100).toFixed(1) : '0.0';
 
+  const [inlineToast, setInlineToast] = useState<string | null>(null);
+  const [confirmClearModal, setConfirmClearModal] = useState(false);
+
+  const showToast = (msg: string) => {
+    setInlineToast(msg);
+    window.setTimeout(() => setInlineToast(null), 3500);
+  };
+
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedAspirasi) return;
@@ -174,11 +182,50 @@ export const CommandCenterView: React.FC<CommandCenterViewProps> = ({
         'Aspirasi telah ditindaklanjuti oleh tim kerja SWARAKU.',
       progressInput
     );
-    alert(`Status aspirasi "${selectedAspirasi.judul}" berhasil diperbarui ke "${statusSelect}"!`);
+    showToast(`Status aspirasi "${selectedAspirasi.judul}" berhasil diperbarui ke "${statusSelect}"!`);
   };
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+      {inlineToast && (
+        <div className="rounded-2xl bg-slate-900 text-white px-4 py-3 text-xs font-bold flex items-center justify-between gap-3 shadow-md">
+          <span>{inlineToast}</span>
+          <button type="button" onClick={() => setInlineToast(null)} className="text-slate-400 hover:text-white cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {confirmClearModal && onClearAllData && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 border border-slate-200 shadow-xl">
+            <h3 className="text-base font-extrabold text-slate-900">Kosongkan Data Command Center?</h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Semua data Quick Count C1 &amp; B1, DPT, Survei, WhatsApp Blazt, dan Aspirasi akan direset ke nol.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmClearModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onClearAllData();
+                  setConfirmClearModal(false);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
+              >
+                Ya, Kosongkan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Banner */}
       <div className="p-6 bg-gradient-to-r from-sky-50 via-cyan-50 to-white text-slate-900 rounded-3xl border border-cyan-200/80 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div>
@@ -198,11 +245,7 @@ export const CommandCenterView: React.FC<CommandCenterViewProps> = ({
         <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
           {onClearAllData && (
             <button
-              onClick={() => {
-                if (window.confirm('Kosongkan semua data Command Center (Quick Count C1 & B1, DPT, Survei, WhatsApp Blazt, dan Aspirasi)? Tabulasi akan kembali bersih dari nol.')) {
-                  onClearAllData();
-                }
-              }}
+              onClick={() => setConfirmClearModal(true)}
               className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
               title="Kosongkan seluruh data Command Center"
             >
@@ -1466,7 +1509,7 @@ export const CommandCenterView: React.FC<CommandCenterViewProps> = ({
                   <span>Kesiapan Gudang Logistik Kampanye</span>
                 </h4>
                 <button
-                  onClick={() => alert('📄 Form Pengajuan Logistik Tambahan (SPPL) telah dicetak!')}
+                  onClick={() => showToast('Form Pengajuan Logistik Tambahan (SPPL) siap dicetak.')}
                   className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg flex items-center gap-1 text-[11px] cursor-pointer"
                 >
                   <Printer className="w-3 h-3 text-cyan-600" />
