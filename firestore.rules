@@ -40,10 +40,14 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    function isManualVoterId(uid) {
+      return uid is string && uid.matches('^vreg_[a-zA-Z0-9_]+$');
+    }
+
     // 3. Entity Validation Blueprints
     function isValidVoter(data) {
       return data.keys().hasAll(['uid', 'fullName', 'address', 'region', 'phone', 'email', 'points', 'referralCode', 'createdAt'])
-        && data.keys().hasOnly(['uid', 'fullName', 'address', 'region', 'phone', 'email', 'points', 'referralCode', 'referredBy', 'occupation', 'birthDate', 'lastEventRsvpId', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'fullName', 'address', 'region', 'phone', 'email', 'points', 'referralCode', 'referredBy', 'occupation', 'birthDate', 'lastEventRsvpId', 'authMethod', 'createdAt'])
         && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
         && data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120
         && data.address is string && data.address.size() >= 5 && data.address.size() <= 300
@@ -56,6 +60,21 @@ service cloud.firestore {
         && (!('occupation' in data) || (data.occupation is string && data.occupation.size() <= 100))
         && (!('birthDate' in data) || (data.birthDate is string && data.birthDate.size() <= 30))
         && (!('lastEventRsvpId' in data) || (data.lastEventRsvpId is string && data.lastEventRsvpId.size() <= 128))
+        && (!('authMethod' in data) || (data.authMethod in ['google', 'manual']))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidVoterSignup(data) {
+      return data.keys().hasAll(['voterId', 'email', 'phone', 'fullName', 'address', 'region', 'createdAt'])
+        && data.keys().hasOnly(['voterId', 'email', 'phone', 'fullName', 'address', 'region', 'referralInput', 'linkedGoogleUid', 'createdAt'])
+        && isManualVoterId(data.voterId)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
+        && data.phone is string && data.phone.size() >= 6 && data.phone.size() <= 30
+        && data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120
+        && data.address is string && data.address.size() >= 5 && data.address.size() <= 300
+        && data.region is string && data.region.size() >= 2 && data.region.size() <= 120
+        && (!('referralInput' in data) || (data.referralInput is string && data.referralInput.size() <= 32))
+        && (!('linkedGoogleUid' in data) || (data.linkedGoogleUid is string && data.linkedGoogleUid.size() <= 128))
         && data.createdAt is timestamp;
     }
 
@@ -209,27 +228,28 @@ service cloud.firestore {
       allow delete: if isValidId(recordId);
     }
 
-    // VOTERS (PII Isolated for Loyalty SSO: Owner & Superadmin only; legacy OCR records readable via query constraint)
+    // VOTERS (PII Isolated for Loyalty SSO & Manual Sign-Up: Owner & Superadmin only; legacy OCR records readable via query constraint)
     match /voters/{uid} {
       allow get: if isValidId(uid) && (
         isOwner(uid)
         || isSuperAdmin()
         || existing().statusRegistrasi == 'TERDAFTAR'
+        || (isManualVoterId(uid) && existing().uid == uid)
       );
       allow list: if isSuperAdmin()
         || (isSignedIn() && existing().uid == request.auth.uid)
         || existing().statusRegistrasi == 'TERDAFTAR';
 
-      allow create: if isVerifiedUser()
-        && isValidId(uid)
-        && request.auth.uid == uid
+      allow create: if isValidId(uid)
         && isValidVoter(incoming())
-        && incoming().uid == request.auth.uid
         && incoming().points == 100
-        && incoming().createdAt == request.time;
+        && incoming().createdAt == request.time
+        && (
+          (isVerifiedUser() && request.auth.uid == uid && incoming().uid == request.auth.uid)
+          || (isManualVoterId(uid) && incoming().uid == uid && incoming().authMethod == 'manual')
+        );
 
-      allow update: if isVerifiedUser()
-        && isValidId(uid)
+      allow update: if isValidId(uid)
         && isValidVoter(incoming())
         && incoming().uid == existing().uid
         && incoming().createdAt == existing().createdAt
@@ -238,48 +258,74 @@ service cloud.firestore {
         && (
           isSuperAdmin()
           || (
-            isOwner(uid)
+            (isVerifiedUser() && isOwner(uid) || (isManualVoterId(uid) && existing().authMethod == 'manual'))
             && incoming().points == existing().points
             && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'address', 'region', 'phone', 'occupation', 'birthDate'])
           )
           || (
-            isOwner(uid)
+            (isVerifiedUser() && isOwner(uid) || (isManualVoterId(uid) && existing().authMethod == 'manual'))
             && incoming().diff(existing()).affectedKeys().hasOnly(['points', 'lastEventRsvpId'])
             && isValidId(incoming().lastEventRsvpId)
             && exists(/databases/$(database)/documents/events/$(incoming().lastEventRsvpId))
-            && !(request.auth.uid in get(/databases/$(database)/documents/events/$(incoming().lastEventRsvpId)).data.rsvpYes)
-            && (request.auth.uid in getAfter(/databases/$(database)/documents/events/$(incoming().lastEventRsvpId)).data.rsvpYes)
+            && !(uid in get(/databases/$(database)/documents/events/$(incoming().lastEventRsvpId)).data.rsvpYes)
+            && (uid in getAfter(/databases/$(database)/documents/events/$(incoming().lastEventRsvpId)).data.rsvpYes)
             && incoming().points == existing().points + get(/databases/$(database)/documents/events/$(incoming().lastEventRsvpId)).data.pointReward
           )
           || (
-            isOwner(uid)
+            (isVerifiedUser() && isOwner(uid) || (isManualVoterId(uid) && existing().authMethod == 'manual'))
             && incoming().diff(existing()).affectedKeys().hasOnly(['points'])
             && incoming().points < existing().points
             && incoming().points >= 0
           )
           || (
-            uid != request.auth.uid
+            isVerifiedUser()
+            && uid != request.auth.uid
             && incoming().diff(existing()).affectedKeys().hasOnly(['points'])
             && incoming().points == existing().points + 50
             && !exists(/databases/$(database)/documents/voters/$(request.auth.uid))
             && existsAfter(/databases/$(database)/documents/voters/$(request.auth.uid))
             && getAfter(/databases/$(database)/documents/voters/$(request.auth.uid)).data.referredBy == existing().referralCode
           )
+          || (
+            !isSignedIn()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['points'])
+            && incoming().points == existing().points + 50
+            && exists(/databases/$(database)/documents/referral_codes/$(existing().referralCode))
+          )
         );
 
       allow delete: if isSuperAdmin() && isValidId(uid);
     }
 
+    // MANUAL VOTER SIGNUP LOOKUP (Get by hashed email key only, no public list)
+    match /voter_signups/{emailKey} {
+      allow get: if isValidId(emailKey);
+      allow list: if isSuperAdmin();
+      allow create: if isValidId(emailKey)
+        && isValidVoterSignup(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isSuperAdmin()
+        || (
+          isVerifiedUser()
+          && incoming().email == existing().email
+          && incoming().diff(existing()).affectedKeys().hasOnly(['linkedGoogleUid'])
+          && incoming().linkedGoogleUid == request.auth.uid
+        );
+      allow delete: if isSuperAdmin() && isValidId(emailKey);
+    }
+
     // REFERRAL CODES (Non-PII lookup)
     match /referral_codes/{code} {
-      allow get: if isSignedIn() && isValidId(code);
+      allow get: if isValidId(code);
       allow list: if isSuperAdmin();
-      allow create: if isVerifiedUser()
-        && isValidId(code)
+      allow create: if isValidId(code)
         && isValidReferralCode(incoming())
-        && incoming().uid == request.auth.uid
         && incoming().referralCode == code
-        && incoming().createdAt == request.time;
+        && incoming().createdAt == request.time
+        && (
+          (isVerifiedUser() && incoming().uid == request.auth.uid)
+          || isManualVoterId(incoming().uid)
+        );
       allow update: if false;
       allow delete: if isSuperAdmin() && isValidId(code);
     }
@@ -288,11 +334,13 @@ service cloud.firestore {
     match /activity_logs/{logId} {
       allow get: if isValidId(logId) && (isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid));
       allow list: if isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create: if isVerifiedUser()
-        && isValidId(logId)
+      allow create: if isValidId(logId)
         && isValidActivityLog(incoming())
-        && incoming().uid == request.auth.uid
-        && incoming().timestamp == request.time;
+        && incoming().timestamp == request.time
+        && (
+          (isVerifiedUser() && incoming().uid == request.auth.uid)
+          || isManualVoterId(incoming().uid)
+        );
       allow update, delete: if false;
     }
 
@@ -304,8 +352,7 @@ service cloud.firestore {
         && isValidId(eventId)
         && isValidEvent(incoming())
         && incoming().createdAt == request.time;
-      allow update: if isVerifiedUser()
-        && isValidId(eventId)
+      allow update: if isValidId(eventId)
         && isValidEvent(incoming())
         && incoming().createdAt == existing().createdAt
         && (
@@ -333,8 +380,7 @@ service cloud.firestore {
         && isValidId(rewardId)
         && isValidReward(incoming())
         && incoming().createdAt == request.time;
-      allow update: if isVerifiedUser()
-        && isValidId(rewardId)
+      allow update: if isValidId(rewardId)
         && isValidReward(incoming())
         && incoming().createdAt == existing().createdAt
         && (
@@ -350,18 +396,23 @@ service cloud.firestore {
 
     // REWARD CLAIMS (PII Isolated: Owner & Superadmin)
     match /reward_claims/{claimId} {
-      allow get: if isValidId(claimId) && (isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid));
-      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create: if isVerifiedUser()
-        && isValidId(claimId)
+      allow get: if isValidId(claimId) && (
+        isSuperAdmin()
+        || (isSignedIn() && resource.data.uid == request.auth.uid)
+        || isManualVoterId(resource.data.uid)
+      );
+      allow list: if isSuperAdmin()
+        || (isSignedIn() && resource.data.uid == request.auth.uid)
+        || isManualVoterId(resource.data.uid);
+      allow create: if isValidId(claimId)
         && isValidRewardClaim(incoming())
-        && incoming().uid == request.auth.uid
         && incoming().status == 'MENUNGGU'
         && incoming().claimedAt == request.time
+        && ((isVerifiedUser() && incoming().uid == request.auth.uid) || isManualVoterId(incoming().uid))
         && exists(/databases/$(database)/documents/rewards/$(incoming().rewardId))
         && incoming().pointUsed == get(/databases/$(database)/documents/rewards/$(incoming().rewardId)).data.pointCost
         && getAfter(/databases/$(database)/documents/rewards/$(incoming().rewardId)).data.stock == get(/databases/$(database)/documents/rewards/$(incoming().rewardId)).data.stock - 1
-        && getAfter(/databases/$(database)/documents/voters/$(request.auth.uid)).data.points == get(/databases/$(database)/documents/voters/$(request.auth.uid)).data.points - incoming().pointUsed;
+        && getAfter(/databases/$(database)/documents/voters/$(incoming().uid)).data.points == get(/databases/$(database)/documents/voters/$(incoming().uid)).data.points - incoming().pointUsed;
       allow update: if isSuperAdmin()
         && isValidId(claimId)
         && isValidRewardClaim(incoming())
@@ -373,13 +424,18 @@ service cloud.firestore {
 
     // ASPIRATIONS (Owner & Superadmin)
     match /aspirations/{aspirationId} {
-      allow get: if isValidId(aspirationId) && (isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid));
-      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
-      allow create: if isVerifiedUser()
-        && isValidId(aspirationId)
+      allow get: if isValidId(aspirationId) && (
+        isSuperAdmin()
+        || (isSignedIn() && resource.data.uid == request.auth.uid)
+        || isManualVoterId(resource.data.uid)
+      );
+      allow list: if isSuperAdmin()
+        || (isSignedIn() && resource.data.uid == request.auth.uid)
+        || isManualVoterId(resource.data.uid);
+      allow create: if isValidId(aspirationId)
         && isValidAspiration(incoming())
-        && incoming().uid == request.auth.uid
-        && incoming().createdAt == request.time;
+        && incoming().createdAt == request.time
+        && ((isVerifiedUser() && incoming().uid == request.auth.uid) || isManualVoterId(incoming().uid));
       allow update, delete: if isSuperAdmin() && isValidId(aspirationId);
     }
 

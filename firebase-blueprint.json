@@ -17,9 +17,27 @@
         "occupation": { "type": "string", "maxLength": 100 },
         "birthDate": { "type": "string", "maxLength": 30 },
         "lastEventRsvpId": { "type": "string", "maxLength": 128 },
+        "authMethod": { "type": "string", "enum": ["google", "manual"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "fullName", "address", "region", "phone", "email", "points", "referralCode", "createdAt"]
+    },
+    "VoterSignupLookup": {
+      "title": "VoterSignupLookup",
+      "description": "Indeks pendaftaran manual pemilih berdasarkan email terenkode untuk login & penautan SSO Google",
+      "type": "object",
+      "properties": {
+        "voterId": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 150 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "address": { "type": "string", "maxLength": 300 },
+        "region": { "type": "string", "maxLength": 120 },
+        "referralInput": { "type": "string", "maxLength": 32 },
+        "linkedGoogleUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["voterId", "email", "phone", "fullName", "address", "region", "createdAt"]
     },
     "UserAccount": {
       "title": "UserAccount",
@@ -154,6 +172,10 @@
     "/voters/{uid}": {
       "schema": { "$ref": "#/entities/Voter" },
       "description": "Profil dan saldo poin pemilih"
+    },
+    "/voter_signups/{emailKey}": {
+      "schema": { "$ref": "#/entities/VoterSignupLookup" },
+      "description": "Lookup pendaftaran manual pemilih per email"
     },
     "/user_accounts/{userId}": {
       "schema": { "$ref": "#/entities/UserAccount" },

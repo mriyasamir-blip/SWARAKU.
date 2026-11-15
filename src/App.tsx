@@ -13,11 +13,14 @@ import {
 } from 'lucide-react';
 import { auth } from './lib/firebase';
 import {
+  findAndLinkPreRegisteredVoter,
   isSuperAdminEmail,
+  loginManualVoter,
   loginWithGoogleSSO,
   logoutFirebase,
   recordLoginActivity,
   redeemRewardAtomic,
+  registerManualVoterProfile,
   registerVoterProfile,
   rsvpEventAtomic,
   submitAspiration,
@@ -94,6 +97,7 @@ import { PWAInstallButton } from './components/pwa/PWAInstallButton';
 import { OfflineIndicator } from './components/pwa/OfflineIndicator';
 
 const STAFF_SESSION_KEY = 'swaraku_current_user_session';
+const MANUAL_VOTER_SESSION_KEY = 'swaraku_manual_voter_id';
 
 function readSavedStaffSession(): UserAccount | null {
   if (typeof window === 'undefined') return null;
@@ -108,11 +112,22 @@ function readSavedStaffSession(): UserAccount | null {
   }
 }
 
+function readSavedManualVoterId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(MANUAL_VOTER_SESSION_KEY);
+    return raw && raw.startsWith('vreg_') ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [manualVoterId, setManualVoterId] = useState<string | null>(() => readSavedManualVoterId());
 
   // Staff Session (Kader, Tim Sukses, Admin, Super Admin)
   const [staffUser, setStaffUser] = useState<UserAccount | null>(() => readSavedStaffSession());
@@ -200,12 +215,14 @@ export default function App() {
       .catch(() => {});
   }, []);
 
+  const activeVoterUid = !staffUser ? authUser?.uid || manualVoterId : null;
+
   // 1. Firebase Auth Listener
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setAuthUser(user);
       setAuthReady(true);
-      if (!user) {
+      if (!user && !readSavedManualVoterId()) {
         setVoterProfile(undefined);
         loggedLoginForUidRef.current = null;
         setActiveTab('beranda');
@@ -214,17 +231,33 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // 2. Real-time Voter Profile Subscription when authenticated (unless using Staff Portal)
+  // 2. Real-time Voter Profile Subscription when authenticated (Google SSO OR Manual Sign-Up)
+  const linkedAttemptedForUidRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!authUser || staffUser) return;
+    if (!activeVoterUid || staffUser) return;
 
     setVoterProfile(undefined);
     const unsubVoter = subscribeVoterProfile(
-      authUser.uid,
+      activeVoterUid,
       (profile) => {
+        if (!profile && authUser && linkedAttemptedForUidRef.current !== authUser.uid) {
+          linkedAttemptedForUidRef.current = authUser.uid;
+          findAndLinkPreRegisteredVoter(authUser)
+            .then((linked) => {
+              if (!linked) setVoterProfile(null);
+            })
+            .catch(() => setVoterProfile(null));
+          return;
+        }
+        if (!profile && manualVoterId && !authUser) {
+          localStorage.removeItem(MANUAL_VOTER_SESSION_KEY);
+          setManualVoterId(null);
+          setVoterProfile(null);
+          return;
+        }
         setVoterProfile(profile);
-        if (profile && loggedLoginForUidRef.current !== authUser.uid) {
-          loggedLoginForUidRef.current = authUser.uid;
+        if (profile && loggedLoginForUidRef.current !== activeVoterUid) {
+          loggedLoginForUidRef.current = activeVoterUid;
           recordLoginActivity(profile).catch(() => {});
         }
       },
@@ -232,11 +265,11 @@ export default function App() {
     );
 
     return () => unsubVoter();
-  }, [authUser, staffUser, notify]);
+  }, [activeVoterUid, authUser, manualVoterId, staffUser, notify]);
 
   // 3. Subscribe to Shared Collections for registered Voter OR active Staff User
   useEffect(() => {
-    const canViewCampaignData = Boolean(staffUser || (authUser && voterProfile));
+    const canViewCampaignData = Boolean(staffUser || (activeVoterUid && voterProfile));
     if (!canViewCampaignData) return;
 
     const unsubEvents = subscribeEvents(setEvents);
@@ -248,20 +281,20 @@ export default function App() {
       unsubRewards();
       unsubCaleg();
     };
-  }, [staffUser, authUser, voterProfile]);
+  }, [staffUser, activeVoterUid, voterProfile]);
 
   // 4. Subscribe to Personal Claims & Aspirations when logged in as Voter
   useEffect(() => {
-    if (staffUser || !authUser || !voterProfile) return;
+    if (staffUser || !activeVoterUid || !voterProfile) return;
 
-    const unsubClaims = subscribeMyClaims(authUser.uid, setMyClaims);
-    const unsubAsp = subscribeMyAspirations(authUser.uid, setMyAspirations);
+    const unsubClaims = subscribeMyClaims(activeVoterUid, setMyClaims);
+    const unsubAsp = subscribeMyAspirations(activeVoterUid, setMyAspirations);
 
     return () => {
       unsubClaims();
       unsubAsp();
     };
-  }, [staffUser, authUser, voterProfile]);
+  }, [staffUser, activeVoterUid, voterProfile]);
 
   // 5. Subscribe to Cloud Staff User Accounts & Campaign Operational Collections when logged in as Staff
   useEffect(() => {
@@ -315,6 +348,37 @@ export default function App() {
     } finally {
       setIsSigningIn(false);
     }
+  };
+
+  const handleManualVoterSignUp = async (data: {
+    fullName: string;
+    phone: string;
+    email: string;
+    address: string;
+    region: string;
+    referralInput: string;
+  }) => {
+    setAuthError(null);
+    const { voter, appliedReferralBonus } = await registerManualVoterProfile(data);
+    loggedLoginForUidRef.current = voter.uid;
+    localStorage.setItem(MANUAL_VOTER_SESSION_KEY, voter.uid);
+    setManualVoterId(voter.uid);
+    setVoterProfile(voter);
+    notify(
+      appliedReferralBonus
+        ? 'Pendaftaran berhasil! Anda mendapat +100 Poin Awal dan pengundang Anda mendapat +50 Poin.'
+        : 'Pendaftaran berhasil! Selamat datang di Swaraku (+100 Poin Awal).'
+    );
+  };
+
+  const handleManualVoterLogin = async (email: string, phone: string) => {
+    setAuthError(null);
+    const voter = await loginManualVoter(email, phone);
+    loggedLoginForUidRef.current = voter.uid;
+    localStorage.setItem(MANUAL_VOTER_SESSION_KEY, voter.uid);
+    setManualVoterId(voter.uid);
+    setVoterProfile(voter);
+    notify(`Selamat datang kembali, ${voter.fullName}!`);
   };
 
   const handleStaffLogin = async (
@@ -649,14 +713,21 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await logoutFirebase();
+    localStorage.removeItem(MANUAL_VOTER_SESSION_KEY);
+    setManualVoterId(null);
+    setVoterProfile(undefined);
+    loggedLoginForUidRef.current = null;
+    setActiveTab('beranda');
+    if (auth.currentUser) {
+      await logoutFirebase();
+    }
     notify('Anda telah keluar dari akun Swaraku.');
   };
 
   const handleRedeemReward = async (reward: RewardDoc) => {
-    if (!authUser || !voterProfile) return;
+    if (!activeVoterUid || !voterProfile) return;
     try {
-      await redeemRewardAtomic(authUser.uid, voterProfile, reward);
+      await redeemRewardAtomic(activeVoterUid, voterProfile, reward);
       notify(`Penukaran "${reward.itemName}" berhasil dicatat! Cek status di Riwayat Klaim.`);
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal menukarkan poin.');
@@ -664,9 +735,9 @@ export default function App() {
   };
 
   const handleRsvpEvent = async (eventId: string, attending: boolean) => {
-    if (!authUser) return;
+    if (!activeVoterUid) return;
     try {
-      const { pointsAwarded } = await rsvpEventAtomic(authUser.uid, eventId, attending);
+      const { pointsAwarded } = await rsvpEventAtomic(activeVoterUid, eventId, attending);
       if (attending && pointsAwarded > 0) {
         notify(`Kehadiran terkonfirmasi! +${pointsAwarded} Poin ditambahkan ke Kantong Poin Anda.`);
       } else if (attending) {
@@ -697,9 +768,9 @@ export default function App() {
     occupation: string;
     birthDate: string;
   }) => {
-    if (!authUser) return;
+    if (!activeVoterUid) return;
     try {
-      await updateVoterProfile(authUser.uid, patch);
+      await updateVoterProfile(activeVoterUid, patch);
       notify('Perubahan profil berhasil disimpan ke server.');
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Gagal memperbarui profil.');
@@ -780,7 +851,7 @@ export default function App() {
   }
 
   // Loading Screen while checking Firebase Auth / Firestore Profile
-  if (!authReady || (authUser && voterProfile === undefined)) {
+  if (!authReady || (activeVoterUid && voterProfile === undefined)) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center space-y-3">
         <img src="/icon.svg" alt="Swaraku" className="w-12 h-12 animate-pulse" />
@@ -789,8 +860,8 @@ export default function App() {
     );
   }
 
-  // Case 1: Not Authenticated -> Two-Portal Login (Voters Google SSO vs Tim & Admin)
-  if (!authUser) {
+  // Case 1: Not Authenticated -> Two-Portal Login (Voters Google SSO + Sign Up vs Tim & Admin)
+  if (!activeVoterUid) {
     return (
       <>
         {mapsQuotaExceeded && <MapsQuotaBanner />}
@@ -798,6 +869,8 @@ export default function App() {
           referralCode={referralInput}
           onReferralChange={setReferralInput}
           onGoogleLogin={handleGoogleLogin}
+          onManualVoterSignUp={handleManualVoterSignUp}
+          onManualVoterLogin={handleManualVoterLogin}
           onStaffLogin={handleStaffLogin}
           isSigningIn={isSigningIn}
           authError={authError}
@@ -809,6 +882,24 @@ export default function App() {
 
   // Case 2: Authenticated via Google, but not registered in Firestore voters/{uid}
   if (voterProfile === null || !voterProfile) {
+    if (!authUser) {
+      return (
+        <>
+          {mapsQuotaExceeded && <MapsQuotaBanner />}
+          <LoginScreen
+            referralCode={referralInput}
+            onReferralChange={setReferralInput}
+            onGoogleLogin={handleGoogleLogin}
+            onManualVoterSignUp={handleManualVoterSignUp}
+            onManualVoterLogin={handleManualVoterLogin}
+            onStaffLogin={handleStaffLogin}
+            isSigningIn={isSigningIn}
+            authError={authError}
+          />
+          <OfflineIndicator />
+        </>
+      );
+    }
     return (
       <>
         {mapsQuotaExceeded && <MapsQuotaBanner />}
@@ -931,7 +1022,7 @@ export default function App() {
 
           {activeTab === 'acara' && (
             <VoterEventsView
-              uid={authUser.uid}
+              uid={activeVoterUid}
               events={events}
               onRsvpEvent={handleRsvpEvent}
             />

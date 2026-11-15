@@ -216,48 +216,7 @@ export async function resolveAccurateCoordinates(params: {
     };
   }
 
-  // 2. Try Google Maps JavaScript Geocoder API if available in browser
-  if (typeof window !== 'undefined' && (window as any).google?.maps?.Geocoder) {
-    try {
-      const geocoder = new (window as any).google.maps.Geocoder();
-      const response = await new Promise<any>((resolve, reject) => {
-        geocoder.geocode(
-          {
-            address: formattedAddress,
-            componentRestrictions: { country: 'ID' },
-          },
-          (results: any[], status: string) => {
-            if (status === 'OK' && results && results.length > 0) {
-              resolve(results[0]);
-            } else {
-              reject(new Error(`Geocoder status: ${status}`));
-            }
-          }
-        );
-      });
-
-      if (response?.geometry?.location) {
-        const lat = typeof response.geometry.location.lat === 'function'
-          ? response.geometry.location.lat()
-          : response.geometry.location.lat;
-        const lng = typeof response.geometry.location.lng === 'function'
-          ? response.geometry.location.lng()
-          : response.geometry.location.lng;
-
-        return {
-          lat: Number(lat.toFixed(6)),
-          lng: Number(lng.toFixed(6)),
-          resolvedVia: 'google_geocoder',
-          formattedAddress: response.formatted_address || formattedAddress,
-        };
-      }
-    } catch (e) {
-      // Graceful fallback to smart lookup dictionary
-      console.warn('[Geocoding] Google Geocoder fallback triggered:', e);
-    }
-  }
-
-  // 3. Fallback: Lookup in accurate dictionary
+  // 2. Fallback: Lookup in accurate Indonesia regional coordinate dictionary
   if (smartMatch) {
     // Add micro jitter (0.001 - 0.003 deg ~ 100-300m) so multiple voters don't completely overlap on exact same pixel
     const jitterLat = (Math.random() - 0.5) * 0.003;

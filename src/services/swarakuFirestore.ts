@@ -101,6 +101,27 @@ function clampStr(val: string | undefined | null, maxLen: number): string {
   return String(val ?? '').trim().slice(0, maxLen);
 }
 
+function fnv1aHex(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+export function makeEmailLookupId(email: string): string {
+  const norm = email.trim().toLowerCase();
+  const slug = norm.replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').slice(0, 48) || 'user';
+  return `em_${slug}_${fnv1aHex(norm)}`;
+}
+
+export function normalizePhone(phone: string): string {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.startsWith('62')) return `0${digits.slice(2)}`;
+  return digits;
+}
+
 export function getReadableDeviceInfo(): string {
   if (typeof window === 'undefined') return 'Server';
   const ua = window.navigator.userAgent;
@@ -224,6 +245,7 @@ export async function registerVoterProfile({
     referralCode: myCode,
     occupation: '',
     birthDate: '',
+    authMethod: 'google',
     createdAt: serverTimestamp(),
   };
 
@@ -259,6 +281,205 @@ export async function registerVoterProfile({
     return { appliedReferralBonus: Boolean(referrerUid) };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `voters/${uid}`);
+  }
+}
+
+export interface ManualSignUpInput {
+  fullName: string;
+  phone: string;
+  email: string;
+  address: string;
+  region: string;
+  referralInput?: string;
+}
+
+export async function registerManualVoterProfile(
+  input: ManualSignUpInput
+): Promise<{ voter: VoterDoc; appliedReferralBonus: boolean }> {
+  const cleanEmail = clampStr(input.email, 150).toLowerCase();
+  const cleanName = clampStr(input.fullName, 120);
+  const cleanPhone = clampStr(input.phone, 30);
+  const cleanAddress = clampStr(input.address, 300);
+  const cleanRegion = clampStr(input.region, 120);
+
+  if (cleanName.length < 2) throw new Error('Nama lengkap wajib diisi (minimal 2 karakter).');
+  if (cleanPhone.length < 6) throw new Error('Nomor telepon aktif wajib diisi.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    throw new Error('Format alamat email tidak valid.');
+  }
+  if (cleanAddress.length < 5) throw new Error('Alamat lengkap wajib diisi dengan jelas.');
+  if (cleanRegion.length < 2) throw new Error('Dapil atau kelurahan wajib diisi.');
+
+  const emailKey = makeEmailLookupId(cleanEmail);
+  const existingSignupSnap = await getDoc(doc(db, 'voter_signups', emailKey));
+  if (existingSignupSnap.exists()) {
+    throw new Error(
+      'Email ini sudah terdaftar sebagai pemilih. Silakan masuk melalui tab Masuk menggunakan Email & Nomor Telepon atau Google.'
+    );
+  }
+
+  const voterId = `vreg_${fnv1aHex(cleanEmail)}_${Date.now().toString(36)}`;
+  const myCode = `SWR-${fnv1aHex(voterId).slice(0, 6).toUpperCase()}`;
+  const cleanRef = clampStr(input.referralInput, 32).toUpperCase().replace(/[^A-Z0-9\-]/g, '');
+
+  let referrerUid: string | null = null;
+  if (cleanRef && cleanRef !== myCode) {
+    try {
+      const refSnap = await getDoc(doc(db, 'referral_codes', cleanRef));
+      if (refSnap.exists()) {
+        const refData = refSnap.data() as { uid?: string };
+        if (refData?.uid && refData.uid !== voterId) {
+          referrerUid = refData.uid;
+        }
+      }
+    } catch {
+      // Abaikan jika kode referral tidak valid
+    }
+  }
+
+  const batch = writeBatch(db);
+
+  const voterPayload: Record<string, unknown> = {
+    uid: voterId,
+    fullName: cleanName,
+    address: cleanAddress,
+    region: cleanRegion,
+    phone: cleanPhone,
+    email: cleanEmail,
+    points: 100,
+    referralCode: myCode,
+    occupation: '',
+    birthDate: '',
+    authMethod: 'manual',
+    createdAt: serverTimestamp(),
+  };
+
+  if (referrerUid && cleanRef) {
+    voterPayload.referredBy = cleanRef;
+  }
+
+  batch.set(doc(db, 'voters', voterId), voterPayload);
+  batch.set(doc(db, 'voter_signups', emailKey), {
+    voterId,
+    email: cleanEmail,
+    phone: cleanPhone,
+    fullName: cleanName,
+    address: cleanAddress,
+    region: cleanRegion,
+    ...(cleanRef ? { referralInput: cleanRef } : {}),
+    createdAt: serverTimestamp(),
+  });
+  batch.set(doc(db, 'referral_codes', myCode), {
+    uid: voterId,
+    referralCode: myCode,
+    createdAt: serverTimestamp(),
+  });
+
+  if (referrerUid) {
+    batch.update(doc(db, 'voters', referrerUid), {
+      points: increment(50),
+    });
+  }
+
+  const logRef = doc(collection(db, 'activity_logs'));
+  batch.set(logRef, {
+    uid: voterId,
+    fullName: cleanName,
+    email: cleanEmail,
+    activityType: 'REGISTER & LOGIN',
+    deviceInfo: getReadableDeviceInfo(),
+    timestamp: serverTimestamp(),
+  });
+
+  try {
+    await batch.commit();
+    return {
+      appliedReferralBonus: Boolean(referrerUid),
+      voter: {
+        uid: voterId,
+        fullName: cleanName,
+        address: cleanAddress,
+        region: cleanRegion,
+        phone: cleanPhone,
+        email: cleanEmail,
+        points: 100,
+        referralCode: myCode,
+        ...(referrerUid && cleanRef ? { referredBy: cleanRef } : {}),
+        occupation: '',
+        birthDate: '',
+        authMethod: 'manual',
+      },
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `voters/${voterId}`);
+  }
+}
+
+export async function loginManualVoter(email: string, phone: string): Promise<VoterDoc> {
+  const cleanEmail = clampStr(email, 150).toLowerCase();
+  const cleanPhone = normalizePhone(phone);
+  if (!cleanEmail || !cleanPhone) {
+    throw new Error('Mohon isi Email dan Nomor Telepon terdaftar Anda.');
+  }
+
+  const emailKey = makeEmailLookupId(cleanEmail);
+  const signupSnap = await getDoc(doc(db, 'voter_signups', emailKey));
+  if (!signupSnap.exists()) {
+    throw new Error(
+      'Email belum terdaftar. Silakan klik tab Daftar / Sign Up untuk mendaftarkan akun pemilih terlebih dahulu.'
+    );
+  }
+
+  const signupData = signupSnap.data() as { voterId: string; phone: string };
+  if (normalizePhone(signupData.phone) !== cleanPhone) {
+    throw new Error('Nomor telepon tidak cocok dengan data pendaftaran Anda.');
+  }
+
+  const voterSnap = await getDoc(doc(db, 'voters', signupData.voterId));
+  if (!voterSnap.exists()) {
+    throw new Error('Profil pemilih tidak ditemukan di server.');
+  }
+
+  const voter = voterSnap.data() as VoterDoc;
+  recordLoginActivity(voter).catch(() => {});
+  return voter;
+}
+
+export async function findAndLinkPreRegisteredVoter(user: User): Promise<boolean> {
+  if (!user.email) return false;
+  const emailKey = makeEmailLookupId(user.email);
+  try {
+    const signupSnap = await getDoc(doc(db, 'voter_signups', emailKey));
+    if (!signupSnap.exists()) return false;
+    const data = signupSnap.data() as {
+      voterId: string;
+      fullName: string;
+      address: string;
+      region: string;
+      phone: string;
+      referralInput?: string;
+      linkedGoogleUid?: string;
+    };
+    if (data.linkedGoogleUid && data.linkedGoogleUid !== user.uid) {
+      return false;
+    }
+
+    await registerVoterProfile({
+      user,
+      fullName: data.fullName,
+      address: data.address,
+      region: data.region,
+      phone: data.phone,
+      referralInput: data.referralInput,
+    });
+
+    await updateDoc(doc(db, 'voter_signups', emailKey), {
+      linkedGoogleUid: user.uid,
+    }).catch(() => {});
+
+    return true;
+  } catch {
+    return false;
   }
 }
 

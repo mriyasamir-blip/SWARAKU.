@@ -3,11 +3,11 @@ import { VoterOcrRecord } from '../../types/vore';
 import { resolveAccurateCoordinates } from '../../utils/geocoding';
 import { APP_IMAGES } from '../../assets/images';
 import {
-  APIProvider,
   Map as GoogleMap,
   AdvancedMarker,
   InfoWindow,
 } from '@vis.gl/react-google-maps';
+import { SwarakuMapsProvider } from '../maps/SwarakuMapsProvider';
 import {
   Camera,
   Upload,
@@ -1297,9 +1297,18 @@ export const PendaftaranVoterOcrModal: React.FC<PendaftaranVoterOcrModalProps> =
 
                 <div className="relative w-full h-44 rounded-xl overflow-hidden border border-slate-200 shadow-inner bg-slate-100">
                   {voterCoords ? (
-                    <APIProvider
-                      apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''}
-                      libraries={['marker', 'geocoding']}
+                    <SwarakuMapsProvider
+                      fallback={
+                        <div className="w-full h-full flex flex-col items-center justify-center p-4 text-center text-xs text-slate-600 space-y-1">
+                          <MapPin className="w-5 h-5 text-teal-700" />
+                          <p className="font-bold text-slate-800">
+                            Koordinat Terdeteksi: {voterCoords.lat.toFixed(5)}, {voterCoords.lng.toFixed(5)}
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            {kelurahan || 'Kelurahan'}, {kecamatan || 'Kecamatan'}
+                          </p>
+                        </div>
+                      }
                     >
                       <GoogleMap
                         mapId="DEMO_MAP_ID"
@@ -1356,7 +1365,7 @@ export const PendaftaranVoterOcrModal: React.FC<PendaftaranVoterOcrModalProps> =
                           </InfoWindow>
                         )}
                       </GoogleMap>
-                    </APIProvider>
+                    </SwarakuMapsProvider>
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-1">
                       <RefreshCw className="w-5 h-5 animate-spin text-teal-600" />

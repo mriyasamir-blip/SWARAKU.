@@ -11,15 +11,30 @@ import {
   EyeOff,
   Lock,
   User as UserIcon,
+  UserPlus,
+  Phone,
+  Mail,
+  MapPin,
+  Home,
 } from 'lucide-react';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 
 export type LoginPortalTab = 'voters' | 'staff';
+export type VoterAuthMode = 'login' | 'signup';
 
 interface LoginScreenProps {
   referralCode: string;
   onReferralChange: (val: string) => void;
   onGoogleLogin: () => Promise<void>;
+  onManualVoterSignUp: (data: {
+    fullName: string;
+    phone: string;
+    email: string;
+    address: string;
+    region: string;
+    referralInput: string;
+  }) => Promise<void>;
+  onManualVoterLogin: (email: string, phone: string) => Promise<void>;
   onStaffLogin: (
     usernameOrEmail: string,
     password: string
@@ -32,11 +47,28 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   referralCode,
   onReferralChange,
   onGoogleLogin,
+  onManualVoterSignUp,
+  onManualVoterLogin,
   onStaffLogin,
   isSigningIn,
   authError,
 }) => {
   const [portalTab, setPortalTab] = useState<LoginPortalTab>('voters');
+  const [voterMode, setVoterMode] = useState<VoterAuthMode>('login');
+
+  // Voter Manual Login (Email + Phone) State
+  const [voterLoginEmail, setVoterLoginEmail] = useState('');
+  const [voterLoginPhone, setVoterLoginPhone] = useState('');
+  const [voterLocalError, setVoterLocalError] = useState<string | null>(null);
+
+  // Voter Sign-Up 5-Field Form State
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [address, setAddress] = useState('');
+  const [region, setRegion] = useState('');
+
+  // Staff Login State
   const [usernameOrEmail, setUsernameOrEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -44,9 +76,74 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [staffError, setStaffError] = useState<string | null>(null);
 
   const handleGoogleSubmit = async () => {
+    setVoterLocalError(null);
     setLocalBusy(true);
     try {
       await onGoogleLogin();
+    } finally {
+      setLocalBusy(false);
+    }
+  };
+
+  const handleVoterLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setVoterLocalError(null);
+    if (!voterLoginEmail.trim() || !voterLoginPhone.trim()) {
+      setVoterLocalError('Mohon isi Email dan Nomor Telepon terdaftar Anda.');
+      return;
+    }
+
+    setLocalBusy(true);
+    try {
+      await onManualVoterLogin(voterLoginEmail.trim(), voterLoginPhone.trim());
+    } catch (err) {
+      setVoterLocalError(
+        err instanceof Error ? err.message : 'Gagal masuk sebagai pemilih.'
+      );
+    } finally {
+      setLocalBusy(false);
+    }
+  };
+
+  const handleVoterSignUpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setVoterLocalError(null);
+
+    if (fullName.trim().length < 2) {
+      setVoterLocalError('Nama lengkap wajib diisi (minimal 2 karakter).');
+      return;
+    }
+    if (phone.trim().length < 6) {
+      setVoterLocalError('Nomor telepon aktif wajib diisi.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setVoterLocalError('Alamat email tidak valid.');
+      return;
+    }
+    if (address.trim().length < 5) {
+      setVoterLocalError('Alamat lengkap wajib diisi dengan jelas.');
+      return;
+    }
+    if (region.trim().length < 2) {
+      setVoterLocalError('Dapil atau kelurahan wajib diisi.');
+      return;
+    }
+
+    setLocalBusy(true);
+    try {
+      await onManualVoterSignUp({
+        fullName: fullName.trim(),
+        phone: phone.trim(),
+        email: email.trim(),
+        address: address.trim(),
+        region: region.trim(),
+        referralInput: referralCode.trim(),
+      });
+    } catch (err) {
+      setVoterLocalError(
+        err instanceof Error ? err.message : 'Gagal mendaftar. Silakan periksa kembali data Anda.'
+      );
     } finally {
       setLocalBusy(false);
     }
@@ -76,6 +173,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   };
 
   const busy = isSigningIn || localBusy;
+  const displayVoterError = voterLocalError || authError;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center px-4 py-8">
@@ -112,6 +210,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             onClick={() => {
               setPortalTab('voters');
               setStaffError(null);
+              setVoterLocalError(null);
             }}
             className={`min-h-[44px] px-3 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
               portalTab === 'voters'
@@ -130,6 +229,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             onClick={() => {
               setPortalTab('staff');
               setStaffError(null);
+              setVoterLocalError(null);
             }}
             className={`min-h-[44px] px-3 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
               portalTab === 'staff'
@@ -142,47 +242,281 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           </button>
         </div>
 
-        {/* PORTAL 1: PEMILIH / VOTERS (GOOGLE SSO) */}
+        {/* PORTAL 1: PEMILIH / VOTERS (GOOGLE SSO + SIGN UP FORM) */}
         {portalTab === 'voters' && (
           <div className="space-y-5">
-            {authError && (
+            {/* Sub-tab: Masuk vs Daftar / Sign Up */}
+            <div className="grid grid-cols-2 gap-2 border-b border-slate-200 pb-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setVoterMode('login');
+                  setVoterLocalError(null);
+                }}
+                className={`min-h-[42px] px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                  voterMode === 'login'
+                    ? 'bg-blue-700 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <LogIn className="w-4 h-4 shrink-0" />
+                <span>Masuk Akun</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setVoterMode('signup');
+                  setVoterLocalError(null);
+                }}
+                className={`min-h-[42px] px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                  voterMode === 'signup'
+                    ? 'bg-emerald-700 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <UserPlus className="w-4 h-4 shrink-0" />
+                <span>Daftar / Sign Up</span>
+              </button>
+            </div>
+
+            {displayVoterError && (
               <div className="rounded-2xl bg-rose-50 border border-rose-200 p-3.5 flex items-start gap-2.5 text-rose-800 text-xs leading-relaxed">
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                <span>{authError}</span>
+                <span>{displayVoterError}</span>
               </div>
             )}
 
-            <div className="space-y-1.5">
-              <label
-                htmlFor="login-referral"
-                className="flex items-center gap-1.5 text-xs font-semibold text-slate-700"
-              >
-                <Ticket className="w-4 h-4 text-blue-700" />
-                <span>Kode Undangan / Referral (Opsional)</span>
-              </label>
-              <input
-                id="login-referral"
-                type="text"
-                value={referralCode}
-                onChange={(e) => onReferralChange(e.target.value.toUpperCase())}
-                placeholder="Contoh: SWR-A1B2C3"
-                maxLength={32}
-                className="w-full min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-300 bg-slate-50/70 text-sm font-mono uppercase tracking-wider text-slate-900 placeholder:text-slate-400 placeholder:normal-case placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 focus:bg-white transition-colors"
-              />
-              <p className="text-xs text-slate-500">
-                Kosongkan jika Anda belum memiliki kode undangan dari teman.
-              </p>
-            </div>
+            {/* VOTER MODE A: MASUK (GOOGLE SSO ATAU EMAIL + NO TELEPON) */}
+            {voterMode === 'login' && (
+              <div className="space-y-5">
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="login-referral"
+                    className="flex items-center gap-1.5 text-xs font-semibold text-slate-700"
+                  >
+                    <Ticket className="w-4 h-4 text-blue-700" />
+                    <span>Kode Undangan / Referral (Opsional)</span>
+                  </label>
+                  <input
+                    id="login-referral"
+                    type="text"
+                    value={referralCode}
+                    onChange={(e) => onReferralChange(e.target.value.toUpperCase())}
+                    placeholder="Contoh: SWR-A1B2C3"
+                    maxLength={32}
+                    className="w-full min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-300 bg-slate-50/70 text-sm font-mono uppercase tracking-wider text-slate-900 placeholder:text-slate-400 placeholder:normal-case placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 focus:bg-white transition-colors"
+                  />
+                </div>
 
-            <button
-              type="button"
-              onClick={handleGoogleSubmit}
-              disabled={busy}
-              className="w-full min-h-[48px] px-5 py-3 rounded-xl bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white font-bold text-sm shadow-sm flex items-center justify-center gap-2.5 transition-colors cursor-pointer"
-            >
-              <LogIn className="w-4 h-4 shrink-0" />
-              <span>{busy ? 'Menghubungkan ke Google...' : 'Masuk dengan Akun Google'}</span>
-            </button>
+                <button
+                  type="button"
+                  onClick={handleGoogleSubmit}
+                  disabled={busy}
+                  className="w-full min-h-[48px] px-5 py-3 rounded-xl bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white font-bold text-sm shadow-sm flex items-center justify-center gap-2.5 transition-colors cursor-pointer"
+                >
+                  <svg className="w-4 h-4 bg-white rounded-full p-0.5 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                    <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.4 1 3.5 3.6 1.6 7.4l3.7 2.8C6.2 7.2 8.9 5 12 5z" />
+                    <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.7-2.4 3.6l3.7 2.9c2.2-2 3.7-5 3.7-8.7z" />
+                    <path fill="#FBBC05" d="M5.3 14.8c-.2-.8-.4-1.6-.4-2.5s.1-1.7.4-2.5L1.6 7C.6 9 0 10.9 0 13s.6 4 1.6 5.9l3.7-2.9v-1.2z" />
+                    <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-2.1-6.7-5l-3.7 2.9C3.5 21.4 7.4 24 12 24z" />
+                  </svg>
+                  <span>{busy ? 'Menghubungkan...' : 'Masuk dengan Akun Google'}</span>
+                </button>
+
+                <div className="relative flex items-center py-1">
+                  <div className="grow border-t border-slate-200" />
+                  <span className="shrink mx-3 text-[11px] font-semibold text-slate-500">
+                    atau masuk dengan akun terdaftar
+                  </span>
+                  <div className="grow border-t border-slate-200" />
+                </div>
+
+                <form onSubmit={handleVoterLoginSubmit} className="space-y-3">
+                  <div className="space-y-1">
+                    <label htmlFor="voter-login-email" className="block text-xs font-semibold text-slate-700">
+                      Email Terdaftar
+                    </label>
+                    <input
+                      id="voter-login-email"
+                      type="email"
+                      autoComplete="email"
+                      value={voterLoginEmail}
+                      onChange={(e) => setVoterLoginEmail(e.target.value)}
+                      placeholder="contoh@email.com"
+                      className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 bg-slate-50/70 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label htmlFor="voter-login-phone" className="block text-xs font-semibold text-slate-700">
+                      Nomor Telepon (WhatsApp)
+                    </label>
+                    <input
+                      id="voter-login-phone"
+                      type="tel"
+                      autoComplete="tel"
+                      value={voterLoginPhone}
+                      onChange={(e) => setVoterLoginPhone(e.target.value)}
+                      placeholder="Contoh: 081234567890"
+                      className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 bg-slate-50/70 text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white font-bold text-sm transition-colors cursor-pointer"
+                  >
+                    {busy ? 'Memeriksa Akun...' : 'Masuk dengan Email & No. Telepon'}
+                  </button>
+                </form>
+
+                <p className="text-center text-xs text-slate-600">
+                  Belum punya akun?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVoterMode('signup');
+                      setVoterLocalError(null);
+                    }}
+                    className="font-bold text-emerald-700 hover:underline cursor-pointer"
+                  >
+                    Daftar / Sign Up di sini
+                  </button>
+                </p>
+              </div>
+            )}
+
+            {/* VOTER MODE B: FORM DAFTAR / SIGN UP PEMILIH BARU */}
+            {voterMode === 'signup' && (
+              <form onSubmit={handleVoterSignUpSubmit} className="space-y-3.5">
+                <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-900 leading-relaxed">
+                  Lengkapi formulir pendaftaran di bawah untuk mengaktifkan akun Pemilih dan mendapatkan <strong>+100 Poin Awal</strong>.
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="signup-fullname" className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                    <UserIcon className="w-3.5 h-3.5 text-blue-700" />
+                    <span>Nama Lengkap <span className="text-rose-600">*</span></span>
+                  </label>
+                  <input
+                    id="signup-fullname"
+                    type="text"
+                    required
+                    maxLength={120}
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Masukkan nama lengkap Anda"
+                    className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="signup-phone" className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                    <Phone className="w-3.5 h-3.5 text-blue-700" />
+                    <span>Nomor Telepon <span className="text-rose-600">*</span></span>
+                  </label>
+                  <input
+                    id="signup-phone"
+                    type="tel"
+                    required
+                    maxLength={30}
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="Contoh: 081234567890"
+                    className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="signup-email" className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                    <Mail className="w-3.5 h-3.5 text-blue-700" />
+                    <span>Email <span className="text-rose-600">*</span></span>
+                  </label>
+                  <input
+                    id="signup-email"
+                    type="email"
+                    required
+                    maxLength={150}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="contoh@email.com"
+                    className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="signup-address" className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                    <Home className="w-3.5 h-3.5 text-blue-700" />
+                    <span>Alamat <span className="text-rose-600">*</span></span>
+                  </label>
+                  <textarea
+                    id="signup-address"
+                    required
+                    rows={2}
+                    maxLength={300}
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="Nama jalan, nomor rumah, RT/RW"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="signup-region" className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                    <MapPin className="w-3.5 h-3.5 text-blue-700" />
+                    <span>Dapil atau Kelurahan <span className="text-rose-600">*</span></span>
+                  </label>
+                  <input
+                    id="signup-region"
+                    type="text"
+                    required
+                    maxLength={120}
+                    value={region}
+                    onChange={(e) => setRegion(e.target.value)}
+                    placeholder="Contoh: Dapil 1 / Kel. Cilandak Barat"
+                    className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="signup-referral" className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                    <Ticket className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Kode Undangan / Referral (Opsional)</span>
+                  </label>
+                  <input
+                    id="signup-referral"
+                    type="text"
+                    maxLength={32}
+                    value={referralCode}
+                    onChange={(e) => onReferralChange(e.target.value.toUpperCase())}
+                    placeholder="Kosongkan jika tidak ada"
+                    className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-300 bg-slate-50 text-sm font-mono uppercase text-slate-900 placeholder:normal-case placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="w-full min-h-[48px] px-5 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-emerald-400 text-white font-bold text-sm shadow-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4 shrink-0" />
+                  <span>{busy ? 'Mendaftarkan Akun...' : 'Daftar & Masuk Dashboard'}</span>
+                </button>
+
+                <div className="pt-1 text-center">
+                  <button
+                    type="button"
+                    onClick={handleGoogleSubmit}
+                    disabled={busy}
+                    className="text-xs font-bold text-blue-700 hover:underline cursor-pointer"
+                  >
+                    Atau langsung daftar menggunakan Akun Google
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         )}
 
@@ -295,5 +629,3 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     </div>
   );
 };
-
-

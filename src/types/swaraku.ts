@@ -29,6 +29,7 @@ export interface VoterDoc {
   occupation?: string;
   birthDate?: string;
   lastEventRsvpId?: string;
+  authMethod?: 'google' | 'manual';
   createdAt?: Timestamp;
 }
 

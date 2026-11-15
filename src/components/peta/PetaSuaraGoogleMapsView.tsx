@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  APIProvider,
   Map as GoogleMap,
   AdvancedMarker,
   InfoWindow,
   useAdvancedMarkerRef,
   useMap,
 } from '@vis.gl/react-google-maps';
+import { SwarakuMapsProvider } from '../maps/SwarakuMapsProvider';
 import {
   TimSuksesWilayahRecord,
   PetaWilayahMarker,
@@ -351,10 +351,6 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
 
   // Selected Marker for InfoWindow
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
-
-  // Google Maps API Key
-  const apiKey =
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_MAPS_API_KEY) || '';
 
   // 1. DYNAMIC AGGREGATION: Build dynamic markers from Tim Sukses & Voters
   // ZERO DUMMY DATA: All markers are generated exclusively from registered data!
@@ -826,8 +822,57 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
       </div>
 
       {/* Main Google Maps Render Container */}
-      <div className="relative w-full h-[540px] rounded-3xl overflow-hidden border border-slate-200 shadow-md">
-        <APIProvider apiKey={apiKey} libraries={['marker', 'geocoding', 'places']}>
+      <div className="relative w-full h-[540px] rounded-3xl overflow-hidden border border-slate-200 shadow-md bg-slate-50">
+        <SwarakuMapsProvider
+          fallback={
+            <div className="h-full w-full p-5 overflow-y-auto flex flex-col justify-between bg-slate-50">
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-50 border border-amber-200">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-900 space-y-1">
+                    <p className="font-bold">Tampilan Peta Google Maps sedang dialihkan ke Mode Ringkasan Wilayah</p>
+                    <p>
+                      Pastikan API Key Google Maps aktif (Maps JavaScript API, pembatasan HTTP referrer mengizinkan domain Anda, dan kuota/billing aktif). Data koordinat &amp; sebaran suara tetap aktif di bawah ini:
+                    </p>
+                  </div>
+                </div>
+
+                {filteredMarkers.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-slate-500 bg-white rounded-2xl border border-slate-200">
+                    Belum ada titik wilayah atau voter yang sesuai dengan filter.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {filteredMarkers.map((m) => (
+                      <div
+                        key={m.id}
+                        className="p-3.5 rounded-2xl bg-white border border-slate-200 space-y-2 shadow-2xs"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-extrabold text-slate-900">{m.kelurahan}</p>
+                            <p className="text-[11px] text-slate-500">
+                              {m.kecamatan}, {m.kota}
+                            </p>
+                          </div>
+                          <span className="text-xs font-mono font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-lg">
+                            {m.totalVoters} Pemilih
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600">
+                          Koordinator: <strong className="text-slate-800">{m.koordinatorNama}</strong>
+                        </p>
+                        <p className="text-[10px] font-mono text-slate-500">
+                          {m.lat.toFixed(5)}, {m.lng.toFixed(5)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          }
+        >
           <GoogleMap
             mapId="DEMO_MAP_ID"
             defaultZoom={12}
@@ -872,7 +917,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
               />
             ))}
           </GoogleMap>
-        </APIProvider>
+        </SwarakuMapsProvider>
 
         {/* Legend Overlay at Bottom Right */}
         <div className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-md p-3 rounded-2xl border border-slate-200 shadow-lg text-[10px] space-y-1.5 z-10 max-w-xs">
