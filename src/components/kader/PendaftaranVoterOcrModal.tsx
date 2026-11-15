@@ -1298,7 +1298,7 @@ export const PendaftaranVoterOcrModal: React.FC<PendaftaranVoterOcrModalProps> =
                 <div className="relative w-full h-44 rounded-xl overflow-hidden border border-slate-200 shadow-inner bg-slate-100">
                   {voterCoords ? (
                     <APIProvider
-                      apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCdblvQuw9FYALutqDvm1Yly8zXxDV386g'}
+                      apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''}
                       libraries={['marker', 'geocoding']}
                     >
                       <GoogleMap

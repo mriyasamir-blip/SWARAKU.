@@ -1,4 +1,4 @@
-import { UserAccount } from '../types/vore';
+import { UserAccount, UserRole } from '../types/vore';
 import { getActiveScriptUrl, isScriptUrlConfigured } from '../config/apiConfig';
 import {
   collection,
@@ -87,6 +87,17 @@ function normalizeUserAccount(u: any): UserAccount {
   return u as UserAccount;
 }
 
+function stripUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
+  const clean: Record<string, any> = {};
+  Object.keys(obj).forEach((key) => {
+    const val = obj[key];
+    if (val !== undefined) {
+      clean[key] = val;
+    }
+  });
+  return clean as Partial<T>;
+}
+
 /**
  * 1. Ambil seluruh data user langsung dari Cloud Server (Google Sheets / Firestore).
  * TIDAK MENYIMPAN KE LOCALSTORAGE!
@@ -154,10 +165,10 @@ export async function createUserOnCloud(
     const docRef = doc(firestore, FIRESTORE_USERS_COLLECTION, user.id);
     await setDoc(
       docRef,
-      {
+      stripUndefined({
         ...user,
         updatedAt: new Date().toISOString(),
-      },
+      }),
       { merge: true }
     );
   } catch (err: any) {
@@ -218,13 +229,21 @@ export async function createMultipleUsersOnCloud(
   };
 }
 
+const ROLE_LABEL_MAP: Record<UserRole, string> = {
+  super_admin: 'Super Admin',
+  admin: 'Admin',
+  tim_sukses: 'Tim Sukses',
+  kader: 'Kader',
+};
+
 /**
  * 3. Validasi Login secara langsung ke Cloud Database (Cross-Device).
  * TIDAK MENGECEK KE LOCALSTORAGE BROWSER.
  */
 export async function loginUserOnCloud(
   usernameOrEmail: string,
-  plainPassword?: string
+  plainPassword?: string,
+  expectedRole?: UserRole
 ): Promise<{ success: boolean; user?: UserAccount; message?: string }> {
   const cleanInput = (usernameOrEmail || '').trim().toLowerCase();
   const cleanPassword = (plainPassword || '').trim();
@@ -232,6 +251,36 @@ export async function loginUserOnCloud(
   if (!cleanInput) {
     return { success: false, message: 'Silakan masukkan Username atau Email Anda.' };
   }
+  if (!cleanPassword) {
+    return { success: false, message: 'Silakan masukkan Kata Sandi atau PIN akun Anda.' };
+  }
+
+  const validateMatchedUser = (raw: UserAccount): { success: boolean; user?: UserAccount; message?: string } => {
+    const targetUser = normalizeUserAccount(raw);
+    if (targetUser.status === 'Nonaktif') {
+      return {
+        success: false,
+        message: 'Akun Anda dinonaktifkan oleh Super Admin. Silakan hubungi Super Admin.',
+      };
+    }
+
+    if (expectedRole && targetUser.role !== expectedRole) {
+      return {
+        success: false,
+        message: `Akun ini terdaftar sebagai ${ROLE_LABEL_MAP[targetUser.role]}, bukan ${ROLE_LABEL_MAP[expectedRole]}. Silakan pilih tab login ${ROLE_LABEL_MAP[targetUser.role]}.`,
+      };
+    }
+
+    const registeredPassword = (targetUser.password || '123456').trim();
+    if (registeredPassword !== cleanPassword) {
+      return {
+        success: false,
+        message: 'Kata sandi atau PIN yang dimasukkan tidak cocok di Server Cloud Database.',
+      };
+    }
+
+    return { success: true, user: targetUser };
+  };
 
   // A. Validasi langsung ke Firestore Cloud Database (Case-Insensitive & Whitespace-Safe)
   try {
@@ -240,7 +289,7 @@ export async function loginUserOnCloud(
     let matchedUser: UserAccount | null = null;
 
     snap.forEach((d) => {
-      const u = d.data() as UserAccount;
+      const u = normalizeUserAccount(d.data());
       const uName = (u.username || '').trim().toLowerCase();
       const uEmail = (u.email || '').trim().toLowerCase();
       const uId = (u.id || '').trim().toLowerCase();
@@ -250,23 +299,7 @@ export async function loginUserOnCloud(
     });
 
     if (matchedUser) {
-      const targetUser = matchedUser as UserAccount;
-      if (targetUser.status === 'Nonaktif') {
-        return {
-          success: false,
-          message: 'Akun Anda dinonaktifkan oleh Super Admin. Silakan hubungi Super Admin.',
-        };
-      }
-
-      const registeredPassword = (targetUser.password || '123456').trim();
-      if (cleanPassword && registeredPassword !== cleanPassword) {
-        return {
-          success: false,
-          message: 'Kata sandi atau PIN yang dimasukkan tidak cocok di Server Cloud Database.',
-        };
-      }
-
-      return { success: true, user: targetUser };
+      return validateMatchedUser(matchedUser);
     }
   } catch (err: any) {
     console.warn('[UserApi] Validasi Firestore notice:', err);
@@ -280,14 +313,14 @@ export async function loginUserOnCloud(
         password: cleanPassword,
       });
       if (res && res.success && res.user) {
-        return { success: true, user: res.user as UserAccount };
+        return validateMatchedUser(res.user as UserAccount);
       }
     } catch (err: any) {
       console.warn('[UserApi] Validasi Google Script notice:', err);
     }
   }
 
-  // C. Fallback kredensial preset bawaan sistem
+  // C. Fallback kredensial preset bawaan sistem & auto-sync ke Firestore
   const presetFound = PRESET_ACCOUNTS.find(
     (u) =>
       (u.username || '').trim().toLowerCase() === cleanInput ||
@@ -295,15 +328,9 @@ export async function loginUserOnCloud(
   );
 
   if (presetFound) {
-    const registeredPassword = (presetFound.password || '123456').trim();
-    if (cleanPassword && registeredPassword !== cleanPassword) {
-      return {
-        success: false,
-        message: 'Kata sandi tidak sesuai.',
-      };
-    }
+    const check = validateMatchedUser(presetFound);
+    if (!check.success) return check;
 
-    // Pastikan tersinkron ke Firestore
     try {
       const docRef = doc(firestore, FIRESTORE_USERS_COLLECTION, presetFound.id);
       setDoc(docRef, presetFound, { merge: true }).catch(() => {});
@@ -326,27 +353,27 @@ export async function loginUserOnCloud(
 export async function fetchUserProfileById(userId: string): Promise<UserAccount | null> {
   if (!userId) return null;
 
-  // A. Coba dari Google Sheets
-  if (isScriptUrlConfigured()) {
-    try {
-      const res = await fetchGoogleScript('getUserById', { id: userId });
-      if (res && res.success && res.user) {
-        return res.user as UserAccount;
-      }
-    } catch (err) {
-      console.warn('[UserApi] Fetch user by id dari Google Script gagal:', err);
-    }
-  }
-
-  // B. Coba dari Firestore
+  // A. Coba dari Firestore (Prioritas utama untuk foto & relasi kader real-time)
   try {
     const docRef = doc(firestore, FIRESTORE_USERS_COLLECTION, userId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      return snap.data() as UserAccount;
+      return normalizeUserAccount(snap.data());
     }
   } catch (err) {
     console.warn('[UserApi] Fetch user by id dari Firestore gagal:', err);
+  }
+
+  // B. Coba dari Google Sheets
+  if (isScriptUrlConfigured()) {
+    try {
+      const res = await fetchGoogleScript('getUserById', { id: userId });
+      if (res && res.success && res.user) {
+        return normalizeUserAccount(res.user);
+      }
+    } catch (err) {
+      console.warn('[UserApi] Fetch user by id dari Google Script gagal:', err);
+    }
   }
 
   return null;
@@ -366,7 +393,11 @@ export async function updateUserOnCloud(user: UserAccount): Promise<boolean> {
 
   try {
     const docRef = doc(firestore, FIRESTORE_USERS_COLLECTION, user.id);
-    await setDoc(docRef, { ...user, updatedAt: new Date().toISOString() }, { merge: true });
+    await setDoc(
+      docRef,
+      stripUndefined({ ...user, updatedAt: new Date().toISOString() }),
+      { merge: true }
+    );
     return true;
   } catch (e) {
     console.error('[UserApi] Update Firestore error:', e);

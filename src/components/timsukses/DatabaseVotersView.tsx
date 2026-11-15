@@ -226,7 +226,7 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
     setTimeout(() => setExportNotice(null), 3500);
   };
 
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCdblvQuw9FYALutqDvm1Yly8zXxDV386g';
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
   return (
     <div className="space-y-6 text-slate-800">

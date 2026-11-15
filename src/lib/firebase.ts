@@ -1,57 +1,85 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { initializeFirestore, getFirestore, doc, getDoc } from 'firebase/firestore';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  connectAuthEmulator,
+} from 'firebase/auth';
+import {
+  initializeFirestore,
+  getFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  connectFirestoreEmulator,
+  doc,
+  getDocFromServer,
+} from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleAuthProvider = new GoogleAuthProvider();
+googleAuthProvider.setCustomParameters({ prompt: 'select_account' });
 
-// Gunakan initializeFirestore dengan experimentalAutoDetectLongPolling agar koneksi Firestore
-// selalu stabil di berbagai browser, device mobile, container iframe, maupun saat koneksi beralih jaringan
+const targetDatabaseId =
+  firebaseConfig.firestoreDatabaseId &&
+  firebaseConfig.firestoreDatabaseId !== '(default)'
+    ? firebaseConfig.firestoreDatabaseId
+    : undefined;
+
 let dbInstance;
 try {
   dbInstance = initializeFirestore(
     app,
     {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
       experimentalAutoDetectLongPolling: true,
       ignoreUndefinedProperties: true,
     },
-    firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-      ? firebaseConfig.firestoreDatabaseId
-      : undefined
+    targetDatabaseId
   );
 } catch {
-  dbInstance =
-    firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-      ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-      : getFirestore(app);
+  dbInstance = targetDatabaseId
+    ? getFirestore(app, targetDatabaseId)
+    : getFirestore(app);
 }
 
+export const db = dbInstance;
 export const firestore = dbInstance;
 
-/**
- * Validasi koneksi non-blocking ke Cloud Firestore.
- * Menggunakan getDoc (dengan cache offline fallback) sehingga tidak memicu error unhandled jika jaringan lambat saat booting.
- */
+// Dukungan opsional Localhost Emulator saat flag VITE_USE_FIREBASE_EMULATOR=true
+const useEmulator =
+  typeof import.meta !== 'undefined' &&
+  import.meta.env?.VITE_USE_FIREBASE_EMULATOR === 'true' &&
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+if (useEmulator) {
+  try {
+    connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  } catch (err) {
+    console.warn('[Firebase] Emulator connection skipped:', err);
+  }
+}
+
 export async function testFirestoreConnection(): Promise<boolean> {
   try {
-    await getDoc(doc(firestore, 'test', 'connection'));
-    console.log('[Firebase] Cloud Firestore terhubung sukses (Localhost & Cloud)');
+    await getDocFromServer(doc(db, 'test', 'connection'));
     return true;
-  } catch (error: any) {
-    console.warn('[Firebase] Mode jaringan / cache aktif:', error?.message || error);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error('Please check your Firebase configuration.');
+    }
     return false;
   }
 }
 
-// Jalankan validasi secara asinkron setelah window load agar tidak memblokir render awal
 if (typeof window !== 'undefined') {
   window.addEventListener('load', () => {
     setTimeout(() => {
       testFirestoreConnection().catch(() => {});
-    }, 1200);
+    }, 1000);
   });
 }
-
-

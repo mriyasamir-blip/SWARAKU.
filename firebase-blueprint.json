@@ -2,130 +2,190 @@
   "entities": {
     "Voter": {
       "title": "Voter",
-      "description": "Data pemilih hasil pendaftaran kader atau sinkronisasi DPT KPU",
+      "description": "Profil dan saldo poin pemilih terdaftar melalui Google SSO",
       "type": "object",
       "properties": {
-        "nik": { "type": "string" },
-        "nama": { "type": "string" },
-        "tps": { "type": "string" },
-        "kelurahan": { "type": "string" },
-        "kecamatan": { "type": "string" },
-        "kabupatenKota": { "type": "string" },
-        "provinsi": { "type": "string" },
-        "jenisKelamin": { "type": "string" },
-        "noHp": { "type": "string" },
-        "statusDpt": { "type": "string" },
-        "statusPendukung": { "type": "string" },
-        "waktuDaftar": { "type": "string" },
-        "terdaftarOleh": { "type": "string" }
+        "uid": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "address": { "type": "string", "minLength": 5, "maxLength": 300 },
+        "region": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "phone": { "type": "string", "minLength": 6, "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 150 },
+        "points": { "type": "number" },
+        "referralCode": { "type": "string", "minLength": 4, "maxLength": 32, "pattern": "^[A-Z0-9\\-]+$" },
+        "referredBy": { "type": "string", "maxLength": 32 },
+        "occupation": { "type": "string", "maxLength": 100 },
+        "birthDate": { "type": "string", "maxLength": 30 },
+        "lastEventRsvpId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["nik", "nama", "tps"]
-    },
-    "FormC1": {
-      "title": "FormC1",
-      "description": "Formulir C1 Plano hasil scan OCR atau upload saksi TPS",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "tps": { "type": "string" },
-        "kelurahan": { "type": "string" },
-        "kecamatan": { "type": "string" },
-        "saksiNama": { "type": "string" },
-        "waktuUpload": { "type": "string" },
-        "suaraPaslon1": { "type": "number" },
-        "suaraPaslon2": { "type": "number" },
-        "suaraPaslon3": { "type": "number" },
-        "suaraTidakSah": { "type": "number" },
-        "totalSuaraSah": { "type": "number" },
-        "statusVerifikasi": { "type": "string" }
-      },
-      "required": ["id", "tps", "suaraPaslon1"]
-    },
-    "FormB1": {
-      "title": "FormB1",
-      "description": "Formulir Model B1-KWK rekapitulasi tingkat kecamatan",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "kecamatan": { "type": "string" },
-        "kelurahan": { "type": "string" },
-        "dapil": { "type": "string" },
-        "koordinatorNama": { "type": "string" },
-        "waktuUpload": { "type": "string" },
-        "suaraPaslon1": { "type": "number" },
-        "suaraPaslon2": { "type": "number" },
-        "suaraPaslon3": { "type": "number" },
-        "suaraTidakSah": { "type": "number" },
-        "totalSuaraSah": { "type": "number" },
-        "totalTpsTercakup": { "type": "number" },
-        "statusVerifikasi": { "type": "string" }
-      },
-      "required": ["id", "kecamatan", "suaraPaslon1"]
+      "required": ["uid", "fullName", "address", "region", "phone", "email", "points", "referralCode", "createdAt"]
     },
     "UserAccount": {
       "title": "UserAccount",
-      "description": "Akun login pengguna multi-perangkat (Super Admin, Admin, Tim Sukses, Kader)",
+      "description": "Akun tim kampanye multi-perangkat (Super Admin, Admin, Tim Sukses, Kader)",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "role": { "type": "string" },
-        "nama": { "type": "string" },
-        "username": { "type": "string" },
-        "email": { "type": "string" },
-        "jabatan": { "type": "string" },
-        "wilayah": { "type": "string" },
-        "tps": { "type": "string" },
-        "noHp": { "type": "string" },
-        "password": { "type": "string" },
-        "status": { "type": "string" },
-        "dibuatPada": { "type": "string" },
-        "fotoUrl": { "type": "string" },
-        "timSuksesId": { "type": "string" },
-        "timSuksesNama": { "type": "string" },
-        "didaftarkanOlehTimSukses": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "enum": ["super_admin", "admin", "tim_sukses", "kader"] },
+        "nama": { "type": "string", "maxLength": 120 },
+        "username": { "type": "string", "maxLength": 80 },
+        "email": { "type": "string", "maxLength": 150 },
+        "jabatan": { "type": "string", "maxLength": 160 },
+        "wilayah": { "type": "string", "maxLength": 160 },
+        "idPegawai": { "type": "string", "maxLength": 60 },
+        "divisi": { "type": "string", "maxLength": 120 },
+        "tps": { "type": "string", "maxLength": 60 },
+        "noHp": { "type": "string", "maxLength": 30 },
+        "fotoUrl": { "type": "string", "maxLength": 350000 },
+        "password": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["Aktif", "Nonaktif"] },
+        "dibuatPada": { "type": "string", "maxLength": 80 },
+        "updatedAt": { "type": "string", "maxLength": 80 },
+        "timSuksesId": { "type": "string", "maxLength": 128 },
+        "timSuksesNama": { "type": "string", "maxLength": 120 },
+        "didaftarkanOlehTimSukses": { "type": "string", "maxLength": 120 },
         "kaderList": { "type": "array" },
         "kaderIds": { "type": "array" }
       },
       "required": ["id", "role", "nama", "username"]
     },
-    "TimSukses": {
-      "title": "TimSukses",
-      "description": "Data penugasan wilayah dan koordinat tim sukses di peta suara",
+    "ReferralCode": {
+      "title": "ReferralCode",
+      "description": "Peta kode undangan non-PII untuk validasi poin referral",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "nama": { "type": "string" },
-        "noHp": { "type": "string" },
-        "jabatan": { "type": "string" },
-        "kota": { "type": "string" },
+        "uid": { "type": "string", "maxLength": 128 },
+        "referralCode": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "referralCode", "createdAt"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Catatan aktivitas login dan registrasi multi-perangkat",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "email": { "type": "string", "maxLength": 150 },
+        "activityType": { "type": "string", "enum": ["LOGIN", "REGISTER & LOGIN"] },
+        "deviceInfo": { "type": "string", "maxLength": 300 },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "fullName", "email", "activityType", "deviceInfo", "timestamp"]
+    },
+    "CampaignEvent": {
+      "title": "CampaignEvent",
+      "description": "Jadwal acara kampanye partai/Caleg beserta koordinat peta Google Maps",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "partyName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "region": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "eventDate": { "type": "string", "minLength": 4, "maxLength": 60 },
+        "pointReward": { "type": "number" },
+        "address": { "type": "string", "minLength": 4, "maxLength": 300 },
         "lat": { "type": "number" },
         "lng": { "type": "number" },
-        "status": { "type": "string" },
-        "waktuDaftar": { "type": "string" }
+        "rsvpYes": { "type": "array" },
+        "rsvpNo": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "nama", "kota"]
+      "required": ["title", "partyName", "region", "eventDate", "pointReward", "address", "lat", "lng", "rsvpYes", "rsvpNo", "createdAt"]
+    },
+    "RewardItem": {
+      "title": "RewardItem",
+      "description": "Katalog barang/reward yang dapat ditukar dengan poin Voters",
+      "type": "object",
+      "properties": {
+        "itemName": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "pointCost": { "type": "number" },
+        "stock": { "type": "number" },
+        "description": { "type": "string", "maxLength": 400 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["itemName", "pointCost", "stock", "description", "createdAt"]
+    },
+    "RewardClaim": {
+      "title": "RewardClaim",
+      "description": "Riwayat klaim penukaran poin oleh Voters",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "voterName": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "rewardId": { "type": "string", "maxLength": 128 },
+        "itemName": { "type": "string", "maxLength": 140 },
+        "pointUsed": { "type": "number" },
+        "status": { "type": "string", "enum": ["MENUNGGU", "DISERAHKAN"] },
+        "claimedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "voterName", "phone", "rewardId", "itemName", "pointUsed", "status", "claimedAt"]
+    },
+    "Aspiration": {
+      "title": "Aspiration",
+      "description": "Aspirasi dan masukan warga/pemilih berdasarkan dapil",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "voterName": { "type": "string", "maxLength": 120 },
+        "region": { "type": "string", "maxLength": 120 },
+        "message": { "type": "string", "minLength": 4, "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "voterName", "region", "message", "createdAt"]
+    },
+    "CalegInfo": {
+      "title": "CalegInfo",
+      "description": "Informasi Partai Politik dan Profil Calon Legislatif per Dapil",
+      "type": "object",
+      "properties": {
+        "calegName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "partyName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "region": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "description": { "type": "string", "minLength": 4, "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["calegName", "partyName", "region", "description", "createdAt"]
     }
   },
   "firestore": {
-    "/voters/{voterId}": {
+    "/voters/{uid}": {
       "schema": { "$ref": "#/entities/Voter" },
-      "description": "Daftar pemilih tetap dan rujukan kader"
-    },
-    "/c1_records/{c1Id}": {
-      "schema": { "$ref": "#/entities/FormC1" },
-      "description": "Dokumen C1 Plano tabulasi quick count"
-    },
-    "/b1_records/{b1Id}": {
-      "schema": { "$ref": "#/entities/FormB1" },
-      "description": "Dokumen B1 rekapitulasi kecamatan"
+      "description": "Profil dan saldo poin pemilih"
     },
     "/user_accounts/{userId}": {
       "schema": { "$ref": "#/entities/UserAccount" },
-      "description": "Penyimpanan akun pengguna real-time multi-device"
+      "description": "Akun tim kampanye lintas perangkat (Super Admin, Admin, Tim Sukses, Kader)"
     },
-    "/tim_sukses_members/{tsId}": {
-      "schema": { "$ref": "#/entities/TimSukses" },
-      "description": "Struktur tim sukses dan titik koordinat peta suara"
+    "/referral_codes/{code}": {
+      "schema": { "$ref": "#/entities/ReferralCode" },
+      "description": "Lookup kode referral non-PII"
+    },
+    "/activity_logs/{logId}": {
+      "schema": { "$ref": "#/entities/ActivityLog" },
+      "description": "Buku aktivitas login dan registrasi"
+    },
+    "/events/{eventId}": {
+      "schema": { "$ref": "#/entities/CampaignEvent" },
+      "description": "Jadwal acara kampanye dan RSVP"
+    },
+    "/rewards/{rewardId}": {
+      "schema": { "$ref": "#/entities/RewardItem" },
+      "description": "Katalog reward penukaran poin"
+    },
+    "/reward_claims/{claimId}": {
+      "schema": { "$ref": "#/entities/RewardClaim" },
+      "description": "Catatan penukaran poin oleh pemilih"
+    },
+    "/aspirations/{aspirationId}": {
+      "schema": { "$ref": "#/entities/Aspiration" },
+      "description": "Aspirasi pemilih per dapil"
+    },
+    "/caleg_info/{infoId}": {
+      "schema": { "$ref": "#/entities/CalegInfo" },
+      "description": "Informasi partai dan Caleg per daerah/dapil"
     }
   }
 }

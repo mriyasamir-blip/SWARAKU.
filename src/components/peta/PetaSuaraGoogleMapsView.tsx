@@ -354,8 +354,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
 
   // Google Maps API Key
   const apiKey =
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_MAPS_API_KEY) ||
-    'AIzaSyCdblvQuw9FYALutqDvm1Yly8zXxDV386g';
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_MAPS_API_KEY) || '';
 
   // 1. DYNAMIC AGGREGATION: Build dynamic markers from Tim Sukses & Voters
   // ZERO DUMMY DATA: All markers are generated exclusively from registered data!

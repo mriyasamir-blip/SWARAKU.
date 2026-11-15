@@ -1,8 +1,366 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // 1. Global Safety Net (Default Deny Catch-All)
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Helpers
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isSuperAdmin() {
+      return isVerifiedUser() &&
+        request.auth.token.email in [
+          'm.riyasamir@gmail.com',
+          'admin@swaraku.online'
+        ];
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidVoter(data) {
+      return data.keys().hasAll(['uid', 'fullName', 'address', 'region', 'phone', 'email', 'points', 'referralCode', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'fullName', 'address', 'region', 'phone', 'email', 'points', 'referralCode', 'referredBy', 'occupation', 'birthDate', 'lastEventRsvpId', 'createdAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120
+        && data.address is string && data.address.size() >= 5 && data.address.size() <= 300
+        && data.region is string && data.region.size() >= 2 && data.region.size() <= 120
+        && data.phone is string && data.phone.size() >= 6 && data.phone.size() <= 30
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
+        && data.points is number && data.points >= 0 && data.points <= 1000000
+        && data.referralCode is string && data.referralCode.size() >= 4 && data.referralCode.size() <= 32
+        && (!('referredBy' in data) || (data.referredBy is string && data.referredBy.size() <= 32))
+        && (!('occupation' in data) || (data.occupation is string && data.occupation.size() <= 100))
+        && (!('birthDate' in data) || (data.birthDate is string && data.birthDate.size() <= 30))
+        && (!('lastEventRsvpId' in data) || (data.lastEventRsvpId is string && data.lastEventRsvpId.size() <= 128))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidUserAccount(data) {
+      return data.keys().hasAll(['id', 'role', 'nama', 'username'])
+        && data.keys().hasOnly([
+          'id', 'role', 'nama', 'username', 'email', 'jabatan', 'wilayah',
+          'idPegawai', 'divisi', 'tps', 'noHp', 'fotoUrl', 'password',
+          'status', 'dibuatPada', 'updatedAt',
+          'timSuksesId', 'timSuksesNama', 'didaftarkanOlehTimSukses',
+          'kaderList', 'kaderIds'
+        ])
+        && data.id is string && isValidId(data.id)
+        && data.role in ['super_admin', 'admin', 'tim_sukses', 'kader']
+        && data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120
+        && data.username is string && data.username.size() >= 1 && data.username.size() <= 80
+        && (!('email' in data) || (data.email is string && data.email.size() <= 150))
+        && (!('jabatan' in data) || (data.jabatan is string && data.jabatan.size() <= 160))
+        && (!('wilayah' in data) || (data.wilayah is string && data.wilayah.size() <= 160))
+        && (!('idPegawai' in data) || (data.idPegawai is string && data.idPegawai.size() <= 60))
+        && (!('divisi' in data) || (data.divisi is string && data.divisi.size() <= 120))
+        && (!('tps' in data) || (data.tps is string && data.tps.size() <= 60))
+        && (!('noHp' in data) || (data.noHp is string && data.noHp.size() <= 30))
+        && (!('fotoUrl' in data) || (data.fotoUrl is string && data.fotoUrl.size() <= 350000))
+        && (!('password' in data) || (data.password is string && data.password.size() <= 120))
+        && (!('status' in data) || (data.status in ['Aktif', 'Nonaktif']))
+        && (!('dibuatPada' in data) || (data.dibuatPada is string && data.dibuatPada.size() <= 80))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 80))
+        && (!('timSuksesId' in data) || (data.timSuksesId is string && data.timSuksesId.size() <= 128))
+        && (!('timSuksesNama' in data) || (data.timSuksesNama is string && data.timSuksesNama.size() <= 120))
+        && (!('didaftarkanOlehTimSukses' in data) || (data.didaftarkanOlehTimSukses is string && data.didaftarkanOlehTimSukses.size() <= 120))
+        && (!('kaderList' in data) || (data.kaderList is list && data.kaderList.size() <= 100 && (data.kaderList.size() == 0 || data.kaderList[0] is string)))
+        && (!('kaderIds' in data) || (data.kaderIds is list && data.kaderIds.size() <= 100 && (data.kaderIds.size() == 0 || data.kaderIds[0] is string)));
+    }
+
+    function isValidReferralCode(data) {
+      return data.keys().hasAll(['uid', 'referralCode', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'referralCode', 'createdAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.referralCode is string && data.referralCode.size() >= 4 && data.referralCode.size() <= 32
+        && data.createdAt is timestamp;
+    }
+
+    function isValidActivityLog(data) {
+      return data.keys().hasAll(['uid', 'fullName', 'email', 'activityType', 'deviceInfo', 'timestamp'])
+        && data.keys().hasOnly(['uid', 'fullName', 'email', 'activityType', 'deviceInfo', 'timestamp'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
+        && data.activityType in ['LOGIN', 'REGISTER & LOGIN']
+        && data.deviceInfo is string && data.deviceInfo.size() >= 1 && data.deviceInfo.size() <= 300
+        && data.timestamp is timestamp;
+    }
+
+    function isValidEvent(data) {
+      return data.keys().hasAll(['title', 'partyName', 'region', 'eventDate', 'pointReward', 'address', 'lat', 'lng', 'rsvpYes', 'rsvpNo', 'createdAt'])
+        && data.keys().hasOnly(['title', 'partyName', 'region', 'eventDate', 'pointReward', 'address', 'lat', 'lng', 'rsvpYes', 'rsvpNo', 'createdAt'])
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
+        && data.partyName is string && data.partyName.size() >= 1 && data.partyName.size() <= 120
+        && data.region is string && data.region.size() >= 2 && data.region.size() <= 120
+        && data.eventDate is string && data.eventDate.size() >= 4 && data.eventDate.size() <= 60
+        && data.pointReward is number && data.pointReward >= 0 && data.pointReward <= 10000
+        && data.address is string && data.address.size() >= 4 && data.address.size() <= 300
+        && data.lat is number && data.lat >= -90 && data.lat <= 90
+        && data.lng is number && data.lng >= -180 && data.lng <= 180
+        && data.rsvpYes is list && data.rsvpYes.size() <= 5000 && (data.rsvpYes.size() == 0 || data.rsvpYes[0] is string)
+        && data.rsvpNo is list && data.rsvpNo.size() <= 5000 && (data.rsvpNo.size() == 0 || data.rsvpNo[0] is string)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidReward(data) {
+      return data.keys().hasAll(['itemName', 'pointCost', 'stock', 'description', 'createdAt'])
+        && data.keys().hasOnly(['itemName', 'pointCost', 'stock', 'description', 'createdAt'])
+        && data.itemName is string && data.itemName.size() >= 2 && data.itemName.size() <= 140
+        && data.pointCost is number && data.pointCost >= 1 && data.pointCost <= 1000000
+        && data.stock is number && data.stock >= 0 && data.stock <= 1000000
+        && data.description is string && data.description.size() <= 400
+        && data.createdAt is timestamp;
+    }
+
+    function isValidRewardClaim(data) {
+      return data.keys().hasAll(['uid', 'voterName', 'phone', 'rewardId', 'itemName', 'pointUsed', 'status', 'claimedAt'])
+        && data.keys().hasOnly(['uid', 'voterName', 'phone', 'rewardId', 'itemName', 'pointUsed', 'status', 'claimedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.voterName is string && data.voterName.size() >= 2 && data.voterName.size() <= 120
+        && data.phone is string && data.phone.size() >= 6 && data.phone.size() <= 30
+        && data.rewardId is string && isValidId(data.rewardId)
+        && data.itemName is string && data.itemName.size() >= 2 && data.itemName.size() <= 140
+        && data.pointUsed is number && data.pointUsed >= 1 && data.pointUsed <= 1000000
+        && data.status in ['MENUNGGU', 'DISERAHKAN']
+        && data.claimedAt is timestamp;
+    }
+
+    function isValidAspiration(data) {
+      return data.keys().hasAll(['uid', 'voterName', 'region', 'message', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'voterName', 'region', 'message', 'createdAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.voterName is string && data.voterName.size() >= 2 && data.voterName.size() <= 120
+        && data.region is string && data.region.size() >= 2 && data.region.size() <= 120
+        && data.message is string && data.message.size() >= 4 && data.message.size() <= 1500
+        && data.createdAt is timestamp;
+    }
+
+    function isValidCalegInfo(data) {
+      return data.keys().hasAll(['calegName', 'partyName', 'region', 'description', 'createdAt'])
+        && data.keys().hasOnly(['calegName', 'partyName', 'region', 'description', 'createdAt'])
+        && data.calegName is string && data.calegName.size() >= 2 && data.calegName.size() <= 120
+        && data.partyName is string && data.partyName.size() >= 1 && data.partyName.size() <= 120
+        && data.region is string && data.region.size() >= 2 && data.region.size() <= 120
+        && data.description is string && data.description.size() >= 4 && data.description.size() <= 1500
+        && data.createdAt is timestamp;
+    }
+
+    // 4. Collection Match Blocks
+
+    // STAFF ACCOUNTS (Kader, Tim Sukses, Admin, Super Admin - multi-device cloud login & management)
+    match /user_accounts/{userId} {
+      allow get: if isValidId(userId);
+      allow list: if true;
+      allow create: if isValidId(userId) && isValidUserAccount(incoming());
+      allow update: if isValidId(userId) && isValidUserAccount(incoming()) && incoming().id == existing().id;
+      allow delete: if isValidId(userId);
+    }
+
+    // VOTERS (PII Isolated: Owner & Superadmin only)
+    match /voters/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isSuperAdmin());
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(uid)
+        && request.auth.uid == uid
+        && isValidVoter(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().points == 100
+        && incoming().createdAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(uid)
+        && isValidVoter(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().email == existing().email
+        && incoming().referralCode == existing().referralCode
+        && (
+          isSuperAdmin()
+          || (
+            isOwner(uid)
+            && incoming().points == existing().points
+            && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'address', 'region', 'phone', 'occupation', 'birthDate'])
+          )
+          || (
+            isOwner(uid)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['points', 'lastEventRsvpId'])
+            && isValidId(incoming().lastEventRsvpId)
+            && exists(/databases/$(database)/documents/events/$(incoming().lastEventRsvpId))
+            && !(request.auth.uid in get(/databases/$(database)/documents/events/$(incoming().lastEventRsvpId)).data.rsvpYes)
+            && (request.auth.uid in getAfter(/databases/$(database)/documents/events/$(incoming().lastEventRsvpId)).data.rsvpYes)
+            && incoming().points == existing().points + get(/databases/$(database)/documents/events/$(incoming().lastEventRsvpId)).data.pointReward
+          )
+          || (
+            isOwner(uid)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['points'])
+            && incoming().points < existing().points
+            && incoming().points >= 0
+          )
+          || (
+            uid != request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly(['points'])
+            && incoming().points == existing().points + 50
+            && !exists(/databases/$(database)/documents/voters/$(request.auth.uid))
+            && existsAfter(/databases/$(database)/documents/voters/$(request.auth.uid))
+            && getAfter(/databases/$(database)/documents/voters/$(request.auth.uid)).data.referredBy == existing().referralCode
+          )
+        );
+
+      allow delete: if isSuperAdmin() && isValidId(uid);
+    }
+
+    // REFERRAL CODES (Non-PII lookup)
+    match /referral_codes/{code} {
+      allow get: if isSignedIn() && isValidId(code);
+      allow list: if isSuperAdmin();
+      allow create: if isVerifiedUser()
+        && isValidId(code)
+        && isValidReferralCode(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().referralCode == code
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isSuperAdmin() && isValidId(code);
+    }
+
+    // ACTIVITY LOGS (Owner & Superadmin read, immutable audit trail)
+    match /activity_logs/{logId} {
+      allow get: if isValidId(logId) && (isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid));
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isVerifiedUser()
+        && isValidId(logId)
+        && isValidActivityLog(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().timestamp == request.time;
+      allow update, delete: if false;
+    }
+
+    // EVENTS (Public campaign schedule & map, Superadmin CRUD, Voters RSVP)
+    match /events/{eventId} {
+      allow get: if isValidId(eventId);
+      allow list: if true;
+      allow create: if isSuperAdmin()
+        && isValidId(eventId)
+        && isValidEvent(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(eventId)
+        && isValidEvent(incoming())
+        && incoming().createdAt == existing().createdAt
+        && (
+          isSuperAdmin()
+          || (
+            incoming().title == existing().title
+            && incoming().partyName == existing().partyName
+            && incoming().region == existing().region
+            && incoming().eventDate == existing().eventDate
+            && incoming().pointReward == existing().pointReward
+            && incoming().address == existing().address
+            && incoming().lat == existing().lat
+            && incoming().lng == existing().lng
+            && incoming().diff(existing()).affectedKeys().hasOnly(['rsvpYes', 'rsvpNo'])
+          )
+        );
+      allow delete: if isSuperAdmin() && isValidId(eventId);
+    }
+
+    // REWARDS CATALOG (Non-PII public catalog)
+    match /rewards/{rewardId} {
+      allow get: if isValidId(rewardId);
+      allow list: if true;
+      allow create: if isSuperAdmin()
+        && isValidId(rewardId)
+        && isValidReward(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(rewardId)
+        && isValidReward(incoming())
+        && incoming().createdAt == existing().createdAt
+        && (
+          isSuperAdmin()
+          || (
+            incoming().diff(existing()).affectedKeys().hasOnly(['stock'])
+            && existing().stock > 0
+            && incoming().stock == existing().stock - 1
+          )
+        );
+      allow delete: if isSuperAdmin() && isValidId(rewardId);
+    }
+
+    // REWARD CLAIMS (PII Isolated: Owner & Superadmin)
+    match /reward_claims/{claimId} {
+      allow get: if isValidId(claimId) && (isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid));
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isVerifiedUser()
+        && isValidId(claimId)
+        && isValidRewardClaim(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().status == 'MENUNGGU'
+        && incoming().claimedAt == request.time
+        && exists(/databases/$(database)/documents/rewards/$(incoming().rewardId))
+        && incoming().pointUsed == get(/databases/$(database)/documents/rewards/$(incoming().rewardId)).data.pointCost
+        && getAfter(/databases/$(database)/documents/rewards/$(incoming().rewardId)).data.stock == get(/databases/$(database)/documents/rewards/$(incoming().rewardId)).data.stock - 1
+        && getAfter(/databases/$(database)/documents/voters/$(request.auth.uid)).data.points == get(/databases/$(database)/documents/voters/$(request.auth.uid)).data.points - incoming().pointUsed;
+      allow update: if isSuperAdmin()
+        && isValidId(claimId)
+        && isValidRewardClaim(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+        && existing().status == 'MENUNGGU'
+        && incoming().status == 'DISERAHKAN';
+      allow delete: if isSuperAdmin() && isValidId(claimId);
+    }
+
+    // ASPIRATIONS (Owner & Superadmin)
+    match /aspirations/{aspirationId} {
+      allow get: if isValidId(aspirationId) && (isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid));
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isVerifiedUser()
+        && isValidId(aspirationId)
+        && isValidAspiration(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update, delete: if isSuperAdmin() && isValidId(aspirationId);
+    }
+
+    // CALEG & PARTY INFO (Non-PII public campaign info)
+    match /caleg_info/{infoId} {
+      allow get: if isValidId(infoId);
+      allow list: if true;
+      allow create: if isSuperAdmin()
+        && isValidId(infoId)
+        && isValidCalegInfo(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isSuperAdmin()
+        && isValidId(infoId)
+        && isValidCalegInfo(incoming())
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if isSuperAdmin() && isValidId(infoId);
     }
   }
 }
