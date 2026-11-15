@@ -20,6 +20,7 @@ import type {
   SuperadminSection,
   VoterDoc,
 } from '../../types/swaraku';
+import type { VoterOcrRecord } from '../../types/vore';
 import {
   subscribeAllVoters,
   subscribeActivityLogs,
@@ -33,6 +34,7 @@ import {
   deleteCalegInfoAdmin,
   markClaimDiserahkanAdmin,
 } from '../../services/swarakuFirestore';
+import { subscribeToCloudVoters } from '../../services/cloudSyncService';
 import { AdminMapPicker } from '../maps/AdminMapPicker';
 
 interface SuperadminViewProps {
@@ -52,6 +54,7 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
 
   // Real-time Superadmin collections
   const [votersList, setVotersList] = useState<VoterDoc[]>([]);
+  const [ocrVotersList, setOcrVotersList] = useState<VoterOcrRecord[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLogDoc[]>([]);
   const [allClaims, setAllClaims] = useState<RewardClaimDoc[]>([]);
   const [allAspirations, setAllAspirations] = useState<AspirationDoc[]>([]);
@@ -61,6 +64,7 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
     const unsubVoters = subscribeAllVoters(setVotersList, (err) =>
       onNotify(`Gagal memuat data voters: ${err.message}`)
     );
+    const unsubOcrVoters = subscribeToCloudVoters(setOcrVotersList);
     const unsubLogs = subscribeActivityLogs(setActivityLogs, (err) =>
       onNotify(`Gagal memuat activity logs: ${err.message}`)
     );
@@ -73,6 +77,7 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
 
     return () => {
       unsubVoters();
+      unsubOcrVoters();
       unsubLogs();
       unsubClaims();
       unsubAsp();
@@ -185,6 +190,20 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
     );
   }, [votersList, voterSearch]);
 
+  const filteredOcrVoters = useMemo(() => {
+    const q = voterSearch.trim().toLowerCase();
+    if (!q) return ocrVotersList;
+    return ocrVotersList.filter(
+      (v) =>
+        v.nama.toLowerCase().includes(q) ||
+        v.nik.toLowerCase().includes(q) ||
+        v.tps.toLowerCase().includes(q) ||
+        v.kelurahan.toLowerCase().includes(q) ||
+        v.kecamatan.toLowerCase().includes(q) ||
+        v.kabupatenKota.toLowerCase().includes(q)
+    );
+  }, [ocrVotersList, voterSearch]);
+
   const pendingClaimsCount = allClaims.filter((c) => c.status === 'MENUNGGU').length;
 
   const subTabs: { id: SuperadminSection; label: string; icon: React.ReactNode }[] = [
@@ -212,7 +231,7 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
           <div className="rounded-2xl bg-white border border-slate-200 p-4">
             <p className="text-xs font-semibold text-slate-500">Voters Terdaftar</p>
             <p className="text-2xl font-extrabold font-mono tabular-nums text-slate-900 mt-1">
-              {votersList.length}
+              {votersList.length + ocrVotersList.length}
             </p>
           </div>
           <div className="rounded-2xl bg-white border border-slate-200 p-4">
@@ -721,61 +740,138 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
 
       {/* SECTION 4: DATA VOTERS */}
       {section === 'voters' && (
-        <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-2xs">
-          <div className="p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <h3 className="text-base font-extrabold text-slate-900">
-              Daftar Pemilih (Voters) Terdaftar ({filteredVoters.length})
-            </h3>
-            <div className="relative w-full sm:w-72">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={voterSearch}
-                onChange={(e) => setVoterSearch(e.target.value)}
-                placeholder="Cari nama, dapil, atau WA..."
-                className="w-full min-h-[40px] pl-9 pr-3 py-1.5 rounded-xl border border-slate-300 text-xs"
-              />
+        <div className="space-y-6">
+          {/* Tabel Voters e-KTP / Lapangan (OCR) */}
+          <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-2xs">
+            <div className="p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Data Pemilih Terverifikasi e-KTP ({filteredOcrVoters.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Data pemilih hasil pendataan &amp; scan e-KTP yang tersinkron dari Cloud Firestore.
+                </p>
+              </div>
+              <div className="relative w-full sm:w-72">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={voterSearch}
+                  onChange={(e) => setVoterSearch(e.target.value)}
+                  placeholder="Cari nama, NIK, wilayah, TPS, atau WA..."
+                  className="w-full min-h-[40px] pl-9 pr-3 py-1.5 rounded-xl border border-slate-300 text-xs"
+                />
+              </div>
             </div>
+
+            {filteredOcrVoters.length === 0 ? (
+              <div className="p-6 text-center text-sm text-slate-500">
+                Belum ada data pemilih e-KTP terdaftar.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-bold">
+                    <tr>
+                      <th className="px-4 py-3">Nama Pemilih</th>
+                      <th className="px-4 py-3">NIK</th>
+                      <th className="px-4 py-3">Wilayah &amp; TPS</th>
+                      <th className="px-4 py-3">No. Telepon</th>
+                      <th className="px-4 py-3">Diinput Oleh</th>
+                      <th className="px-4 py-3 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredOcrVoters.map((v) => (
+                      <tr key={v.nik || v.id} className="hover:bg-slate-50/70">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2.5">
+                            {v.fotoKtpUrl && (
+                              <img
+                                src={v.fotoKtpUrl}
+                                alt={`KTP ${v.nama}`}
+                                className="w-10 h-7 rounded object-cover border border-slate-200 shrink-0"
+                              />
+                            )}
+                            <div>
+                              <p className="font-bold text-slate-900">{v.nama}</p>
+                              <p className="text-[11px] text-slate-500">{v.tempatTglLahir}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 font-mono font-semibold text-slate-700">
+                          {v.nikMasked || v.nik}
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-blue-700">
+                            {v.tps} &middot; {v.kelurahan}, {v.kecamatan}
+                          </p>
+                          <p className="text-[11px] text-slate-500 max-w-xs truncate">
+                            {v.alamat} ({v.kabupatenKota})
+                          </p>
+                        </td>
+                        <td className="px-4 py-3 font-mono">{v.noHp || '-'}</td>
+                        <td className="px-4 py-3 text-slate-600">{v.terdaftarOleh || '-'}</td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[10px]">
+                            {v.statusDpt || 'DPT valid'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
-          {filteredVoters.length === 0 ? (
-            <div className="p-6 text-center text-sm text-slate-500">
-              Belum ada data pemilih terdaftar.
+          {/* Tabel Voters Loyalty (Google SSO) */}
+          <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-2xs">
+            <div className="p-5 border-b border-slate-200">
+              <h3 className="text-base font-extrabold text-slate-900">
+                Daftar Pemilih Loyalty Google SSO ({filteredVoters.length})
+              </h3>
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-bold">
-                  <tr>
-                    <th className="px-4 py-3">Nama Lengkap</th>
-                    <th className="px-4 py-3">Daerah / Alamat</th>
-                    <th className="px-4 py-3">No. Telepon</th>
-                    <th className="px-4 py-3">Kode Referral</th>
-                    <th className="px-4 py-3 text-right">Kantong Poin</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredVoters.map((v) => (
-                    <tr key={v.uid} className="hover:bg-slate-50/70">
-                      <td className="px-4 py-3">
-                        <p className="font-bold text-slate-900">{v.fullName}</p>
-                        <p className="text-[11px] text-slate-500">{v.email}</p>
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="font-semibold text-blue-700">{v.region}</p>
-                        <p className="text-[11px] text-slate-500 max-w-xs truncate">{v.address}</p>
-                      </td>
-                      <td className="px-4 py-3 font-mono">{v.phone}</td>
-                      <td className="px-4 py-3 font-mono font-bold text-slate-700">{v.referralCode}</td>
-                      <td className="px-4 py-3 text-right font-mono tabular-nums font-extrabold text-emerald-700">
-                        {v.points.toLocaleString('id-ID')}
-                      </td>
+
+            {filteredVoters.length === 0 ? (
+              <div className="p-6 text-center text-sm text-slate-500">
+                Belum ada pemilih Loyalty Google SSO terdaftar.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-bold">
+                    <tr>
+                      <th className="px-4 py-3">Nama Lengkap</th>
+                      <th className="px-4 py-3">Daerah / Alamat</th>
+                      <th className="px-4 py-3">No. Telepon</th>
+                      <th className="px-4 py-3">Kode Referral</th>
+                      <th className="px-4 py-3 text-right">Kantong Poin</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredVoters.map((v) => (
+                      <tr key={v.uid} className="hover:bg-slate-50/70">
+                        <td className="px-4 py-3">
+                          <p className="font-bold text-slate-900">{v.fullName}</p>
+                          <p className="text-[11px] text-slate-500">{v.email}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-blue-700">{v.region}</p>
+                          <p className="text-[11px] text-slate-500 max-w-xs truncate">{v.address}</p>
+                        </td>
+                        <td className="px-4 py-3 font-mono">{v.phone}</td>
+                        <td className="px-4 py-3 font-mono font-bold text-slate-700">{v.referralCode}</td>
+                        <td className="px-4 py-3 text-right font-mono tabular-nums font-extrabold text-emerald-700">
+                          {v.points.toLocaleString('id-ID')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

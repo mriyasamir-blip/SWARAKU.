@@ -8,6 +8,8 @@ import {
   deleteDoc,
   getDocs,
   onSnapshot,
+  query,
+  where,
   Unsubscribe,
 } from 'firebase/firestore';
 import { firestore } from '../lib/firebase';
@@ -188,6 +190,54 @@ export async function autoHealVoterCoordinates(voter: VoterOcrRecord): Promise<V
 // -------------------------------------------------------------
 // 2. REAL-TIME MULTI-DEVICE LISTENER: VOTERS
 // -------------------------------------------------------------
+const legacyMigratingNiks = new Set<string>();
+
+function mapDocToVoterOcrRecord(
+  docId: string,
+  d: Record<string, any>
+): { cleanNik: string; record: VoterOcrRecord; sortTime: number } {
+  const rawNik = String(d.nik || docId || '').trim();
+  const cleanNik = rawNik.replace(/\D/g, '') || rawNik;
+  const masked =
+    d.nikMasked ||
+    (cleanNik.length >= 8
+      ? `${cleanNik.slice(0, 4)}••••••••${cleanNik.slice(-4)}`
+      : cleanNik);
+
+  const record: VoterOcrRecord = {
+    id: d.id || docId,
+    nik: cleanNik,
+    nikMasked: masked,
+    nama: String(d.nama || 'VOTER TANPA NAMA').toUpperCase().trim(),
+    tempatTglLahir: d.tempatTglLahir || '-',
+    jenisKelamin: d.jenisKelamin === 'Perempuan' ? 'Perempuan' : 'Laki-laki',
+    alamat: d.alamat || '-',
+    rtRw: d.rtRw || '001/001',
+    kelurahan: d.kelurahan || '',
+    kecamatan: d.kecamatan || '',
+    kabupatenKota: d.kabupatenKota || '',
+    provinsi: d.provinsi || 'DKI Jakarta',
+    tps: d.tps || 'TPS 001',
+    noHp: d.noHp || '-',
+    waktuDaftar: d.waktuDaftar || new Date().toLocaleString('id-ID'),
+    fotoKtpUrl: d.fotoKtpUrl || undefined,
+    statusDpt: d.statusDpt === 'Perlu cek' ? 'Perlu cek' : 'DPT valid',
+    statusRegistrasi: 'TERDAFTAR',
+    terdaftarOleh: d.terdaftarOleh || 'Database Cloud',
+    diinputOlehRole: d.diinputOlehRole,
+    diinputOlehNama: d.diinputOlehNama,
+    lat: typeof d.lat === 'number' ? d.lat : undefined,
+    lng: typeof d.lng === 'number' ? d.lng : undefined,
+  };
+
+  const sortTime =
+    (d.updatedAt ? new Date(String(d.updatedAt)).getTime() : 0) ||
+    new Date(record.waktuDaftar).getTime() ||
+    0;
+
+  return { cleanNik, record, sortTime };
+}
+
 export function subscribeToCloudVoters(
   onUpdate: (voters: VoterOcrRecord[]) => void,
   onError?: (err: any) => void
@@ -197,95 +247,126 @@ export function subscribeToCloudVoters(
     statusText: 'Mendengarkan perubahan Real-Time Cloud Voters...',
   });
 
-  const votersCollectionRef = collection(firestore, CLOUD_COLLECTIONS.VOTERS);
+  const primaryCollectionRef = collection(firestore, CLOUD_COLLECTIONS.VOTERS);
+  const legacyVotersQuery = query(
+    collection(firestore, 'voters'),
+    where('statusRegistrasi', '==', 'TERDAFTAR')
+  );
 
-  const unsubscribe = onSnapshot(
-    votersCollectionRef,
+  const primaryMap = new Map<string, { record: VoterOcrRecord; sortTime: number }>();
+  const legacyMap = new Map<string, { record: VoterOcrRecord; sortTime: number }>();
+  let primaryLoaded = false;
+  let legacyLoaded = false;
+
+  const emitMerged = () => {
+    const mergedMap = new Map<string, { record: VoterOcrRecord; sortTime: number }>();
+
+    // Masukkan data historis dari koleksi 'voters' terlebih dahulu
+    legacyMap.forEach((val, key) => {
+      mergedMap.set(key, val);
+    });
+
+    // Prioritaskan data terbaru dari koleksi 'voter_ocr_records'
+    primaryMap.forEach((val, key) => {
+      mergedMap.set(key, val);
+    });
+
+    const entries = Array.from(mergedMap.values());
+    entries.sort((a, b) => b.sortTime - a.sortTime);
+
+    const voters = entries.map((e) => e.record);
+    const needsHealingList = voters.filter((v) => isCoordinateErroneousOrMissing(v));
+
+    // Sinkronkan diam-diam data legacy ke koleksi primary agar semua perangkat konsisten
+    if (primaryLoaded && legacyLoaded) {
+      legacyMap.forEach((val, key) => {
+        if (!primaryMap.has(key) && !legacyMigratingNiks.has(key)) {
+          legacyMigratingNiks.add(key);
+          setDoc(
+            doc(firestore, CLOUD_COLLECTIONS.VOTERS, key),
+            cleanForFirestore({
+              ...val.record,
+              migratedFromLegacy: true,
+              updatedAt: new Date().toISOString(),
+            }),
+            { merge: true }
+          )
+            .catch(() => {
+              legacyMigratingNiks.delete(key);
+            });
+        }
+      });
+    }
+
+    updateSyncState({
+      isConnected: true,
+      totalVotersInCloud: voters.length,
+      statusText: `🟢 Cloud Real-Time Tersinkron (${voters.length} Voter)`,
+    });
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(LOCAL_CACHE_KEYS.VOTERS, JSON.stringify(voters));
+      } catch (e) {
+        console.warn('[Cache] LocalStorage cache notice:', e);
+      }
+    }
+
+    onUpdate(voters);
+
+    if (needsHealingList.length > 0) {
+      needsHealingList.slice(0, 5).forEach((v) => {
+        autoHealVoterCoordinates(v);
+      });
+    }
+  };
+
+  const unsubscribePrimary = onSnapshot(
+    primaryCollectionRef,
     (snapshot) => {
-      const voters: VoterOcrRecord[] = [];
-      const needsHealingList: VoterOcrRecord[] = [];
-
+      primaryMap.clear();
       snapshot.forEach((docSnap) => {
-        const d = docSnap.data();
-        const rawNik = String(d.nik || docSnap.id || '').trim();
-        const cleanNik = rawNik.replace(/\D/g, '') || rawNik;
-        const masked =
-          d.nikMasked ||
-          (cleanNik.length >= 8
-            ? `${cleanNik.slice(0, 4)}••••••••${cleanNik.slice(-4)}`
-            : cleanNik);
-
-        const voterRecord: VoterOcrRecord = {
-          id: d.id || docSnap.id,
-          nik: cleanNik,
-          nikMasked: masked,
-          nama: String(d.nama || 'VOTER TANPA NAMA').toUpperCase().trim(),
-          tempatTglLahir: d.tempatTglLahir || '-',
-          jenisKelamin: d.jenisKelamin === 'Perempuan' ? 'Perempuan' : 'Laki-laki',
-          alamat: d.alamat || '-',
-          rtRw: d.rtRw || '001/001',
-          kelurahan: d.kelurahan || '',
-          kecamatan: d.kecamatan || '',
-          kabupatenKota: d.kabupatenKota || '',
-          provinsi: d.provinsi || 'DKI Jakarta',
-          tps: d.tps || 'TPS 001',
-          noHp: d.noHp || '-',
-          waktuDaftar: d.waktuDaftar || new Date().toLocaleString('id-ID'),
-          fotoKtpUrl: d.fotoKtpUrl || undefined,
-          statusDpt: d.statusDpt === 'Perlu cek' ? 'Perlu cek' : 'DPT valid',
-          statusRegistrasi: 'TERDAFTAR',
-          terdaftarOleh: d.terdaftarOleh || 'Database Cloud',
-          diinputOlehRole: d.diinputOlehRole,
-          diinputOlehNama: d.diinputOlehNama,
-          lat: typeof d.lat === 'number' ? d.lat : undefined,
-          lng: typeof d.lng === 'number' ? d.lng : undefined,
-        };
-
-        if (isCoordinateErroneousOrMissing(voterRecord)) {
-          needsHealingList.push(voterRecord);
+        const mapped = mapDocToVoterOcrRecord(docSnap.id, docSnap.data());
+        if (mapped.cleanNik) {
+          primaryMap.set(mapped.cleanNik, {
+            record: mapped.record,
+            sortTime: mapped.sortTime,
+          });
         }
-
-        voters.push(voterRecord);
       });
-
-      // Urutkan data voter: Terbaru di paling atas (top of list)
-      voters.sort((a, b) => {
-        const timeA = new Date(a.waktuDaftar).getTime() || 0;
-        const timeB = new Date(b.waktuDaftar).getTime() || 0;
-        return timeB - timeA;
-      });
-
-      // Update state sinkronisasi & cache lokal (resilience)
-      updateSyncState({
-        isConnected: true,
-        totalVotersInCloud: voters.length,
-        statusText: `🟢 Cloud Real-Time Tersinkron (${voters.length} Voter)`,
-      });
-
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem(LOCAL_CACHE_KEYS.VOTERS, JSON.stringify(voters));
-        } catch (e) {
-          console.warn('[Cache] LocalStorage cache notice:', e);
-        }
-      }
-
-      onUpdate(voters);
-
-      // Jalankan auto-healing di latar belakang untuk data lama yang titiknya meleset
-      if (needsHealingList.length > 0) {
-        needsHealingList.slice(0, 5).forEach((v) => {
-          autoHealVoterCoordinates(v);
-        });
-      }
+      primaryLoaded = true;
+      emitMerged();
     },
     (error) => {
-      console.warn('[CloudSync] Firestore voters snapshot notice:', error);
-      updateSyncState({
-        isConnected: false,
-        statusText: '⚠️ Offline / Cloud Sync Tertunda (Menggunakan Cache)',
+      console.warn('[CloudSync] Firestore voter_ocr_records snapshot notice:', error);
+      if (!legacyLoaded) {
+        updateSyncState({
+          isConnected: false,
+          statusText: '⚠️ Offline / Cloud Sync Tertunda (Menggunakan Cache)',
+        });
+        if (onError) onError(error);
+      }
+    }
+  );
+
+  const unsubscribeLegacy = onSnapshot(
+    legacyVotersQuery,
+    (snapshot) => {
+      legacyMap.clear();
+      snapshot.forEach((docSnap) => {
+        const mapped = mapDocToVoterOcrRecord(docSnap.id, docSnap.data());
+        if (mapped.cleanNik) {
+          legacyMap.set(mapped.cleanNik, {
+            record: mapped.record,
+            sortTime: mapped.sortTime,
+          });
+        }
       });
-      if (onError) onError(error);
+      legacyLoaded = true;
+      emitMerged();
+    },
+    (error) => {
+      console.warn('[CloudSync] Firestore legacy voters snapshot notice:', error);
     }
   );
 
@@ -293,7 +374,8 @@ export function subscribeToCloudVoters(
     updateSyncState({
       activeListenersCount: Math.max(0, syncState.activeListenersCount - 1),
     });
-    unsubscribe();
+    unsubscribePrimary();
+    unsubscribeLegacy();
   };
 }
 
@@ -766,7 +848,7 @@ export async function migrateLocalDataToCloud(): Promise<{
   }
 
   try {
-    // 1. Ambil data eksisting dari Cloud Firestore untuk deduplikasi berdasarkan NIK
+    // 1. Ambil data eksisting dari Cloud Firestore (voter_ocr_records + legacy voters) untuk deduplikasi berdasarkan NIK
     const cloudVotersSnapshot = await getDocs(collection(firestore, CLOUD_COLLECTIONS.VOTERS));
     const cloudNikSet = new Set<string>();
     cloudVotersSnapshot.forEach((docSnap) => {
@@ -774,6 +856,23 @@ export async function migrateLocalDataToCloud(): Promise<{
       const nik = String(d.nik || docSnap.id).replace(/\D/g, '');
       if (nik) cloudNikSet.add(nik);
     });
+
+    // Ambil juga data legacy OCR voters di koleksi 'voters' agar tersinkron ke 'voter_ocr_records'
+    try {
+      const legacySnapshot = await getDocs(
+        query(collection(firestore, 'voters'), where('statusRegistrasi', '==', 'TERDAFTAR'))
+      );
+      for (const docSnap of legacySnapshot.docs) {
+        const mapped = mapDocToVoterOcrRecord(docSnap.id, docSnap.data());
+        if (mapped.cleanNik && !cloudNikSet.has(mapped.cleanNik)) {
+          await saveVoterToCloud(mapped.record);
+          cloudNikSet.add(mapped.cleanNik);
+          votersMigrated++;
+        }
+      }
+    } catch (legacyErr) {
+      console.warn('[CloudSync] Legacy voters migration notice:', legacyErr);
+    }
 
     // 2. Baca local cache
     const rawLocalVoters = [

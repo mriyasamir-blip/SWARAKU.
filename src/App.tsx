@@ -40,6 +40,7 @@ import {
   updateUserPhotoOnCloud,
 } from './services/userApiService';
 import {
+  LOCAL_CACHE_KEYS,
   migrateLocalDataToCloud,
   saveB1ToCloud,
   saveC1ToCloud,
@@ -118,7 +119,16 @@ export default function App() {
   const [userAccounts, setUserAccounts] = useState<UserAccount[]>([]);
 
   // Operational Campaign Data for Admin & Superadmin Modules (Firestore-synced, zero dummy defaults)
-  const [voterOcrRecords, setVoterOcrRecords] = useState<VoterOcrRecord[]>([]);
+  const [voterOcrRecords, setVoterOcrRecords] = useState<VoterOcrRecord[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(LOCAL_CACHE_KEYS.VOTERS);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
   const [timSuksesList, setTimSuksesList] = useState<TimSuksesWilayahRecord[]>([]);
   const [c1Records, setC1Records] = useState<FormC1Upload[]>([]);
   const [b1Records, setB1Records] = useState<FormB1Upload[]>([]);

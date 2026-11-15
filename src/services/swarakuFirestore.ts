@@ -545,7 +545,10 @@ export function subscribeAllVoters(
   return onSnapshot(
     q,
     (snap) => {
-      onData(snap.docs.map((d) => d.data() as VoterDoc));
+      const loyaltyVoters = snap.docs
+        .map((d) => d.data() as VoterDoc)
+        .filter((v) => Boolean(v && v.uid && v.fullName));
+      onData(loyaltyVoters);
     },
     (error) => {
       try {

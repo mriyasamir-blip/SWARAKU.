@@ -209,10 +209,16 @@ service cloud.firestore {
       allow delete: if isValidId(recordId);
     }
 
-    // VOTERS (PII Isolated: Owner & Superadmin only)
+    // VOTERS (PII Isolated for Loyalty SSO: Owner & Superadmin only; legacy OCR records readable via query constraint)
     match /voters/{uid} {
-      allow get: if isValidId(uid) && (isOwner(uid) || isSuperAdmin());
-      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow get: if isValidId(uid) && (
+        isOwner(uid)
+        || isSuperAdmin()
+        || existing().statusRegistrasi == 'TERDAFTAR'
+      );
+      allow list: if isSuperAdmin()
+        || (isSignedIn() && existing().uid == request.auth.uid)
+        || existing().statusRegistrasi == 'TERDAFTAR';
 
       allow create: if isVerifiedUser()
         && isValidId(uid)

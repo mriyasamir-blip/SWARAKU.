@@ -1,6 +1,7 @@
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { firestore } from '../lib/firebase';
 import {
+  CLOUD_COLLECTIONS,
   saveVoterToCloud,
   saveTimSuksesToCloud,
   saveC1ToCloud,
@@ -67,41 +68,52 @@ export async function syncSaveTimSukses(timSukses: TimSuksesWilayahRecord): Prom
 export async function fetchRemoteVoters(): Promise<VoterOcrRecord[]> {
   const votersMap = new Map<string, VoterOcrRecord>();
 
+  const parseSnap = (docSnap: any) => {
+    const data = docSnap.data() as any;
+    const cleanNik = String(data.nik || docSnap.id).replace(/\D/g, '');
+    if (cleanNik) {
+      votersMap.set(cleanNik, {
+        id: docSnap.id,
+        nik: cleanNik,
+        nikMasked: data.nikMasked || (cleanNik.length >= 8 ? `${cleanNik.slice(0, 4)}••••••••${cleanNik.slice(-4)}` : cleanNik),
+        nama: String(data.nama || '').toUpperCase(),
+        tempatTglLahir: data.tempatTglLahir || '-',
+        jenisKelamin: data.jenisKelamin === 'Perempuan' ? 'Perempuan' : 'Laki-laki',
+        alamat: data.alamat || '-',
+        rtRw: data.rtRw || '001/001',
+        kelurahan: data.kelurahan || '',
+        kecamatan: data.kecamatan || '',
+        kabupatenKota: data.kabupatenKota || '',
+        provinsi: data.provinsi || 'DKI Jakarta',
+        tps: data.tps || 'TPS 001',
+        noHp: data.noHp || '-',
+        waktuDaftar: data.waktuDaftar || new Date().toLocaleString('id-ID'),
+        fotoKtpUrl: data.fotoKtpUrl,
+        statusDpt: data.statusDpt || 'DPT valid',
+        statusRegistrasi: 'TERDAFTAR',
+        terdaftarOleh: data.terdaftarOleh || 'Database Cloud',
+        diinputOlehRole: data.diinputOlehRole,
+        diinputOlehNama: data.diinputOlehNama,
+        lat: typeof data.lat === 'number' ? data.lat : undefined,
+        lng: typeof data.lng === 'number' ? data.lng : undefined,
+      });
+    }
+  };
+
   try {
-    const querySnapshot = await getDocs(collection(firestore, 'voters'));
-    querySnapshot.forEach((docSnap) => {
-      const data = docSnap.data() as any;
-      const cleanNik = String(data.nik || docSnap.id).replace(/\D/g, '');
-      if (cleanNik) {
-        votersMap.set(cleanNik, {
-          id: docSnap.id,
-          nik: cleanNik,
-          nikMasked: data.nikMasked || (cleanNik.length >= 8 ? `${cleanNik.slice(0, 4)}••••••••${cleanNik.slice(-4)}` : cleanNik),
-          nama: String(data.nama || '').toUpperCase(),
-          tempatTglLahir: data.tempatTglLahir || '-',
-          jenisKelamin: data.jenisKelamin === 'Perempuan' ? 'Perempuan' : 'Laki-laki',
-          alamat: data.alamat || '-',
-          rtRw: data.rtRw || '001/001',
-          kelurahan: data.kelurahan || '',
-          kecamatan: data.kecamatan || '',
-          kabupatenKota: data.kabupatenKota || '',
-          provinsi: data.provinsi || 'DKI Jakarta',
-          tps: data.tps || 'TPS 001',
-          noHp: data.noHp || '-',
-          waktuDaftar: data.waktuDaftar || new Date().toLocaleString('id-ID'),
-          fotoKtpUrl: data.fotoKtpUrl,
-          statusDpt: data.statusDpt || 'DPT valid',
-          statusRegistrasi: 'TERDAFTAR',
-          terdaftarOleh: data.terdaftarOleh || 'Database Cloud',
-          diinputOlehRole: data.diinputOlehRole,
-          diinputOlehNama: data.diinputOlehNama,
-          lat: typeof data.lat === 'number' ? data.lat : undefined,
-          lng: typeof data.lng === 'number' ? data.lng : undefined,
-        });
-      }
-    });
+    const legacySnap = await getDocs(
+      query(collection(firestore, 'voters'), where('statusRegistrasi', '==', 'TERDAFTAR'))
+    );
+    legacySnap.forEach(parseSnap);
   } catch (e) {
-    console.warn('Fetch remote voters notice:', e);
+    console.warn('Fetch legacy remote voters notice:', e);
+  }
+
+  try {
+    const primarySnap = await getDocs(collection(firestore, CLOUD_COLLECTIONS.VOTERS));
+    primarySnap.forEach(parseSnap);
+  } catch (e) {
+    console.warn('Fetch primary remote voters notice:', e);
   }
 
   return Array.from(votersMap.values());
