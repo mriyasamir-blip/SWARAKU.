@@ -9,6 +9,8 @@ import {
   CheckCircle2,
   Search,
   MapPin,
+  Shield,
+  KeyRound,
 } from 'lucide-react';
 import type {
   ActivityLogDoc,
@@ -42,6 +44,8 @@ interface SuperadminViewProps {
   rewards: RewardDoc[];
   calegInfoList: CalegInfoDoc[];
   onNotify: (msg: string) => void;
+  hasGoogleSuperAdmin?: boolean;
+  onConnectGoogleAdmin?: () => Promise<void>;
 }
 
 export const SuperadminView: React.FC<SuperadminViewProps> = ({
@@ -49,8 +53,11 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
   rewards,
   calegInfoList,
   onNotify,
+  hasGoogleSuperAdmin = true,
+  onConnectGoogleAdmin,
 }) => {
   const [section, setSection] = useState<SuperadminSection>('acara');
+  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
 
   // Real-time Superadmin collections
   const [votersList, setVotersList] = useState<VoterDoc[]>([]);
@@ -61,10 +68,21 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
   const [voterSearch, setVoterSearch] = useState('');
 
   useEffect(() => {
+    const unsubOcrVoters = subscribeToCloudVoters(setOcrVotersList);
+
+    if (!hasGoogleSuperAdmin) {
+      setVotersList([]);
+      setActivityLogs([]);
+      setAllClaims([]);
+      setAllAspirations([]);
+      return () => {
+        unsubOcrVoters();
+      };
+    }
+
     const unsubVoters = subscribeAllVoters(setVotersList, (err) =>
       onNotify(`Gagal memuat data voters: ${err.message}`)
     );
-    const unsubOcrVoters = subscribeToCloudVoters(setOcrVotersList);
     const unsubLogs = subscribeActivityLogs(setActivityLogs, (err) =>
       onNotify(`Gagal memuat activity logs: ${err.message}`)
     );
@@ -82,7 +100,7 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
       unsubClaims();
       unsubAsp();
     };
-  }, [onNotify]);
+  }, [onNotify, hasGoogleSuperAdmin]);
 
   // Event Form State
   const [evTitle, setEvTitle] = useState('');
@@ -109,8 +127,17 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
   const [clDesc, setClDesc] = useState('');
   const [savingCaleg, setSavingCaleg] = useState(false);
 
+  const requireGoogleSuperAdmin = (): boolean => {
+    if (hasGoogleSuperAdmin) return true;
+    onNotify(
+      'Silakan klik tombol "Verifikasi Google Superadmin" di bagian atas panel terlebih dahulu untuk menyimpan atau mengubah data di Cloud Firestore.'
+    );
+    return false;
+  };
+
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!requireGoogleSuperAdmin()) return;
     setSavingEvent(true);
     try {
       await createEventAdmin({
@@ -138,6 +165,7 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
 
   const handleAddReward = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!requireGoogleSuperAdmin()) return;
     setSavingReward(true);
     try {
       await createRewardAdmin({
@@ -158,6 +186,7 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
 
   const handleAddCaleg = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!requireGoogleSuperAdmin()) return;
     setSavingCaleg(true);
     try {
       await createCalegInfoAdmin({
@@ -218,14 +247,58 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
     <div className="space-y-6">
       {/* Header & Real-time Summary Metrics */}
       <div className="space-y-4">
-        <div>
-          <h2 className="text-xl font-extrabold text-slate-900">
-            Panel Manajemen Superadmin
-          </h2>
-          <p className="text-sm text-slate-600">
-            Kelola jadwal acara kampanye, katalog reward, info partai &amp; Caleg, data pemilih, dan laporan aktivitas real-time.
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-900">
+              Panel Manajemen Superadmin
+            </h2>
+            <p className="text-sm text-slate-600">
+              Kelola jadwal acara kampanye, katalog reward, info partai &amp; Caleg, data pemilih, dan laporan aktivitas real-time.
+            </p>
+          </div>
+          {hasGoogleSuperAdmin && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold shrink-0">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <span>Sesi Google Superadmin Terverifikasi</span>
+            </span>
+          )}
         </div>
+
+        {!hasGoogleSuperAdmin && onConnectGoogleAdmin && (
+          <div className="rounded-2xl bg-indigo-50 border border-indigo-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 mt-0.5">
+                <KeyRound className="w-4 h-4" />
+              </div>
+              <div className="space-y-0.5">
+                <p className="text-xs font-extrabold text-indigo-950">
+                  Verifikasi Google Superadmin untuk Akses Penuh Data Sensitif &amp; Penulisan Firestore
+                </p>
+                <p className="text-xs text-indigo-800 leading-relaxed">
+                  Anda login melalui akun Super Admin (Username &amp; Password). Hubungkan akun Google Superadmin terdaftar untuk membuka data Voters Google SSO, Riwayat Klaim, Activity Log, serta menyimpan perubahan Acara/Reward/Caleg.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={isConnectingGoogle}
+              onClick={async () => {
+                setIsConnectingGoogle(true);
+                try {
+                  await onConnectGoogleAdmin();
+                } finally {
+                  setIsConnectingGoogle(false);
+                }
+              }}
+              className="min-h-[40px] px-4 py-2 rounded-xl bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+            >
+              <Shield className="w-3.5 h-3.5" />
+              <span>
+                {isConnectingGoogle ? 'Menghubungkan...' : 'Verifikasi Google Superadmin'}
+              </span>
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="rounded-2xl bg-white border border-slate-200 p-4">
@@ -431,11 +504,12 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                     </div>
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        if (!requireGoogleSuperAdmin()) return;
                         deleteEventAdmin(ev.id)
                           .then(() => onNotify('Acara dihapus.'))
-                          .catch((err) => onNotify(err.message))
-                      }
+                          .catch((err) => onNotify(err.message));
+                      }}
                       className="min-h-[40px] min-w-[40px] p-2 rounded-xl text-rose-600 hover:bg-rose-50 cursor-pointer shrink-0"
                       title="Hapus Acara"
                     >
@@ -540,11 +614,12 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                       </div>
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
+                          if (!requireGoogleSuperAdmin()) return;
                           deleteRewardAdmin(item.id)
                             .then(() => onNotify('Reward dihapus.'))
-                            .catch((err) => onNotify(err.message))
-                        }
+                            .catch((err) => onNotify(err.message));
+                        }}
                         className="min-h-[40px] min-w-[40px] p-2 rounded-xl text-rose-600 hover:bg-rose-50 cursor-pointer shrink-0"
                         title="Hapus Reward"
                       >
@@ -603,11 +678,12 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                           {claim.status === 'MENUNGGU' ? (
                             <button
                               type="button"
-                              onClick={() =>
+                              onClick={() => {
+                                if (!requireGoogleSuperAdmin()) return;
                                 markClaimDiserahkanAdmin(claim.id)
                                   .then(() => onNotify('Status klaim diperbarui ke DISERAHKAN.'))
-                                  .catch((err) => onNotify(err.message))
-                              }
+                                  .catch((err) => onNotify(err.message));
+                              }}
                               className="min-h-[36px] px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer"
                             >
                               Tandai Diserahkan
@@ -720,11 +796,12 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                     </div>
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        if (!requireGoogleSuperAdmin()) return;
                         deleteCalegInfoAdmin(info.id)
                           .then(() => onNotify('Info Caleg dihapus.'))
-                          .catch((err) => onNotify(err.message))
-                      }
+                          .catch((err) => onNotify(err.message));
+                      }}
                       className="min-h-[40px] min-w-[40px] p-2 rounded-xl text-rose-600 hover:bg-rose-50 cursor-pointer shrink-0"
                       title="Hapus Info"
                     >

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   LogIn,
   Ticket,
@@ -16,6 +16,7 @@ import {
   Mail,
   MapPin,
   Home,
+  ArrowLeft,
 } from 'lucide-react';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 
@@ -41,6 +42,8 @@ interface LoginScreenProps {
   ) => Promise<{ success: boolean; message?: string }>;
   isSigningIn: boolean;
   authError: string | null;
+  initialPortalTab?: LoginPortalTab;
+  onSwitchToWebsite?: () => void;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
@@ -52,9 +55,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   onStaffLogin,
   isSigningIn,
   authError,
+  initialPortalTab = 'voters',
+  onSwitchToWebsite,
 }) => {
-  const [portalTab, setPortalTab] = useState<LoginPortalTab>('voters');
+  const [portalTab, setPortalTab] = useState<LoginPortalTab>(initialPortalTab);
   const [voterMode, setVoterMode] = useState<VoterAuthMode>('login');
+
+  useEffect(() => {
+    setPortalTab(initialPortalTab);
+  }, [initialPortalTab]);
 
   // Voter Manual Login (Email + Phone) State
   const [voterLoginEmail, setVoterLoginEmail] = useState('');
@@ -177,6 +186,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center px-4 py-8">
+      {onSwitchToWebsite && (
+        <div className="w-full max-w-md mb-4 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={onSwitchToWebsite}
+            className="min-h-[38px] px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
+            <span>Kembali ke Mode Website</span>
+          </button>
+          <span className="text-xs font-semibold text-slate-500">Mode Apps</span>
+        </div>
+      )}
       <div className="w-full max-w-md bg-white rounded-3xl border border-slate-200/90 shadow-lg p-6 sm:p-8 space-y-6">
         {/* Brand Header */}
         <div className="flex flex-col items-center text-center space-y-2.5">

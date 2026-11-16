@@ -5,8 +5,7 @@ export type VoterTab =
   | 'acara'
   | 'aspirasi'
   | 'referral'
-  | 'profil'
-  | 'superadmin';
+  | 'profil';
 
 export type SuperadminSection =
   | 'acara'

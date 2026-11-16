@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import type { User } from 'firebase/auth';
-import { UserCheck, MapPin, Phone, Ticket, LogOut, AlertCircle, Shield } from 'lucide-react';
-import { isSuperAdminEmail } from '../../services/swarakuFirestore';
+import { UserCheck, MapPin, Phone, Ticket, LogOut, AlertCircle } from 'lucide-react';
 
 interface RegisterVoterScreenProps {
   user: User;
@@ -29,8 +28,6 @@ export const RegisterVoterScreen: React.FC<RegisterVoterScreenProps> = ({
   const [referralInput, setReferralInput] = useState(initialReferralCode);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  const isAdmin = isSuperAdminEmail(user.email);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,15 +96,6 @@ export const RegisterVoterScreen: React.FC<RegisterVoterScreenProps> = ({
             <span>Keluar</span>
           </button>
         </div>
-
-        {isAdmin && (
-          <div className="rounded-2xl bg-blue-50 border border-blue-200 p-3.5 flex items-start gap-2.5 text-xs text-blue-900">
-            <Shield className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
-            <span>
-              Akun <strong>Superadmin</strong> terdeteksi. Lengkapi identitas singkat ini terlebih dahulu untuk membuka Dashboard &amp; Panel Superadmin.
-            </span>
-          </div>
-        )}
 
         <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-3.5 text-xs text-emerald-900">
           Isi data diri Anda secara manual untuk mengaktifkan <strong>Kantong Poin (+100 Poin Awal)</strong> dan menampilkan informasi Caleg sesuai Daerah / Dapil Anda.

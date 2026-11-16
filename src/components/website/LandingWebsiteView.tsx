@@ -75,6 +75,7 @@ export const LandingWebsiteView: React.FC<LandingWebsiteViewProps> = ({
   });
 
   const [formSubmitted, setFormSubmitted] = useState(false);
+  const [inquiryError, setInquiryError] = useState<string | null>(null);
   const [inquiryTicketId, setInquiryTicketId] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const [proposalModalOpen, setProposalModalOpen] = useState(false);
@@ -127,8 +128,9 @@ export const LandingWebsiteView: React.FC<LandingWebsiteViewProps> = ({
   // Form Submit Handler
   const handleInquirySubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setInquiryError(null);
     if (!formData.nama.trim() || !formData.noHp.trim()) {
-      alert('Mohon lengkapi Nama dan Nomor WhatsApp aktif Anda.');
+      setInquiryError('Mohon lengkapi Nama dan Nomor WhatsApp aktif Anda.');
       return;
     }
     const ticket = `SWK-INQ-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -1949,6 +1951,11 @@ export const LandingWebsiteView: React.FC<LandingWebsiteViewProps> = ({
                   <h3 className="text-base font-bold text-slate-900 pb-2 border-b border-slate-200">
                     Lengkapi Data Inquire Caleg / Paslon
                   </h3>
+                  {inquiryError && (
+                    <div className="rounded-xl bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-xs text-rose-800 font-medium">
+                      {inquiryError}
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>

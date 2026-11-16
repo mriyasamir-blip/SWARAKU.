@@ -20,7 +20,6 @@ import {
   BadgeCheck,
   Briefcase,
   Award,
-  KeyRound,
   Compass,
   Radio,
   Database,
@@ -30,6 +29,7 @@ import {
   X,
   ChevronRight,
   AlertTriangle,
+  Globe,
 } from 'lucide-react';
 import type {
   AspirasiItem,
@@ -133,6 +133,7 @@ interface StaffPortalAppProps {
   onCheckinCoblos: (photoUrl?: string) => void;
   onResetDataToZero: () => void;
   onTriggerCloudSync: () => Promise<void>;
+  onOpenWebsiteMode?: () => void;
 }
 
 const ROLE_META: Record<
@@ -246,12 +247,12 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
   onCheckinCoblos,
   onResetDataToZero,
   onTriggerCloudSync,
+  onOpenWebsiteMode,
 }) => {
   const [activeTab, setActiveTab] = useState<StaffTab>('beranda');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isSyncingProfile, setIsSyncingProfile] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
@@ -355,24 +356,26 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
           label: 'Operasi Lapangan',
           shortLabel: 'Lapangan',
           icon: <UserCheck className="w-5 h-5" />,
-        },
-        {
-          id: 'kelola_voters',
-          label: 'Acara, Reward & Loyalty',
-          shortLabel: 'Loyalty',
-          icon: <Calendar className="w-5 h-5" />,
         }
       );
     }
 
     if (staffUser.role === 'super_admin') {
-      items.push({
-        id: 'kelola_akun',
-        label: 'Kelola Role & User',
-        shortLabel: 'Kelola User',
-        icon: <Users className="w-5 h-5" />,
-        badge: userAccounts.length > 0 ? userAccounts.length : undefined,
-      });
+      items.push(
+        {
+          id: 'kelola_voters',
+          label: 'Panel Manajemen Superadmin',
+          shortLabel: 'Superadmin',
+          icon: <Shield className="w-5 h-5" />,
+        },
+        {
+          id: 'kelola_akun',
+          label: 'Kelola Role & User',
+          shortLabel: 'Kelola User',
+          icon: <Users className="w-5 h-5" />,
+          badge: userAccounts.length > 0 ? userAccounts.length : undefined,
+        }
+      );
     }
 
     items.push({
@@ -546,6 +549,16 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
 
         {/* Footer Actions */}
         <div className="p-4 border-t border-slate-100 space-y-2">
+          {onOpenWebsiteMode && (
+            <button
+              type="button"
+              onClick={onOpenWebsiteMode}
+              className="w-full min-h-[40px] px-4 py-2 rounded-xl text-slate-700 bg-slate-100 hover:bg-slate-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Globe className="w-4 h-4" />
+              <span>Buka Mode Website</span>
+            </button>
+          )}
           <PWAInstallButton
             variant="outline"
             label="Pasang Aplikasi"
@@ -684,7 +697,20 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
               })}
             </nav>
 
-            <div className="p-4 border-t border-slate-100">
+            <div className="p-4 border-t border-slate-100 space-y-2">
+              {onOpenWebsiteMode && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onOpenWebsiteMode();
+                  }}
+                  className="w-full min-h-[42px] px-4 py-2 rounded-xl text-slate-700 bg-slate-100 hover:bg-slate-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Globe className="w-4 h-4" />
+                  <span>Buka Mode Website</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onLogout}
@@ -934,48 +960,50 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
                         <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-amber-600 shrink-0 mt-1" />
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => handleSelectTab('kelola_voters')}
-                        className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 shadow-2xs text-left flex items-start justify-between gap-3 cursor-pointer group"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
-                            <Calendar className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <h4 className="text-sm font-black text-slate-900">
-                              Acara, Reward &amp; Voters SSO
-                            </h4>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              Kelola jadwal kampanye + Map Picker, katalog reward, &amp; klaim poin.
-                            </p>
-                          </div>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-blue-600 shrink-0 mt-1" />
-                      </button>
-
                       {staffUser.role === 'super_admin' && (
-                        <button
-                          type="button"
-                          onClick={() => handleSelectTab('kelola_akun')}
-                          className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-purple-200 shadow-2xs text-left flex items-start justify-between gap-3 cursor-pointer group"
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center shrink-0">
-                              <Users className="w-5 h-5" />
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectTab('kelola_voters')}
+                            className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-blue-200 shadow-2xs text-left flex items-start justify-between gap-3 cursor-pointer group"
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
+                                <Shield className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <h4 className="text-sm font-black text-slate-900">
+                                  Panel Manajemen Superadmin
+                                </h4>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                  Kelola jadwal acara + Map Picker, katalog reward, info Caleg, data voters &amp; aktivitas.
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <h4 className="text-sm font-black text-slate-900">
-                                Kelola Role &amp; User
-                              </h4>
-                              <p className="text-xs text-slate-500 mt-0.5">
-                                Daftarkan Admin, Tim Sukses, dan Kader otomatis tersinkron.
-                              </p>
+                            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-blue-600 shrink-0 mt-1" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleSelectTab('kelola_akun')}
+                            className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-purple-200 shadow-2xs text-left flex items-start justify-between gap-3 cursor-pointer group"
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center shrink-0">
+                                <Users className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <h4 className="text-sm font-black text-slate-900">
+                                  Kelola Role &amp; User
+                                </h4>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                  Daftarkan Admin, Tim Sukses, dan Kader otomatis tersinkron.
+                                </p>
+                              </div>
                             </div>
-                          </div>
-                          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-purple-600 shrink-0 mt-1" />
-                        </button>
+                            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-purple-600 shrink-0 mt-1" />
+                          </button>
+                        </>
                       )}
                     </div>
                   </section>
@@ -1266,50 +1294,16 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             />
           )}
 
-          {/* 9. ACARA, REWARD & VOTERS SSO */}
-          {activeTab === 'kelola_voters' && isAdminOrSuper && (
-            <>
-              {hasGoogleSuperAdmin ? (
-                <SuperadminView
-                  events={events}
-                  rewards={rewards}
-                  calegInfoList={calegInfoList}
-                  onNotify={onNotify}
-                />
-              ) : (
-                <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 max-w-xl mx-auto text-center space-y-4 shadow-xs">
-                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center mx-auto">
-                    <KeyRound className="w-6 h-6" />
-                  </div>
-                  <h3 className="text-lg font-extrabold text-slate-900">
-                    Verifikasi Google Admin Diperlukan
-                  </h3>
-                  <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                    Untuk mengakses data sensitif Pemilih Loyalty (Voters SSO), Riwayat Klaim Reward, Kalender Acara, dan Book Activity Login, verifikasikan sesi Anda menggunakan akun Google Superadmin terdaftar.
-                  </p>
-                  <button
-                    type="button"
-                    disabled={isConnectingGoogle}
-                    onClick={async () => {
-                      setIsConnectingGoogle(true);
-                      try {
-                        await onConnectGoogleAdmin();
-                      } finally {
-                        setIsConnectingGoogle(false);
-                      }
-                    }}
-                    className="min-h-[46px] px-5 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <Shield className="w-4 h-4" />
-                    <span>
-                      {isConnectingGoogle
-                        ? 'Menghubungkan Google...'
-                        : 'Hubungkan Akun Google Superadmin'}
-                    </span>
-                  </button>
-                </div>
-              )}
-            </>
+          {/* 9. PANEL MANAJEMEN SUPERADMIN (KHUSUS SUPER ADMIN) */}
+          {activeTab === 'kelola_voters' && staffUser.role === 'super_admin' && (
+            <SuperadminView
+              events={events}
+              rewards={rewards}
+              calegInfoList={calegInfoList}
+              onNotify={onNotify}
+              hasGoogleSuperAdmin={hasGoogleSuperAdmin}
+              onConnectGoogleAdmin={onConnectGoogleAdmin}
+            />
           )}
 
           {/* 10. PROFIL SAYA */}
