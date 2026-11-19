@@ -823,10 +823,10 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
             <div className="p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">
-                  Data Pemilih Terverifikasi e-KTP ({filteredOcrVoters.length})
+                  Data Pemilih Terdaftar &amp; Peta Suara ({filteredOcrVoters.length})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Data pemilih hasil pendataan &amp; scan e-KTP yang tersinkron dari Cloud Firestore.
+                  Mencakup pemilih Daftar Online, Google SSO, dan pendataan e-KTP yang tampil otomatis di Peta Suara.
                 </p>
               </div>
               <div className="relative w-full sm:w-72">

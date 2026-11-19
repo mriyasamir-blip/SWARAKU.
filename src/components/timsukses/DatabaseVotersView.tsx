@@ -250,7 +250,7 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
               Database Voters • Master Pemilih &amp; Peta Sebaran
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-              Data voter hasil scan e-KTP, thumbnail foto fisik, titik lokasi koordinat Google Maps, dan verifikasi DPT KPU tersinkronisasi secara real-time.
+              Data pemilih terdaftar (Daftar Online, Google SSO, &amp; scan e-KTP), titik lokasi koordinat Google Maps, dan verifikasi wilayah tersinkronisasi secara real-time.
             </p>
           </div>
 
@@ -584,6 +584,15 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
                                 <Eye className="w-3.5 h-3.5" />
                               </div>
                             </button>
+                          ) : voter.diinputOlehRole === 'voter' ||
+                            voter.registrationSource === 'google_sso' ||
+                            voter.registrationSource === 'manual_signup' ? (
+                            <div
+                              title="Pemilih Terdaftar Online"
+                              className="w-14 h-9 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700 mx-auto"
+                            >
+                              <UserCheck className="w-4 h-4" />
+                            </div>
                           ) : (
                             <div className="w-14 h-9 rounded-lg bg-slate-100 border border-dashed border-slate-300 flex items-center justify-center text-slate-400 mx-auto">
                               <Camera className="w-3.5 h-3.5" />
@@ -596,11 +605,23 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
                           <span className="font-extrabold text-slate-900 block text-xs">
                             {voter.nama}
                           </span>
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-teal-50 text-teal-800 border border-teal-200 text-[9px] font-bold">
-                              <Sparkles className="w-2.5 h-2.5 text-teal-600" />
-                              <span>Terverifikasi (Scan AI)</span>
-                            </span>
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            {voter.registrationSource === 'manual_signup' ? (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-blue-50 text-blue-800 border border-blue-200 text-[9px] font-bold">
+                                <UserCheck className="w-2.5 h-2.5 text-blue-600" />
+                                <span>Daftar Mandiri Online</span>
+                              </span>
+                            ) : voter.registrationSource === 'google_sso' || voter.diinputOlehRole === 'voter' ? (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-indigo-50 text-indigo-800 border border-indigo-200 text-[9px] font-bold">
+                                <ShieldCheck className="w-2.5 h-2.5 text-indigo-600" />
+                                <span>Terdaftar Google SSO</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-teal-50 text-teal-800 border border-teal-200 text-[9px] font-bold">
+                                <Sparkles className="w-2.5 h-2.5 text-teal-600" />
+                                <span>Terverifikasi (Scan AI)</span>
+                              </span>
+                            )}
                             <span className="text-[9px] text-slate-400 font-mono">
                               {voter.waktuDaftar || 'Tersimpan'}
                             </span>

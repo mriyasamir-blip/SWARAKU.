@@ -239,3 +239,221 @@ export async function resolveAccurateCoordinates(params: {
     formattedAddress,
   };
 }
+
+export interface ParsedVoterRegion {
+  kelurahan: string;
+  kecamatan: string;
+  kabupatenKota: string;
+  provinsi: string;
+}
+
+const REGION_PARENT_INFERENCE: Record<string, { kecamatan?: string; kota: string; provinsi: string }> = {
+  // Jakarta Utara
+  penjaringan: { kecamatan: 'Penjaringan', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  pluit: { kecamatan: 'Penjaringan', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  pejagalan: { kecamatan: 'Penjaringan', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  'kapuk muara': { kecamatan: 'Penjaringan', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  'kamal muara': { kecamatan: 'Penjaringan', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  'tanjung priok': { kecamatan: 'Tanjung Priok', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  'sunter agung': { kecamatan: 'Tanjung Priok', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  'sunter jaya': { kecamatan: 'Tanjung Priok', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  koja: { kecamatan: 'Koja', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  rawabadak: { kecamatan: 'Koja', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  lagoa: { kecamatan: 'Koja', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  cilincing: { kecamatan: 'Cilincing', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  marunda: { kecamatan: 'Cilincing', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  rorotan: { kecamatan: 'Cilincing', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  pademangan: { kecamatan: 'Pademangan', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  ancol: { kecamatan: 'Pademangan', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  'kelapa gading': { kecamatan: 'Kelapa Gading', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  'kelapa gading timur': { kecamatan: 'Kelapa Gading', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  'kelapa gading barat': { kecamatan: 'Kelapa Gading', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  'pegangsaan dua': { kecamatan: 'Kelapa Gading', kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  'jakarta utara': { kota: 'Jakarta Utara', provinsi: 'DKI Jakarta' },
+  // Jakarta Barat
+  'grogol petamburan': { kecamatan: 'Grogol Petamburan', kota: 'Jakarta Barat', provinsi: 'DKI Jakarta' },
+  'kebon jeruk': { kecamatan: 'Kebon Jeruk', kota: 'Jakarta Barat', provinsi: 'DKI Jakarta' },
+  palmerah: { kecamatan: 'Palmerah', kota: 'Jakarta Barat', provinsi: 'DKI Jakarta' },
+  kembangan: { kecamatan: 'Kembangan', kota: 'Jakarta Barat', provinsi: 'DKI Jakarta' },
+  cengkareng: { kecamatan: 'Cengkareng', kota: 'Jakarta Barat', provinsi: 'DKI Jakarta' },
+  kalideres: { kecamatan: 'Kalideres', kota: 'Jakarta Barat', provinsi: 'DKI Jakarta' },
+  tambora: { kecamatan: 'Tambora', kota: 'Jakarta Barat', provinsi: 'DKI Jakarta' },
+  'taman sari': { kecamatan: 'Taman Sari', kota: 'Jakarta Barat', provinsi: 'DKI Jakarta' },
+  'jakarta barat': { kota: 'Jakarta Barat', provinsi: 'DKI Jakarta' },
+  // Jakarta Pusat
+  gambir: { kecamatan: 'Gambir', kota: 'Jakarta Pusat', provinsi: 'DKI Jakarta' },
+  'tanah abang': { kecamatan: 'Tanah Abang', kota: 'Jakarta Pusat', provinsi: 'DKI Jakarta' },
+  menteng: { kecamatan: 'Menteng', kota: 'Jakarta Pusat', provinsi: 'DKI Jakarta' },
+  senen: { kecamatan: 'Senen', kota: 'Jakarta Pusat', provinsi: 'DKI Jakarta' },
+  'cempaka putih': { kecamatan: 'Cempaka Putih', kota: 'Jakarta Pusat', provinsi: 'DKI Jakarta' },
+  'johar baru': { kecamatan: 'Johar Baru', kota: 'Jakarta Pusat', provinsi: 'DKI Jakarta' },
+  kemayoran: { kecamatan: 'Kemayoran', kota: 'Jakarta Pusat', provinsi: 'DKI Jakarta' },
+  'sawah besar': { kecamatan: 'Sawah Besar', kota: 'Jakarta Pusat', provinsi: 'DKI Jakarta' },
+  'jakarta pusat': { kota: 'Jakarta Pusat', provinsi: 'DKI Jakarta' },
+  // Jakarta Timur
+  matraman: { kecamatan: 'Matraman', kota: 'Jakarta Timur', provinsi: 'DKI Jakarta' },
+  'pulo gadung': { kecamatan: 'Pulo Gadung', kota: 'Jakarta Timur', provinsi: 'DKI Jakarta' },
+  jatinegara: { kecamatan: 'Jatinegara', kota: 'Jakarta Timur', provinsi: 'DKI Jakarta' },
+  'duren sawit': { kecamatan: 'Duren Sawit', kota: 'Jakarta Timur', provinsi: 'DKI Jakarta' },
+  'kramat jati': { kecamatan: 'Kramat Jati', kota: 'Jakarta Timur', provinsi: 'DKI Jakarta' },
+  makasar: { kecamatan: 'Makasar', kota: 'Jakarta Timur', provinsi: 'DKI Jakarta' },
+  'pasar rebo': { kecamatan: 'Pasar Rebo', kota: 'Jakarta Timur', provinsi: 'DKI Jakarta' },
+  ciracas: { kecamatan: 'Ciracas', kota: 'Jakarta Timur', provinsi: 'DKI Jakarta' },
+  cipayung: { kecamatan: 'Cipayung', kota: 'Jakarta Timur', provinsi: 'DKI Jakarta' },
+  cakung: { kecamatan: 'Cakung', kota: 'Jakarta Timur', provinsi: 'DKI Jakarta' },
+  'jakarta timur': { kota: 'Jakarta Timur', provinsi: 'DKI Jakarta' },
+  // Jakarta Selatan
+  cilandak: { kecamatan: 'Cilandak', kota: 'Jakarta Selatan', provinsi: 'DKI Jakarta' },
+  'kebayoran baru': { kecamatan: 'Kebayoran Baru', kota: 'Jakarta Selatan', provinsi: 'DKI Jakarta' },
+  'kebayoran lama': { kecamatan: 'Kebayoran Lama', kota: 'Jakarta Selatan', provinsi: 'DKI Jakarta' },
+  pesanggrahan: { kecamatan: 'Pesanggrahan', kota: 'Jakarta Selatan', provinsi: 'DKI Jakarta' },
+  'pasar minggu': { kecamatan: 'Pasar Minggu', kota: 'Jakarta Selatan', provinsi: 'DKI Jakarta' },
+  jagakarsa: { kecamatan: 'Jagakarsa', kota: 'Jakarta Selatan', provinsi: 'DKI Jakarta' },
+  'mampang prapatan': { kecamatan: 'Mampang Prapatan', kota: 'Jakarta Selatan', provinsi: 'DKI Jakarta' },
+  pancoran: { kecamatan: 'Pancoran', kota: 'Jakarta Selatan', provinsi: 'DKI Jakarta' },
+  tebet: { kecamatan: 'Tebet', kota: 'Jakarta Selatan', provinsi: 'DKI Jakarta' },
+  setiabudi: { kecamatan: 'Setiabudi', kota: 'Jakarta Selatan', provinsi: 'DKI Jakarta' },
+  'jakarta selatan': { kota: 'Jakarta Selatan', provinsi: 'DKI Jakarta' },
+  // Kota-kota besar
+  'tangerang selatan': { kota: 'Tangerang Selatan', provinsi: 'Banten' },
+  tangerang: { kota: 'Tangerang', provinsi: 'Banten' },
+  bekasi: { kota: 'Bekasi', provinsi: 'Jawa Barat' },
+  depok: { kota: 'Depok', provinsi: 'Jawa Barat' },
+  bogor: { kota: 'Bogor', provinsi: 'Jawa Barat' },
+  bandung: { kota: 'Bandung', provinsi: 'Jawa Barat' },
+  surabaya: { kota: 'Surabaya', provinsi: 'Jawa Timur' },
+  semarang: { kota: 'Semarang', provinsi: 'Jawa Tengah' },
+  medan: { kota: 'Medan', provinsi: 'Sumatera Utara' },
+  makassar: { kota: 'Makassar', provinsi: 'Sulawesi Selatan' },
+  yogyakarta: { kota: 'Yogyakarta', provinsi: 'DI Yogyakarta' },
+  denpasar: { kota: 'Denpasar', provinsi: 'Bali' },
+  palembang: { kota: 'Palembang', provinsi: 'Sumatera Selatan' },
+  batam: { kota: 'Batam', provinsi: 'Kepulauan Riau' },
+  pekanbaru: { kota: 'Pekanbaru', provinsi: 'Riau' },
+  padang: { kota: 'Padang', provinsi: 'Sumatera Barat' },
+  'bandar lampung': { kota: 'Bandar Lampung', provinsi: 'Lampung' },
+  malang: { kota: 'Malang', provinsi: 'Jawa Timur' },
+  surakarta: { kota: 'Surakarta', provinsi: 'Jawa Tengah' },
+  solo: { kota: 'Surakarta', provinsi: 'Jawa Tengah' },
+};
+
+function toTitleCase(str: string): string {
+  return str
+    .trim()
+    .split(/\s+/)
+    .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ''))
+    .join(' ');
+}
+
+/**
+ * Mengurai teks bebas Dapil / Kelurahan + Alamat Voter menjadi struktur wilayah peta suara
+ * (kelurahan, kecamatan, kabupatenKota, provinsi) yang konsisten dengan Peta Suara.
+ */
+export function parseVoterRegionAndAddress(region: string, address?: string): ParsedVoterRegion {
+  const combined = `${region || ''} ${address || ''}`.trim();
+  const lower = combined.toLowerCase();
+
+  let kelurahan = '';
+  let kecamatan = '';
+  let kabupatenKota = '';
+  let provinsi = 'Indonesia';
+
+  // 1. Ekstrak pola eksplisit "Kel./Kelurahan ...", "Kec./Kecamatan ...", "Kota/Kab ..."
+  const kelMatch = combined.match(/(?:kelurahan|kel\.|desa)\s+([a-z0-9\s]+?)(?:,|\/|$|\.|rt|rw|kec)/i);
+  if (kelMatch?.[1]) {
+    kelurahan = `Kel. ${toTitleCase(kelMatch[1])}`;
+  }
+
+  const kecMatch = combined.match(/(?:kecamatan|kec\.)\s+([a-z0-9\s]+?)(?:,|\/|$|\.|kota|kab|jakarta|dki)/i);
+  if (kecMatch?.[1]) {
+    kecamatan = `Kec. ${toTitleCase(kecMatch[1])}`;
+  }
+
+  const kotaMatch = combined.match(/(?:kota\s+administrasi|kota|kabupaten|kab\.)\s+([a-z0-9\s]+?)(?:,|\/|$|\.|dki|jawa|banten|sumatera|bali)/i);
+  if (kotaMatch?.[1]) {
+    kabupatenKota = toTitleCase(kotaMatch[1]);
+  }
+
+  // 2. Pencocokan kamus wilayah Indonesia (prioritaskan frasa terpanjang)
+  const sortedKeys = Object.keys(REGION_PARENT_INFERENCE).sort((a, b) => b.length - a.length);
+  for (const key of sortedKeys) {
+    if (lower.includes(key)) {
+      const info = REGION_PARENT_INFERENCE[key];
+      if (!kabupatenKota) kabupatenKota = info.kota;
+      provinsi = info.provinsi;
+      if (!kecamatan && info.kecamatan) {
+        kecamatan = `Kec. ${info.kecamatan}`;
+      }
+      if (!kelurahan && info.kecamatan && key !== info.kecamatan.toLowerCase() && key !== info.kota.toLowerCase()) {
+        kelurahan = `Kel. ${toTitleCase(key)}`;
+      }
+      break;
+    }
+  }
+
+  // 3. Jika belum terurai dari pola eksplisit/kamus, gunakan segmen dari field "region" (Dapil/Kelurahan)
+  const regionClean = (region || '').trim();
+  if (!kelurahan) {
+    // Jika format "Dapil 1 / Cilandak Barat" atau "Pluit, Jakarta Utara"
+    const segments = regionClean
+      .split(/[/,|•-]+/)
+      .map((s) => s.trim())
+      .filter((s) => s && !/^dapil\s*\d*/i.test(s));
+    if (segments.length > 0) {
+      kelurahan = segments[0];
+      if (!kecamatan && segments.length > 1) {
+        kecamatan = segments[1];
+      }
+    } else {
+      kelurahan = regionClean || 'Wilayah Pemilih';
+    }
+  }
+
+  if (!kecamatan) {
+    kecamatan = kabupatenKota || regionClean || 'Wilayah Terdaftar';
+  }
+  if (!kabupatenKota) {
+    kabupatenKota = kecamatan.replace(/^kec\.\s*/i, '') || regionClean || 'Wilayah Terdaftar';
+  }
+
+  return {
+    kelurahan,
+    kecamatan,
+    kabupatenKota,
+    provinsi,
+  };
+}
+
+function deterministicUnitOffset(seed: string): { dLat: number; dLng: number } {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const u1 = ((hash >>> 0) % 1000) / 1000 - 0.5;
+  const u2 = (((hash >>> 10) % 1000) / 1000) - 0.5;
+  return {
+    dLat: Number((u1 * 0.0024).toFixed(6)),
+    dLng: Number((u2 * 0.0024).toFixed(6)),
+  };
+}
+
+export function resolveStableVoterCoordinates(params: {
+  uid: string;
+  region: string;
+  address?: string;
+}): ParsedVoterRegion & { lat: number; lng: number } {
+  const parsed = parseVoterRegionAndAddress(params.region, params.address);
+  const smart =
+    lookupSmartCoordinates(parsed.kelurahan, parsed.kecamatan, parsed.kabupatenKota) ||
+    lookupSmartCoordinates(params.region, params.address, parsed.kabupatenKota);
+
+  const base = smart || { lat: -6.1754, lng: 106.8272 };
+  const { dLat, dLng } = deterministicUnitOffset(params.uid || params.region);
+
+  return {
+    ...parsed,
+    lat: Number((base.lat + dLat).toFixed(6)),
+    lng: Number((base.lng + dLng).toFixed(6)),
+  };
+}

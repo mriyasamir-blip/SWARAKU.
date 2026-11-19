@@ -220,7 +220,7 @@ export interface VoterOcrRecord {
   nikMasked: string;
   nama: string;
   tempatTglLahir: string;
-  jenisKelamin: 'Laki-laki' | 'Perempuan';
+  jenisKelamin: 'Laki-laki' | 'Perempuan' | '-';
   alamat: string;
   rtRw: string;
   kelurahan: string;
@@ -234,8 +234,11 @@ export interface VoterOcrRecord {
   statusDpt: 'DPT valid' | 'Perlu cek';
   statusRegistrasi: 'TERDAFTAR';
   terdaftarOleh: string;
-  diinputOlehRole?: 'tim_sukses' | 'kader' | 'admin';
+  diinputOlehRole?: 'tim_sukses' | 'kader' | 'admin' | 'voter';
   diinputOlehNama?: string;
+  registrationSource?: 'ocr_ktp' | 'lapangan' | 'google_sso' | 'manual_signup';
+  voterUid?: string;
+  dapilLabel?: string;
   lat?: number;
   lng?: number;
 }

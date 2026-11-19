@@ -12,7 +12,7 @@ import {
   where,
   Unsubscribe,
 } from 'firebase/firestore';
-import { firestore } from '../lib/firebase';
+import { firestore, auth } from '../lib/firebase';
 import {
   VoterOcrRecord,
   FormC1Upload,
@@ -20,9 +20,14 @@ import {
   DptVoterRecord,
   UserAccount,
 } from '../types/vore';
+import type { VoterDoc } from '../types/swaraku';
 import { TimSuksesWilayahRecord } from '../data/petaSuaraData';
 import { PRESET_ACCOUNTS } from '../data/accountsData';
-import { resolveAccurateCoordinates, lookupSmartCoordinates } from '../utils/geocoding';
+import {
+  resolveAccurateCoordinates,
+  lookupSmartCoordinates,
+  resolveStableVoterCoordinates,
+} from '../utils/geocoding';
 
 export const CLOUD_COLLECTIONS = {
   VOTERS: 'voter_ocr_records',
@@ -134,7 +139,13 @@ export function isCoordinateErroneousOrMissing(voter: Partial<VoterOcrRecord>): 
  * Memperbaiki koordinat voter lama secara otomatis dan menyimpannya kembali ke Cloud Firestore
  */
 export async function autoHealVoterCoordinates(voter: VoterOcrRecord): Promise<VoterOcrRecord> {
-  const cleanId = voter.nik ? voter.nik.replace(/\D/g, '') : voter.id;
+  const isOnlineRegistered =
+    voter.diinputOlehRole === 'voter' ||
+    voter.registrationSource === 'google_sso' ||
+    voter.registrationSource === 'manual_signup';
+  const cleanId = isOnlineRegistered
+    ? voter.id
+    : (voter.nik ? voter.nik.replace(/\D/g, '') : voter.id) || voter.id;
   if (!cleanId || healingInProgress.has(cleanId)) {
     return voter;
   }
@@ -187,6 +198,101 @@ export async function autoHealVoterCoordinates(voter: VoterOcrRecord): Promise<V
   }
 }
 
+export function loyaltyVoterToOcrRecord(
+  voter: Pick<
+    VoterDoc,
+    'uid' | 'fullName' | 'address' | 'region' | 'phone' | 'referralCode' | 'authMethod' | 'createdAt'
+  >
+): VoterOcrRecord {
+  const geo = resolveStableVoterCoordinates({
+    uid: voter.uid,
+    region: voter.region,
+    address: voter.address,
+  });
+
+  const regCode =
+    voter.referralCode || `SWR-${String(voter.uid || '').slice(0, 6).toUpperCase()}`;
+
+  let waktuDaftar = '';
+  const created = voter.createdAt as { toDate?: () => Date } | undefined;
+  if (created && typeof created.toDate === 'function') {
+    waktuDaftar = created.toDate().toLocaleString('id-ID');
+  } else {
+    waktuDaftar = new Date().toLocaleString('id-ID');
+  }
+
+  const isManual = voter.authMethod === 'manual' || voter.uid.startsWith('vreg_');
+
+  return {
+    id: voter.uid,
+    voterUid: voter.uid,
+    nik: regCode,
+    nikMasked: regCode,
+    nama: String(voter.fullName || 'PEMILIH').toUpperCase().trim(),
+    tempatTglLahir: '-',
+    jenisKelamin: '-',
+    alamat: voter.address || '-',
+    rtRw: '-',
+    kelurahan: geo.kelurahan,
+    kecamatan: geo.kecamatan,
+    kabupatenKota: geo.kabupatenKota,
+    provinsi: geo.provinsi,
+    dapilLabel: voter.region || geo.kelurahan,
+    tps: 'Reg. Online',
+    noHp: voter.phone || '-',
+    waktuDaftar,
+    statusDpt: 'DPT valid',
+    statusRegistrasi: 'TERDAFTAR',
+    terdaftarOleh: isManual ? 'Daftar Mandiri (Online)' : 'Google SSO (Online)',
+    diinputOlehRole: 'voter',
+    diinputOlehNama: voter.fullName,
+    registrationSource: isManual ? 'manual_signup' : 'google_sso',
+    lat: geo.lat,
+    lng: geo.lng,
+  };
+}
+
+export async function syncLoyaltyVoterToPetaSuara(
+  voter: Pick<
+    VoterDoc,
+    'uid' | 'fullName' | 'address' | 'region' | 'phone' | 'referralCode' | 'authMethod' | 'createdAt'
+  >
+): Promise<VoterOcrRecord | null> {
+  if (!voter?.uid || !voter?.fullName) return null;
+
+  const record = loyaltyVoterToOcrRecord(voter);
+  try {
+    const docRef = doc(firestore, CLOUD_COLLECTIONS.VOTERS, voter.uid);
+    await setDoc(
+      docRef,
+      cleanForFirestore({
+        ...record,
+        updatedAt: new Date().toISOString(),
+      }),
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('[CloudSync] Sinkron voter portal ke Peta Suara gagal:', err);
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const currentCache = JSON.parse(
+        localStorage.getItem(LOCAL_CACHE_KEYS.VOTERS) || '[]'
+      ) as VoterOcrRecord[];
+      const updatedCache = [
+        record,
+        ...currentCache.filter((v) => v.id !== record.id && v.voterUid !== voter.uid),
+      ];
+      localStorage.setItem(LOCAL_CACHE_KEYS.VOTERS, JSON.stringify(updatedCache));
+    } catch {
+      // ignore localStorage errors
+    }
+  }
+
+  return record;
+}
+
 // -------------------------------------------------------------
 // 2. REAL-TIME MULTI-DEVICE LISTENER: VOTERS
 // -------------------------------------------------------------
@@ -197,28 +303,52 @@ function mapDocToVoterOcrRecord(
   d: Record<string, any>
 ): { cleanNik: string; record: VoterOcrRecord; sortTime: number } {
   const rawNik = String(d.nik || docId || '').trim();
-  const cleanNik = rawNik.replace(/\D/g, '') || rawNik;
+  const isOnlineRegistered =
+    Boolean(d.voterUid) ||
+    d.diinputOlehRole === 'voter' ||
+    d.registrationSource === 'google_sso' ||
+    d.registrationSource === 'manual_signup' ||
+    docId.startsWith('vreg_') ||
+    !/^\d{8,}$/.test(rawNik);
+
+  const cleanNik = isOnlineRegistered ? docId : rawNik.replace(/\D/g, '') || docId;
   const masked =
     d.nikMasked ||
-    (cleanNik.length >= 8
+    (!isOnlineRegistered && cleanNik.length >= 8
       ? `${cleanNik.slice(0, 4)}••••••••${cleanNik.slice(-4)}`
-      : cleanNik);
+      : rawNik);
+
+  const parsedFallback =
+    d.dapilLabel || d.region
+      ? resolveStableVoterCoordinates({
+          uid: docId,
+          region: String(d.dapilLabel || d.region || ''),
+          address: String(d.alamat || d.address || ''),
+        })
+      : null;
 
   const record: VoterOcrRecord = {
     id: d.id || docId,
-    nik: cleanNik,
+    voterUid: d.voterUid || undefined,
+    nik: rawNik,
     nikMasked: masked,
-    nama: String(d.nama || 'VOTER TANPA NAMA').toUpperCase().trim(),
+    nama: String(d.nama || d.fullName || 'VOTER TANPA NAMA').toUpperCase().trim(),
     tempatTglLahir: d.tempatTglLahir || '-',
-    jenisKelamin: d.jenisKelamin === 'Perempuan' ? 'Perempuan' : 'Laki-laki',
-    alamat: d.alamat || '-',
-    rtRw: d.rtRw || '001/001',
-    kelurahan: d.kelurahan || '',
-    kecamatan: d.kecamatan || '',
-    kabupatenKota: d.kabupatenKota || '',
-    provinsi: d.provinsi || 'DKI Jakarta',
-    tps: d.tps || 'TPS 001',
-    noHp: d.noHp || '-',
+    jenisKelamin:
+      d.jenisKelamin === 'Perempuan'
+        ? 'Perempuan'
+        : d.jenisKelamin === '-'
+        ? '-'
+        : 'Laki-laki',
+    alamat: d.alamat || d.address || '-',
+    rtRw: d.rtRw || (isOnlineRegistered ? '-' : '001/001'),
+    kelurahan: d.kelurahan || parsedFallback?.kelurahan || '',
+    kecamatan: d.kecamatan || parsedFallback?.kecamatan || '',
+    kabupatenKota: d.kabupatenKota || parsedFallback?.kabupatenKota || '',
+    provinsi: d.provinsi || parsedFallback?.provinsi || 'DKI Jakarta',
+    dapilLabel: d.dapilLabel || d.region || undefined,
+    tps: d.tps || (isOnlineRegistered ? 'Reg. Online' : 'TPS 001'),
+    noHp: d.noHp || d.phone || '-',
     waktuDaftar: d.waktuDaftar || new Date().toLocaleString('id-ID'),
     fotoKtpUrl: d.fotoKtpUrl || undefined,
     statusDpt: d.statusDpt === 'Perlu cek' ? 'Perlu cek' : 'DPT valid',
@@ -226,8 +356,9 @@ function mapDocToVoterOcrRecord(
     terdaftarOleh: d.terdaftarOleh || 'Database Cloud',
     diinputOlehRole: d.diinputOlehRole,
     diinputOlehNama: d.diinputOlehNama,
-    lat: typeof d.lat === 'number' ? d.lat : undefined,
-    lng: typeof d.lng === 'number' ? d.lng : undefined,
+    registrationSource: d.registrationSource || undefined,
+    lat: typeof d.lat === 'number' ? d.lat : parsedFallback?.lat,
+    lng: typeof d.lng === 'number' ? d.lng : parsedFallback?.lng,
   };
 
   const sortTime =
@@ -652,7 +783,14 @@ export async function saveVoterToCloud(
   voter: VoterOcrRecord,
   dptRecord?: DptVoterRecord
 ): Promise<void> {
-  const cleanNik = voter.nik ? voter.nik.replace(/\D/g, '') : voter.id;
+  const isOnlineRegistered =
+    Boolean(voter.voterUid) ||
+    voter.diinputOlehRole === 'voter' ||
+    voter.registrationSource === 'google_sso' ||
+    voter.registrationSource === 'manual_signup';
+  const targetDocId = isOnlineRegistered
+    ? voter.id
+    : (voter.nik ? voter.nik.replace(/\D/g, '') : voter.id) || voter.id;
 
   // Pastikan koordinat akurat sebelum dikirim ke Cloud
   let lat = voter.lat;
@@ -685,7 +823,7 @@ export async function saveVoterToCloud(
 
   // 1. Simpan ke Firestore Centralized
   try {
-    const docRef = doc(firestore, CLOUD_COLLECTIONS.VOTERS, cleanNik);
+    const docRef = doc(firestore, CLOUD_COLLECTIONS.VOTERS, targetDocId);
     await setDoc(
       docRef,
       cleanForFirestore({
@@ -848,14 +986,37 @@ export async function migrateLocalDataToCloud(): Promise<{
   }
 
   try {
-    // 1. Ambil data eksisting dari Cloud Firestore (voter_ocr_records + legacy voters) untuk deduplikasi berdasarkan NIK
+    // 1. Ambil data eksisting dari Cloud Firestore (voter_ocr_records + legacy voters) untuk deduplikasi
     const cloudVotersSnapshot = await getDocs(collection(firestore, CLOUD_COLLECTIONS.VOTERS));
     const cloudNikSet = new Set<string>();
     cloudVotersSnapshot.forEach((docSnap) => {
       const d = docSnap.data();
+      cloudNikSet.add(docSnap.id);
       const nik = String(d.nik || docSnap.id).replace(/\D/g, '');
       if (nik) cloudNikSet.add(nik);
+      if (d.voterUid) cloudNikSet.add(String(d.voterUid));
     });
+
+    // Jika Superadmin Google SSO aktif, sinkronkan semua Voter terdaftar dari koleksi 'voters' ke Peta Suara
+    const currentEmail = (auth.currentUser?.email || '').toLowerCase();
+    if (
+      currentEmail === 'm.riyasamir@gmail.com' ||
+      currentEmail === 'admin@swaraku.online'
+    ) {
+      try {
+        const allLoyaltyVotersSnap = await getDocs(collection(firestore, 'voters'));
+        for (const docSnap of allLoyaltyVotersSnap.docs) {
+          const vData = docSnap.data() as VoterDoc;
+          if (vData?.uid && vData?.fullName && !cloudNikSet.has(vData.uid)) {
+            await syncLoyaltyVoterToPetaSuara(vData);
+            cloudNikSet.add(vData.uid);
+            votersMigrated++;
+          }
+        }
+      } catch (allVotersErr) {
+        console.warn('[CloudSync] Loyalty voters Peta Suara sync notice:', allVotersErr);
+      }
+    }
 
     // Ambil juga data legacy OCR voters di koleksi 'voters' agar tersinkron ke 'voter_ocr_records'
     try {

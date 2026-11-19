@@ -96,6 +96,7 @@ export interface PetaWilayahMarker {
   totalVoters: number;
   voterTimSuksesCount: number; // Input oleh Tim Sukses
   voterKaderCount: number;      // Input oleh Kader
+  voterOnlineCount?: number;    // Pendaftaran Mandiri / Google SSO
   voterListNiks: string[];
   recentVoters?: any[];
   terakhirUpdate?: string;

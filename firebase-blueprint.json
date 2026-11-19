@@ -166,6 +166,22 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["calegName", "partyName", "region", "description", "createdAt"]
+    },
+    "KaderLocation": {
+      "title": "KaderLocation",
+      "description": "Posisi GPS real-time terakhir setiap akun Kader untuk halaman Monitoring Kader Admin",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "namaKader": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "accuracy": { "type": "number" },
+        "address": { "type": "string", "maxLength": 300 },
+        "gpsStatus": { "type": "string", "enum": ["Aktif", "Tidak Aktif", "Ditolak"] },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "namaKader", "gpsStatus", "lastUpdated"]
     }
   },
   "firestore": {
@@ -180,6 +196,10 @@
     "/user_accounts/{userId}": {
       "schema": { "$ref": "#/entities/UserAccount" },
       "description": "Akun tim kampanye lintas perangkat (Super Admin, Admin, Tim Sukses, Kader)"
+    },
+    "/kader_locations/{userId}": {
+      "schema": { "$ref": "#/entities/KaderLocation" },
+      "description": "Tracking GPS real-time terakhir per akun Kader (1 dokumen per Kader)"
     },
     "/referral_codes/{code}": {
       "schema": { "$ref": "#/entities/ReferralCode" },

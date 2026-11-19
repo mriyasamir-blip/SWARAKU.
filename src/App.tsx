@@ -14,6 +14,7 @@ import {
 import { auth } from './lib/firebase';
 import {
   findAndLinkPreRegisteredVoter,
+  isSuperAdminEmail,
   loginManualVoter,
   loginWithGoogleSSO,
   logoutFirebase,
@@ -23,6 +24,7 @@ import {
   registerVoterProfile,
   rsvpEventAtomic,
   submitAspiration,
+  subscribeAllVoters,
   subscribeCalegInfo,
   subscribeEvents,
   subscribeMyAspirations,
@@ -43,6 +45,7 @@ import {
 } from './services/userApiService';
 import {
   LOCAL_CACHE_KEYS,
+  loyaltyVoterToOcrRecord,
   migrateLocalDataToCloud,
   saveB1ToCloud,
   saveC1ToCloud,
@@ -53,7 +56,12 @@ import {
   subscribeToCloudTimSukses,
   subscribeToCloudUserAccounts,
   subscribeToCloudVoters,
+  syncLoyaltyVoterToPetaSuara,
 } from './services/cloudSyncService';
+import {
+  markKaderGpsInactive,
+  startKaderGpsTracking,
+} from './services/kaderLocationService';
 import type {
   AspirationDoc,
   CalegInfoDoc,
@@ -206,6 +214,7 @@ export default function App() {
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
 
   const [voterProfile, setVoterProfile] = useState<VoterDoc | null | undefined>(undefined);
+  const [registeredLoyaltyVoters, setRegisteredLoyaltyVoters] = useState<VoterDoc[]>([]);
   const [activeTab, setActiveTab] = useState<VoterTab>('beranda');
 
   // Shared collections state (100% Firestore-backed, zero dummy data)
@@ -229,6 +238,8 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const loggedLoginForUidRef = useRef<string | null>(null);
+  const syncedSelfVoterUidRef = useRef<string | null>(null);
+  const syncedCloudLoyaltyRef = useRef<Set<string>>(new Set());
 
   const notify = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -303,9 +314,15 @@ export default function App() {
           return;
         }
         setVoterProfile(profile);
-        if (profile && loggedLoginForUidRef.current !== activeVoterUid) {
-          loggedLoginForUidRef.current = activeVoterUid;
-          recordLoginActivity(profile).catch(() => {});
+        if (profile) {
+          if (loggedLoginForUidRef.current !== activeVoterUid) {
+            loggedLoginForUidRef.current = activeVoterUid;
+            recordLoginActivity(profile).catch(() => {});
+          }
+          if (syncedSelfVoterUidRef.current !== profile.uid) {
+            syncedSelfVoterUidRef.current = profile.uid;
+            syncLoyaltyVoterToPetaSuara(profile).catch(() => {});
+          }
         }
       },
       (err) => notify(`Gagal memuat profil: ${err.message}`)
@@ -381,6 +398,60 @@ export default function App() {
     };
   }, [staffUser?.id, notify]);
 
+  // 5b. Real-Time GPS Writer (Firestore `kader_locations`) khusus saat login sebagai Kader
+  useEffect(() => {
+    if (!staffUser || staffUser.role !== 'kader') return;
+
+    const stopTracking = startKaderGpsTracking({
+      userId: staffUser.id || staffUser.username,
+      namaKader: staffUser.nama,
+    });
+
+    return () => {
+      stopTracking();
+    };
+  }, [staffUser?.id, staffUser?.username, staffUser?.nama, staffUser?.role]);
+
+  // 5b. When Superadmin Google SSO is active in Staff Portal, mirror all registered Loyalty/Manual voters to Peta Suara
+  useEffect(() => {
+    if (
+      !staffUser ||
+      staffUser.role !== 'super_admin' ||
+      !authUser ||
+      !isSuperAdminEmail(authUser.email)
+    ) {
+      setRegisteredLoyaltyVoters([]);
+      return;
+    }
+
+    const unsubAll = subscribeAllVoters((allVoters) => {
+      setRegisteredLoyaltyVoters(allVoters);
+      allVoters.forEach((v) => {
+        const sig = `${v.uid}|${v.fullName}|${v.region}|${v.address}|${v.phone}`;
+        if (!syncedCloudLoyaltyRef.current.has(sig)) {
+          syncedCloudLoyaltyRef.current.add(sig);
+          syncLoyaltyVoterToPetaSuara(v).catch(() => {});
+        }
+      });
+    });
+
+    return () => unsubAll();
+  }, [staffUser?.id, staffUser?.role, authUser?.email]);
+
+  const mergedVoterRecords = React.useMemo<VoterOcrRecord[]>(() => {
+    if (registeredLoyaltyVoters.length === 0) return voterOcrRecords;
+    const byKey = new Map<string, VoterOcrRecord>();
+    voterOcrRecords.forEach((rec) => {
+      byKey.set(rec.voterUid || rec.id, rec);
+    });
+    registeredLoyaltyVoters.forEach((lv) => {
+      if (!byKey.has(lv.uid)) {
+        byKey.set(lv.uid, loyaltyVoterToOcrRecord(lv));
+      }
+    });
+    return Array.from(byKey.values());
+  }, [voterOcrRecords, registeredLoyaltyVoters]);
+
   const handleGoogleLogin = async () => {
     setAuthError(null);
     setIsSigningIn(true);
@@ -440,6 +511,12 @@ export default function App() {
   };
 
   const handleStaffLogout = async () => {
+    if (staffUser && staffUser.role === 'kader') {
+      await markKaderGpsInactive(
+        staffUser.id || staffUser.username,
+        staffUser.nama
+      ).catch(() => {});
+    }
     localStorage.removeItem(STAFF_SESSION_KEY);
     setStaffUser(null);
     setUserAccounts([]);
@@ -854,7 +931,7 @@ export default function App() {
           events={events}
           rewards={rewards}
           calegInfoList={calegInfoList}
-          voterOcrRecords={voterOcrRecords}
+          voterOcrRecords={mergedVoterRecords}
           timSuksesList={timSuksesList}
           c1Records={c1Records}
           b1Records={b1Records}

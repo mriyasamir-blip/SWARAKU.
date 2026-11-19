@@ -34,6 +34,7 @@ import type {
   RewardDoc,
   VoterDoc,
 } from '../types/swaraku';
+import { syncLoyaltyVoterToPetaSuara } from './cloudSyncService';
 
 export const SUPERADMIN_EMAILS: readonly string[] = [
   'm.riyasamir@gmail.com',
@@ -278,6 +279,15 @@ export async function registerVoterProfile({
 
   try {
     await batch.commit();
+    await syncLoyaltyVoterToPetaSuara({
+      uid,
+      fullName: clampStr(fullName, 120),
+      address: clampStr(address, 300),
+      region: clampStr(region, 120),
+      phone: clampStr(phone, 30),
+      referralCode: myCode,
+      authMethod: 'google',
+    }).catch(() => {});
     return { appliedReferralBonus: Boolean(referrerUid) };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `voters/${uid}`);
@@ -393,22 +403,24 @@ export async function registerManualVoterProfile(
 
   try {
     await batch.commit();
+    const createdVoter: VoterDoc = {
+      uid: voterId,
+      fullName: cleanName,
+      address: cleanAddress,
+      region: cleanRegion,
+      phone: cleanPhone,
+      email: cleanEmail,
+      points: 100,
+      referralCode: myCode,
+      ...(referrerUid && cleanRef ? { referredBy: cleanRef } : {}),
+      occupation: '',
+      birthDate: '',
+      authMethod: 'manual',
+    };
+    await syncLoyaltyVoterToPetaSuara(createdVoter).catch(() => {});
     return {
       appliedReferralBonus: Boolean(referrerUid),
-      voter: {
-        uid: voterId,
-        fullName: cleanName,
-        address: cleanAddress,
-        region: cleanRegion,
-        phone: cleanPhone,
-        email: cleanEmail,
-        points: 100,
-        referralCode: myCode,
-        ...(referrerUid && cleanRef ? { referredBy: cleanRef } : {}),
-        occupation: '',
-        birthDate: '',
-        authMethod: 'manual',
-      },
+      voter: createdVoter,
     };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `voters/${voterId}`);
@@ -504,6 +516,25 @@ export async function updateVoterProfile(
       occupation: clampStr(patch.occupation, 100),
       birthDate: clampStr(patch.birthDate, 30),
     });
+
+    try {
+      const voterSnap = await getDoc(doc(db, 'voters', uid));
+      if (voterSnap.exists()) {
+        await syncLoyaltyVoterToPetaSuara(voterSnap.data() as VoterDoc);
+      } else {
+        await syncLoyaltyVoterToPetaSuara({
+          uid,
+          fullName: clampStr(patch.fullName, 120),
+          address: clampStr(patch.address, 300),
+          region: clampStr(patch.region, 120),
+          phone: clampStr(patch.phone, 30),
+          referralCode: `SWR-${uid.substring(0, 6).toUpperCase()}`,
+          authMethod: uid.startsWith('vreg_') ? 'manual' : 'google',
+        });
+      }
+    } catch {
+      // Non-fatal Peta Suara sync
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
   }

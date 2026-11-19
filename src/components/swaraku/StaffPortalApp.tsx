@@ -17,7 +17,6 @@ import {
   Trash2,
   Mail,
   Phone,
-  BadgeCheck,
   Briefcase,
   Award,
   Compass,
@@ -30,6 +29,8 @@ import {
   ChevronRight,
   AlertTriangle,
   Globe,
+  FileText,
+  Navigation,
 } from 'lucide-react';
 import type {
   AspirasiItem,
@@ -47,6 +48,7 @@ import type {
 import type { TimSuksesWilayahRecord } from '../../data/petaSuaraData';
 import type { CalegInfoDoc, CampaignEventDoc, RewardDoc } from '../../types/swaraku';
 import { UserRoleManagementView } from '../admin/UserRoleManagementView';
+import { MonitoringKaderView } from '../admin/MonitoringKaderView';
 import { SuperadminView } from './SuperadminView';
 import { EventLocationMap } from '../maps/EventLocationMap';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
@@ -64,10 +66,16 @@ import { WhatsAppBlaztModal } from '../common/WhatsAppBlaztModal';
 import { TambahNikUndangTemanModal } from '../common/TambahNikUndangTemanModal';
 import { AiPilcalegModal } from '../common/AiPilcalegModal';
 import { PendaftaranVoterOcrModal } from '../kader/PendaftaranVoterOcrModal';
+import { QuickCountOcrModal } from '../kader/QuickCountOcrModal';
+import { ElectabilitySurveyModal } from '../common/ElectabilitySurveyModal';
+import { CekTpsAiModal } from '../common/CekTpsAiModal';
+import { AutoCekNikModal } from '../common/AutoCekNikModal';
+import { FieldRoleDashboard } from './FieldRoleDashboard';
 
 export type StaffTab =
   | 'beranda'
   | 'peta_suara'
+  | 'monitoring_kader'
   | 'command_center'
   | 'database_voters'
   | 'aspirasi'
@@ -256,10 +264,14 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
-  // Supporting Admin Modals
+  // Supporting Staff & Field Modals
   const [showC1Modal, setShowC1Modal] = useState(false);
   const [showB1Modal, setShowB1Modal] = useState(false);
   const [showQuickCountModal, setShowQuickCountModal] = useState(false);
+  const [showQuickCountOcrModal, setShowQuickCountOcrModal] = useState(false);
+  const [showSurveyModal, setShowSurveyModal] = useState(false);
+  const [showCekTpsAiModal, setShowCekTpsAiModal] = useState(false);
+  const [showAutoCekNikModal, setShowAutoCekNikModal] = useState(false);
   const [showBlaztModal, setShowBlaztModal] = useState(false);
   const [showTambahNikModal, setShowTambahNikModal] = useState(false);
   const [showVoterOcrModal, setShowVoterOcrModal] = useState(false);
@@ -269,9 +281,29 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
 
   const roleMeta = ROLE_META[staffUser.role] || ROLE_META.kader;
   const isAdminOrSuper = staffUser.role === 'super_admin' || staffUser.role === 'admin';
+  const isTimSukses = staffUser.role === 'tim_sukses';
+  const isKader = staffUser.role === 'kader';
+  const canAccessPetaSuara = isAdminOrSuper || isTimSukses;
+  const canUseAiPilcaleg = isAdminOrSuper || isTimSukses;
+  const canAccessFieldModules = isAdminOrSuper || isTimSukses || isKader;
   const hasGoogleSuperAdmin = Boolean(authUser && isSuperAdminEmail(authUser.email));
   const timSuksesSupervisor =
     staffUser.timSuksesNama || staffUser.didaftarkanOlehTimSukses || '';
+
+  const handleSaveVoterWithRole = (voter: VoterOcrRecord) => {
+    const roleTag: VoterOcrRecord['diinputOlehRole'] =
+      staffUser.role === 'tim_sukses'
+        ? 'tim_sukses'
+        : staffUser.role === 'kader'
+        ? 'kader'
+        : 'admin';
+    onSaveVoter({
+      ...voter,
+      diinputOlehRole: voter.diinputOlehRole || roleTag,
+      diinputOlehNama: voter.diinputOlehNama || staffUser.nama,
+      terdaftarOleh: voter.terdaftarOleh || staffUser.nama,
+    });
+  };
 
   // Derived VoterProfile for legacy TPS / Undang Teman sub-components
   const staffVoterProfile = useMemo<VoterProfile>(
@@ -316,21 +348,35 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
       { id: 'beranda', label: 'Beranda', shortLabel: 'Beranda', icon: <Home className="w-5 h-5" /> },
     ];
 
+    if (canAccessPetaSuara) {
+      items.push({
+        id: 'peta_suara',
+        label: 'Peta Suara (Google Maps)',
+        shortLabel: 'Peta Suara',
+        icon: <Compass className="w-5 h-5" />,
+        badge: timSuksesList.length > 0 ? timSuksesList.length : undefined,
+      });
+    }
+
     if (isAdminOrSuper) {
       items.push(
         {
-          id: 'peta_suara',
-          label: 'Peta Suara (Google Maps)',
-          shortLabel: 'Peta Suara',
-          icon: <Compass className="w-5 h-5" />,
-          badge: timSuksesList.length > 0 ? timSuksesList.length : undefined,
+          id: 'monitoring_kader',
+          label: 'Monitoring Kader',
+          shortLabel: 'GPS Kader',
+          icon: <Navigation className="w-5 h-5" />,
         },
         {
           id: 'command_center',
           label: 'Command Center',
           shortLabel: 'Command',
           icon: <Radio className="w-5 h-5" />,
-        },
+        }
+      );
+    }
+
+    if (canAccessFieldModules) {
+      items.push(
         {
           id: 'database_voters',
           label: 'Database Voters',
@@ -339,23 +385,27 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
           badge: voterOcrRecords.length,
         },
         {
-          id: 'aspirasi',
-          label: 'Aspirasi Warga',
-          shortLabel: 'Aspirasi',
-          icon: <MessageSquare className="w-5 h-5" />,
-          badge: aspirasiList.length > 0 ? aspirasiList.length : undefined,
-        },
-        {
           id: 'tps',
-          label: 'TPS & Info Saksi',
+          label: isKader ? 'TPS & Form C1/B1' : 'TPS & Info Saksi',
           shortLabel: 'TPS & C1',
           icon: <MapPin className="w-5 h-5" />,
+          badge:
+            c1Records.length + b1Records.length > 0
+              ? c1Records.length + b1Records.length
+              : undefined,
         },
         {
           id: 'operasi_lapangan',
           label: 'Operasi Lapangan',
           shortLabel: 'Lapangan',
           icon: <UserCheck className="w-5 h-5" />,
+        },
+        {
+          id: 'aspirasi',
+          label: 'Aspirasi Warga',
+          shortLabel: 'Aspirasi',
+          icon: <MessageSquare className="w-5 h-5" />,
+          badge: aspirasiList.length > 0 ? aspirasiList.length : undefined,
         }
       );
     }
@@ -387,10 +437,15 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
 
     return items;
   }, [
+    canAccessPetaSuara,
+    canAccessFieldModules,
     isAdminOrSuper,
+    isKader,
     staffUser.role,
     timSuksesList.length,
     voterOcrRecords.length,
+    c1Records.length,
+    b1Records.length,
     aspirasiList.length,
     userAccounts.length,
   ]);
@@ -455,10 +510,12 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
       </div>
     );
 
-  // Mobile bottom navigation displays up to 4 key shortcuts + Menu drawer trigger (when Admin/Super Admin)
+  // Mobile bottom navigation displays 4 primary role shortcuts + Menu drawer trigger
   const mobileBottomItems: StaffTab[] = isAdminOrSuper
     ? ['beranda', 'peta_suara', 'command_center', 'database_voters']
-    : ['beranda', 'profil'];
+    : isTimSukses
+    ? ['beranda', 'peta_suara', 'database_voters', 'tps']
+    : ['beranda', 'database_voters', 'tps', 'operasi_lapangan'];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col lg:flex-row">
@@ -489,28 +546,68 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
           </div>
         </div>
 
-        {/* Quick Actions for Admin & Super Admin */}
-        {isAdminOrSuper && (
-          <div className="px-4 pt-3 pb-1 grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={onTriggerCloudSync}
-              disabled={isSyncingCloud}
-              className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
-              <span>{isSyncingCloud ? 'Sinkron...' : 'Sinkron'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowAiModal(true)}
-              className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-slate-950 text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Bot className="w-3.5 h-3.5" />
-              <span>AI PILCALEG</span>
-            </button>
-          </div>
-        )}
+        {/* Quick Actions per Role */}
+        <div className="px-4 pt-3 pb-1 grid grid-cols-2 gap-2">
+          {isAdminOrSuper ? (
+            <>
+              <button
+                type="button"
+                onClick={onTriggerCloudSync}
+                disabled={isSyncingCloud}
+                className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+                <span>{isSyncingCloud ? 'Sinkron...' : 'Sinkron'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAiModal(true)}
+                className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-slate-950 text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Bot className="w-3.5 h-3.5" />
+                <span>AI PILCALEG</span>
+              </button>
+            </>
+          ) : isTimSukses ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowVoterOcrModal(true)}
+                className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 text-cyan-900 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Scan e-KTP</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAiModal(true)}
+                className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-slate-950 text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Bot className="w-3.5 h-3.5" />
+                <span>AI PILCALEG</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowVoterOcrModal(true)}
+                className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 text-cyan-900 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Scan e-KTP</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowQuickCountOcrModal(true)}
+                className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-900 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Scan C1/B1</span>
+              </button>
+            </>
+          )}
+        </div>
 
         {/* Nav Links */}
         <nav className="flex-1 p-3.5 space-y-1 overflow-y-auto">
@@ -578,16 +675,14 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
       {/* Mobile Compact Header */}
       <header className="lg:hidden sticky top-0 z-30 bg-white border-b border-slate-200 px-3 sm:px-4 h-14 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          {isAdminOrSuper && (
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(true)}
-              className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center shrink-0 cursor-pointer"
-              aria-label="Buka semua menu Admin"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center shrink-0 cursor-pointer"
+            aria-label={`Buka semua menu ${roleMeta.label}`}
+          >
+            <Menu className="w-5 h-5" />
+          </button>
           <img src="/icon.svg" alt="Swaraku" className="w-7 h-7 shrink-0" />
           <div className="min-w-0">
             <span className="font-extrabold text-sm text-slate-900 block truncate">
@@ -596,7 +691,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {isAdminOrSuper && (
+          {canUseAiPilcaleg ? (
             <button
               type="button"
               onClick={() => setShowAiModal(true)}
@@ -604,6 +699,15 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             >
               <Bot className="w-3.5 h-3.5" />
               <span>AI</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowVoterOcrModal(true)}
+              className="h-8 px-2.5 rounded-lg bg-cyan-50 border border-cyan-200 text-cyan-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>e-KTP</span>
             </button>
           )}
           <span
@@ -637,20 +741,33 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
               </button>
             </div>
 
-            {isAdminOrSuper && (
-              <div className="px-4 pt-3 pb-1 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
+            <div className="px-4 pt-3 pb-1 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (isAdminOrSuper) {
                     onTriggerCloudSync();
-                    setMobileMenuOpen(false);
-                  }}
-                  disabled={isSyncingCloud}
-                  className="min-h-[38px] px-2 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
-                  <span>Sinkron Cloud</span>
-                </button>
+                  } else {
+                    setShowVoterOcrModal(true);
+                  }
+                  setMobileMenuOpen(false);
+                }}
+                disabled={isAdminOrSuper && isSyncingCloud}
+                className="min-h-[38px] px-2 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {isAdminOrSuper ? (
+                  <>
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+                    <span>Sinkron Cloud</span>
+                  </>
+                ) : (
+                  <>
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Scan e-KTP</span>
+                  </>
+                )}
+              </button>
+              {canUseAiPilcaleg ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -662,8 +779,20 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
                   <Bot className="w-3.5 h-3.5" />
                   <span>AI PILCALEG</span>
                 </button>
-              </div>
-            )}
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowQuickCountOcrModal(true);
+                    setMobileMenuOpen(false);
+                  }}
+                  className="min-h-[38px] px-2 py-1.5 rounded-xl bg-cyan-50 border border-cyan-200 text-cyan-900 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Scan C1/B1</span>
+                </button>
+              )}
+            </div>
 
             <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
               {navItems.map((item) => {
@@ -759,7 +888,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  {isAdminOrSuper && (
+                  {canUseAiPilcaleg && (
                     <button
                       type="button"
                       onClick={() => setShowAiModal(true)}
@@ -769,6 +898,16 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
                       <span>AI PILCALEG</span>
                     </button>
                   )}
+                  {(isTimSukses || isKader) && (
+                    <button
+                      type="button"
+                      onClick={() => setShowVoterOcrModal(true)}
+                      className="min-h-[42px] px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Camera className="w-4 h-4" />
+                      <span>Daftar Voter e-KTP</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleRefresh}
@@ -776,7 +915,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
                     className="min-h-[42px] px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold inline-flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <RefreshCw className={`w-4 h-4 ${isSyncingProfile ? 'animate-spin' : ''}`} />
-                    <span>{isSyncingProfile ? 'Menyinkronkan...' : 'Sinkronkan Profil'}</span>
+                    <span>{isSyncingProfile ? 'Menyinkronkan...' : 'Sinkronkan Data'}</span>
                   </button>
                 </div>
               </div>
@@ -787,14 +926,14 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                     <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs">
                       <div className="flex items-center justify-between text-slate-500 mb-1">
-                        <span className="text-xs font-semibold">Data Voters (OCR)</span>
+                        <span className="text-xs font-semibold">Total Data Voters</span>
                         <Database className="w-4 h-4 text-cyan-600" />
                       </div>
                       <p className="text-2xl font-black text-slate-900 font-mono">
                         {voterOcrRecords.length.toLocaleString('id-ID')}
                       </p>
                       <span className="text-[11px] text-cyan-700 font-medium">
-                        Tersinkron Cloud Firestore
+                        Daftar Online &amp; e-KTP · Peta Suara
                       </span>
                     </div>
 
@@ -894,9 +1033,9 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
                             <Database className="w-5 h-5" />
                           </div>
                           <div>
-                            <h4 className="text-sm font-black text-slate-900">Data Voters (OCR)</h4>
+                            <h4 className="text-sm font-black text-slate-900">Database Voters</h4>
                             <p className="text-xs text-slate-500 mt-0.5">
-                              Scan e-KTP pemilih, peta titik lokasi, filter TPS &amp; ekspor laporan.
+                              Pemilih daftar online, scan e-KTP, peta titik lokasi, &amp; ekspor laporan.
                             </p>
                           </div>
                         </div>
@@ -1010,65 +1149,31 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
                 </>
               )}
 
-              {/* Relasi Kader <-> Tim Sukses */}
-              {staffUser.role === 'kader' && timSuksesSupervisor && (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 sm:p-5 flex items-start gap-3">
-                  <BadgeCheck className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-xs font-extrabold text-emerald-900 uppercase tracking-wider">
-                      Tim Sukses Pembina Anda
-                    </p>
-                    <p className="text-sm font-bold text-slate-900 mt-0.5">
-                      {timSuksesSupervisor}
-                    </p>
-                    <p className="text-xs text-emerald-800 mt-0.5">
-                      Akun Anda terhubung otomatis di bawah koordinasi Tim Sukses tersebut.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {staffUser.role === 'tim_sukses' && (
-                <div className="bg-white rounded-3xl border border-slate-200 p-6 space-y-3 shadow-xs">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-base font-extrabold text-slate-900">
-                        Daftar Kader Binaan Anda
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        Kader yang terdaftar bersama akun Tim Sukses Anda di Cloud Database
-                      </p>
-                    </div>
-                    <span className="px-3 py-1 rounded-xl bg-cyan-50 text-cyan-800 border border-cyan-200 text-xs font-extrabold font-mono">
-                      {staffUser.kaderList?.length || 0} Kader
-                    </span>
-                  </div>
-
-                  {staffUser.kaderList && staffUser.kaderList.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
-                      {staffUser.kaderList.map((kaderName, idx) => (
-                        <div
-                          key={`${kaderName}-${idx}`}
-                          className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center gap-3"
-                        >
-                          <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center shrink-0">
-                            {getInitials(kaderName)}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-bold text-slate-900 truncate">
-                              {kaderName}
-                            </p>
-                            <p className="text-xs text-slate-500">Kader Lapangan</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-500 py-3">
-                      Belum ada kader binaan yang ditautkan ke akun Tim Sukses ini.
-                    </p>
-                  )}
-                </div>
+              {/* Dashboard Operasional Khusus Tim Sukses & Kader */}
+              {(isTimSukses || isKader) && (
+                <FieldRoleDashboard
+                  staffUser={staffUser}
+                  voterCount={voterOcrRecords.length}
+                  c1Records={c1Records}
+                  b1Records={b1Records}
+                  surveyCount={surveyList.length}
+                  invitedCount={invitedList.length}
+                  aspirasiCount={aspirasiList.length}
+                  kaderPoints={kaderPoints}
+                  sudahMencoblos={sudahMencoblos}
+                  timSuksesSupervisor={timSuksesSupervisor}
+                  onOpenDaftarVoterOcr={() => setShowVoterOcrModal(true)}
+                  onOpenQuickCountOcr={() => setShowQuickCountOcrModal(true)}
+                  onOpenUploadC1={() => setShowC1Modal(true)}
+                  onOpenRekapPaslon={() => setShowQuickCountModal(true)}
+                  onOpenSurvey={() => setShowSurveyModal(true)}
+                  onOpenCekTpsAi={() => setShowCekTpsAiModal(true)}
+                  onOpenAutoCekNik={() => setShowAutoCekNikModal(true)}
+                  onOpenTambahNik={() => setShowTambahNikModal(true)}
+                  onOpenWhatsAppBlazt={() => setShowBlaztModal(true)}
+                  onOpenAiPilcaleg={() => setShowAiModal(true)}
+                  onNavigateTab={handleSelectTab}
+                />
               )}
 
               {/* Shared Info Caleg Daerah */}
@@ -1165,8 +1270,8 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             </div>
           )}
 
-          {/* 2. PETA SUARA (GOOGLE MAPS API) */}
-          {activeTab === 'peta_suara' && isAdminOrSuper && (
+          {/* 2. PETA SUARA (GOOGLE MAPS API) — Super Admin, Admin, & Tim Sukses */}
+          {activeTab === 'peta_suara' && canAccessPetaSuara && (
             <div className="bg-white rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4">
               <MonitoringPetaSuaraScreen
                 voterList={voterOcrRecords}
@@ -1174,12 +1279,19 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
                 timSuksesList={timSuksesList}
                 currentUser={staffUser}
                 onSaveTimSukses={onSaveTimSukses}
-                onSaveVoter={onSaveVoter}
-                onResetDataToZero={() => setConfirmResetOpen(true)}
+                onSaveVoter={handleSaveVoterWithRole}
+                onResetDataToZero={isAdminOrSuper ? () => setConfirmResetOpen(true) : undefined}
                 onOpenWhatsAppBlazt={() => setShowBlaztModal(true)}
                 onNavigateTab={(tab) => handleSelectTab(tab as StaffTab)}
                 onOpenTambahNikModal={() => setShowTambahNikModal(true)}
               />
+            </div>
+          )}
+
+          {/* 2b. MONITORING KADER (GPS REAL-TIME FIRESTORE) */}
+          {activeTab === 'monitoring_kader' && isAdminOrSuper && (
+            <div className="bg-white rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4">
+              <MonitoringKaderView onNotify={onNotify} />
             </div>
           )}
 
@@ -1209,7 +1321,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
           )}
 
           {/* 4. DATABASE VOTERS (DATA VOTERS) */}
-          {activeTab === 'database_voters' && isAdminOrSuper && (
+          {activeTab === 'database_voters' && canAccessFieldModules && (
             <div className="bg-white rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4">
               <DatabaseVotersView
                 voterList={voterOcrRecords}
@@ -1221,7 +1333,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
           )}
 
           {/* 5. ASPIRASI */}
-          {activeTab === 'aspirasi' && isAdminOrSuper && (
+          {activeTab === 'aspirasi' && canAccessFieldModules && (
             <div className="bg-white rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4">
               <AspirasiScreen
                 aspirasiList={aspirasiList}
@@ -1232,7 +1344,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
           )}
 
           {/* 6. TPS & INFO SAKSI */}
-          {activeTab === 'tps' && isAdminOrSuper && (
+          {activeTab === 'tps' && canAccessFieldModules && (
             <div className="bg-white rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
                 <div>
@@ -1240,21 +1352,29 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
                     TPS &amp; Info Relawan Saksi
                   </h2>
                   <p className="text-xs text-slate-500">
-                    Kelola lokasi TPS, unggah Form C1 Plano / Form B1, &amp; tabulasi Quick Count.
+                    Kelola lokasi TPS, scan OCR atau unggah Form C1 Plano / Form B1, &amp; pantau Quick Count.
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickCountOcrModal(true)}
+                    className="min-h-[38px] px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Scan OCR C1/B1</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => setShowC1Modal(true)}
-                    className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-bold cursor-pointer"
+                    className="min-h-[38px] px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-bold cursor-pointer"
                   >
                     Unggah C1
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowB1Modal(true)}
-                    className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold cursor-pointer"
+                    className="min-h-[38px] px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold cursor-pointer"
                   >
                     Unggah B1
                   </button>
@@ -1271,7 +1391,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
           )}
 
           {/* 7. OPERASI LAPANGAN */}
-          {activeTab === 'operasi_lapangan' && isAdminOrSuper && (
+          {activeTab === 'operasi_lapangan' && canAccessFieldModules && (
             <div className="bg-white rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4">
               <GroundOperationsView
                 onRegisterVoter={onRegisterVoterField}
@@ -1465,16 +1585,14 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             </button>
           );
         })}
-        {isAdminOrSuper && (
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen(true)}
-            className="min-h-[44px] min-w-[52px] px-2 py-1 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[11px] font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
-          >
-            <Menu className="w-5 h-5" />
-            <span>Menu</span>
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen(true)}
+          className="min-h-[44px] min-w-[52px] px-2 py-1 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[11px] font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
+        >
+          <Menu className="w-5 h-5" />
+          <span>Menu</span>
+        </button>
       </nav>
 
       {/* Inline Confirm Reset Modal for Peta Suara */}
@@ -1566,20 +1684,50 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
       <PendaftaranVoterOcrModal
         isOpen={showVoterOcrModal}
         onClose={() => setShowVoterOcrModal(false)}
-        onSaveVoter={onSaveVoter}
+        onSaveVoter={handleSaveVoterWithRole}
         defaultTps={staffUser.tps || 'TPS 001'}
         kaderNama={staffUser.nama}
       />
 
-      <AiPilcalegModal
-        isOpen={showAiModal}
-        onClose={() => setShowAiModal(false)}
-        userRole="admin"
-        onNavigateToBlazt={() => {
-          setShowAiModal(false);
-          setShowBlaztModal(true);
-        }}
+      <QuickCountOcrModal
+        isOpen={showQuickCountOcrModal}
+        onClose={() => setShowQuickCountOcrModal(false)}
+        onApproveC1={(data) => onSubmitC1(data)}
+        onApproveB1={(data) => onSubmitB1(data)}
+        defaultTps={staffUser.tps || 'TPS 047'}
+        saksiNama={staffUser.nama}
       />
+
+      <ElectabilitySurveyModal
+        isOpen={showSurveyModal}
+        onClose={() => setShowSurveyModal(false)}
+        surveyList={surveyList}
+        onSubmitSurvey={onSubmitSurvey}
+      />
+
+      <CekTpsAiModal
+        isOpen={showCekTpsAiModal}
+        onClose={() => setShowCekTpsAiModal(false)}
+        onSaveVoter={onSaveDptVoter}
+      />
+
+      <AutoCekNikModal
+        isOpen={showAutoCekNikModal}
+        onClose={() => setShowAutoCekNikModal(false)}
+        onSaveVoter={onSaveDptVoter}
+      />
+
+      {canUseAiPilcaleg && (
+        <AiPilcalegModal
+          isOpen={showAiModal}
+          onClose={() => setShowAiModal(false)}
+          userRole={isAdminOrSuper ? 'admin' : 'tim_sukses'}
+          onNavigateToBlazt={() => {
+            setShowAiModal(false);
+            setShowBlaztModal(true);
+          }}
+        />
+      )}
     </div>
   );
 };

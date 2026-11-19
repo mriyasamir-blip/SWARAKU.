@@ -12,7 +12,7 @@ import {
   PetaWilayahMarker,
   normalizeWilayahName,
 } from '../../data/petaSuaraData';
-import { lookupSmartCoordinates } from '../../utils/geocoding';
+import { lookupSmartCoordinates, parseVoterRegionAndAddress } from '../../utils/geocoding';
 import { VoterOcrRecord, UserAccount } from '../../types/vore';
 import {
   Search,
@@ -178,7 +178,7 @@ const MarkerWithAnchor: React.FC<MarkerWithAnchorProps> = ({
               )}
             </div>
 
-            {/* Total Suara & Rincian Input (Tim Sukses vs Kader) */}
+            {/* Total Suara & Rincian Input (Tim Sukses vs Kader vs Daftar Online) */}
             <div className="p-2.5 bg-gradient-to-br from-cyan-50 to-teal-50 border border-cyan-200 rounded-xl space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold text-cyan-900 uppercase">
@@ -189,23 +189,32 @@ const MarkerWithAnchor: React.FC<MarkerWithAnchorProps> = ({
                 </span>
               </div>
 
-              {/* Rincian: Tim Sukses vs Kader */}
-              <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-cyan-200/70 text-[11px]">
+              {/* Rincian: Tim Sukses vs Kader vs Daftar Online */}
+              <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-cyan-200/70 text-[11px]">
                 <div className="p-1.5 bg-white/80 rounded-lg border border-cyan-200">
                   <span className="text-[9px] text-slate-500 block leading-tight font-semibold">
-                    Input Tim Sukses
+                    Tim Sukses
                   </span>
                   <span className="text-xs font-black font-mono text-cyan-700 block mt-0.5">
-                    {markerData.voterTimSuksesCount} Voter
+                    {markerData.voterTimSuksesCount}
                   </span>
                 </div>
 
                 <div className="p-1.5 bg-white/80 rounded-lg border border-teal-200">
                   <span className="text-[9px] text-slate-500 block leading-tight font-semibold">
-                    Input Kader
+                    Kader
                   </span>
                   <span className="text-xs font-black font-mono text-emerald-700 block mt-0.5">
-                    {markerData.voterKaderCount} Voter
+                    {markerData.voterKaderCount}
+                  </span>
+                </div>
+
+                <div className="p-1.5 bg-white/80 rounded-lg border border-blue-200">
+                  <span className="text-[9px] text-slate-500 block leading-tight font-semibold">
+                    Daftar Online
+                  </span>
+                  <span className="text-xs font-black font-mono text-blue-700 block mt-0.5">
+                    {markerData.voterOnlineCount || 0}
                   </span>
                 </div>
               </div>
@@ -219,44 +228,75 @@ const MarkerWithAnchor: React.FC<MarkerWithAnchorProps> = ({
                     Pemilih Terdaftar di Titik Ini ({markerData.recentVoters.length}):
                   </span>
                   <span className="text-[9px] font-bold text-teal-700 bg-teal-50 px-1.5 py-0.2 rounded border border-teal-200">
-                    ✓ Scan AI KTP
+                    ✓ Real-Time Cloud
                   </span>
                 </div>
 
                 <div className="max-h-40 overflow-y-auto space-y-1.5 pr-0.5">
-                  {markerData.recentVoters.map((v: VoterOcrRecord) => (
-                    <div
-                      key={v.id}
-                      className="p-1.5 bg-white rounded-xl border border-slate-200 shadow-2xs flex items-center gap-2"
-                    >
-                      {v.fotoKtpUrl ? (
-                        <img
-                          src={v.fotoKtpUrl}
-                          alt="Foto KTP"
-                          className="w-10 h-7 object-cover rounded-md border border-slate-200 shrink-0 shadow-2xs"
-                        />
-                      ) : (
-                        <div className="w-10 h-7 rounded-md bg-slate-100 border border-dashed border-slate-300 flex items-center justify-center text-[8px] text-slate-400 shrink-0 font-bold">
-                          KTP
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <span className="text-[11px] font-black text-slate-900 block truncate">
-                          {v.nama}
-                        </span>
-                        <div className="flex items-center gap-1 text-[9px] text-slate-500 font-mono">
-                          <span>{v.nikMasked || v.nik}</span>
-                          <span>·</span>
-                          <span className="text-teal-700 font-bold">{v.tps}</span>
-                        </div>
-                        {v.alamat && (
-                          <span className="text-[8px] text-slate-400 block truncate">
-                            {v.alamat} (RT {v.rtRw || '-'})
-                          </span>
+                  {markerData.recentVoters.map((v: VoterOcrRecord) => {
+                    const isOnline =
+                      v.diinputOlehRole === 'voter' ||
+                      v.registrationSource === 'google_sso' ||
+                      v.registrationSource === 'manual_signup';
+                    const sourceBadge =
+                      v.registrationSource === 'manual_signup'
+                        ? 'Daftar Mandiri'
+                        : v.registrationSource === 'google_sso'
+                        ? 'Google SSO'
+                        : 'Scan KTP';
+
+                    return (
+                      <div
+                        key={v.id}
+                        className="p-1.5 bg-white rounded-xl border border-slate-200 shadow-2xs flex items-center gap-2"
+                      >
+                        {v.fotoKtpUrl ? (
+                          <img
+                            src={v.fotoKtpUrl}
+                            alt="Foto KTP"
+                            className="w-10 h-7 object-cover rounded-md border border-slate-200 shrink-0 shadow-2xs"
+                          />
+                        ) : (
+                          <div
+                            className={`w-10 h-7 rounded-md border flex items-center justify-center text-[9px] shrink-0 font-black ${
+                              isOnline
+                                ? 'bg-blue-50 border-blue-200 text-blue-700'
+                                : 'bg-slate-100 border-dashed border-slate-300 text-slate-500'
+                            }`}
+                          >
+                            {isOnline ? 'WEB' : 'KTP'}
+                          </div>
                         )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-[11px] font-black text-slate-900 block truncate">
+                              {v.nama}
+                            </span>
+                            <span
+                              className={`text-[8px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                                isOnline
+                                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                  : 'bg-teal-50 text-teal-700 border border-teal-200'
+                              }`}
+                            >
+                              {sourceBadge}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 text-[9px] text-slate-500 font-mono">
+                            <span>{v.nikMasked || v.nik}</span>
+                            <span>·</span>
+                            <span className="text-teal-700 font-bold">{v.dapilLabel || v.tps}</span>
+                          </div>
+                          {v.alamat && (
+                            <span className="text-[8px] text-slate-400 block truncate">
+                              {v.alamat}
+                              {v.rtRw && v.rtRw !== '-' ? ` (RT ${v.rtRw})` : ''}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -393,6 +433,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
               totalVoters: 0,
               voterTimSuksesCount: 0,
               voterKaderCount: 0,
+              voterOnlineCount: 0,
               voterListNiks: [],
               terakhirUpdate: ts.waktuDaftar,
             });
@@ -408,11 +449,16 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
       });
     });
 
-    // Step B: Connect & Aggregate Voters (No static fallback to Jakarta Selatan)
+    // Step B: Connect & Aggregate Voters (Including e-KTP OCR, Lapangan, & Self-Registered Voters)
     voterList.forEach((v) => {
-      let vKota = v.kabupatenKota?.trim();
-      const vKec = v.kecamatan?.trim() || 'Kecamatan Belum Terdata';
-      const vKel = v.kelurahan?.trim() || 'Kelurahan Belum Terdata';
+      const parsedFallback =
+        !v.kelurahan || !v.kecamatan || !v.kabupatenKota
+          ? parseVoterRegionAndAddress(v.dapilLabel || v.kelurahan || '', v.alamat)
+          : null;
+
+      let vKota = (v.kabupatenKota || parsedFallback?.kabupatenKota || '').trim();
+      const vKec = (v.kecamatan || parsedFallback?.kecamatan || 'Wilayah Terdaftar').trim();
+      const vKel = (v.kelurahan || parsedFallback?.kelurahan || v.dapilLabel || 'Kelurahan Terdaftar').trim();
 
       // Fix city if missing or if mistakenly saved as Jakarta Selatan for Penjaringan
       if (!vKota || vKota === 'Kota Jakarta Selatan') {
@@ -474,6 +520,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
           totalVoters: 0,
           voterTimSuksesCount: 0,
           voterKaderCount: 0,
+          voterOnlineCount: 0,
           voterListNiks: [],
           recentVoters: [],
           terakhirUpdate: v.waktuDaftar,
@@ -489,8 +536,14 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
 
       if (v.diinputOlehRole === 'tim_sukses') {
         marker.voterTimSuksesCount += 1;
+      } else if (
+        v.diinputOlehRole === 'voter' ||
+        v.registrationSource === 'google_sso' ||
+        v.registrationSource === 'manual_signup'
+      ) {
+        marker.voterOnlineCount = (marker.voterOnlineCount || 0) + 1;
       } else {
-        marker.voterKaderCount += 1; // Default to Kader
+        marker.voterKaderCount += 1;
       }
     });
 
@@ -562,7 +615,13 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
   // 4. MACRO METRICS
   const grandTotalVoters = voterList.length;
   const totalVoterByTimSukses = voterList.filter((v) => v.diinputOlehRole === 'tim_sukses').length;
-  const totalVoterByKader = voterList.filter((v) => v.diinputOlehRole !== 'tim_sukses').length;
+  const totalVoterByOnline = voterList.filter(
+    (v) =>
+      v.diinputOlehRole === 'voter' ||
+      v.registrationSource === 'google_sso' ||
+      v.registrationSource === 'manual_signup'
+  ).length;
+  const totalVoterByKader = Math.max(0, grandTotalVoters - totalVoterByTimSukses - totalVoterByOnline);
   const totalWilayahTerpetakan = dynamicMarkers.length;
   const totalKoordinatorAktif = timSuksesList.length;
 
@@ -606,7 +665,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
             </span>
           </div>
           <p className="text-xs text-slate-500">
-            Sebaran suara pemilih &amp; wilayah kerja koordinator kecamatan/kelurahan
+            Sebaran seluruh pemilih terdaftar (Daftar Online, Google SSO, e-KTP) &amp; wilayah kerja koordinator
           </p>
         </div>
 
@@ -652,19 +711,19 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
             {grandTotalVoters.toLocaleString('id-ID')}
           </span>
           <span className="text-[10px] text-slate-300 block mt-0.5">
-            Real-Time Terverifikasi
+            {totalWilayahTerpetakan} Titik Wilayah Terpetakan
           </span>
         </div>
 
-        <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs">
-          <span className="text-[10px] uppercase font-bold text-slate-500 block">
-            Titik Wilayah Kerja
+        <div className="p-3 bg-white rounded-2xl border border-blue-200 shadow-2xs">
+          <span className="text-[10px] uppercase font-bold text-blue-700 block">
+            Voters Daftar Online
           </span>
-          <span className="text-xl font-black font-mono text-cyan-800 mt-1 block">
-            {totalWilayahTerpetakan}
+          <span className="text-xl font-black font-mono text-blue-700 mt-1 block">
+            {totalVoterByOnline}
           </span>
           <span className="text-[10px] text-slate-400 block mt-0.5">
-            Kecamatan &amp; Kelurahan
+            Google SSO &amp; Daftar Mandiri
           </span>
         </div>
 

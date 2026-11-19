@@ -20,7 +20,20 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
+
+const resolvedFirebaseConfig = {
+  apiKey: env?.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey,
+  authDomain: env?.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
+  projectId: env?.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
+  storageBucket: env?.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
+  messagingSenderId: env?.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId,
+  appId: env?.VITE_FIREBASE_APP_ID || firebaseConfig.appId,
+  measurementId: env?.VITE_FIREBASE_MEASUREMENT_ID || firebaseConfig.measurementId,
+};
+
+export const app =
+  getApps().length > 0 ? getApp() : initializeApp(resolvedFirebaseConfig);
 export const auth = getAuth(app);
 export const googleAuthProvider = new GoogleAuthProvider();
 googleAuthProvider.setCustomParameters({ prompt: 'select_account' });
@@ -28,10 +41,12 @@ googleAuthProvider.setCustomParameters({ prompt: 'select_account' });
 // Hanya tampilkan log tingkat error agar warning retry WebChannel sementara tidak memicu alarm palsu
 setLogLevel('error');
 
+const configuredDatabaseId =
+  env?.VITE_FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
+
 const targetDatabaseId =
-  firebaseConfig.firestoreDatabaseId &&
-  firebaseConfig.firestoreDatabaseId !== '(default)'
-    ? firebaseConfig.firestoreDatabaseId
+  configuredDatabaseId && configuredDatabaseId !== '(default)'
+    ? configuredDatabaseId
     : undefined;
 
 function buildLocalCache() {

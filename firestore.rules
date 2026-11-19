@@ -188,6 +188,19 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    function isValidKaderLocation(data) {
+      return data.keys().hasAll(['userId', 'namaKader', 'gpsStatus', 'lastUpdated'])
+        && data.keys().hasOnly(['userId', 'namaKader', 'latitude', 'longitude', 'accuracy', 'address', 'gpsStatus', 'lastUpdated'])
+        && data.userId is string && isValidId(data.userId)
+        && data.namaKader is string && data.namaKader.size() >= 1 && data.namaKader.size() <= 120
+        && data.gpsStatus in ['Aktif', 'Tidak Aktif', 'Ditolak']
+        && (!('latitude' in data) || (data.latitude is number && data.latitude >= -90 && data.latitude <= 90))
+        && (!('longitude' in data) || (data.longitude is number && data.longitude >= -180 && data.longitude <= 180))
+        && (!('accuracy' in data) || (data.accuracy is number && data.accuracy >= 0 && data.accuracy <= 100000))
+        && (!('address' in data) || (data.address is string && data.address.size() <= 300))
+        && data.lastUpdated is timestamp;
+    }
+
     // 4. Collection Match Blocks
 
     // STAFF ACCOUNTS (Kader, Tim Sukses, Admin, Super Admin - multi-device cloud login & management)
@@ -197,6 +210,25 @@ service cloud.firestore {
       allow create: if isValidId(userId) && isValidUserAccount(incoming());
       allow update: if isValidId(userId) && isValidUserAccount(incoming()) && incoming().id == existing().id;
       allow delete: if isValidId(userId);
+    }
+
+    // KADER GPS LOCATIONS (Real-time last-known GPS position per Kader; 1 doc per Kader)
+    match /kader_locations/{userId} {
+      allow get: if isValidId(userId);
+      allow list: if true;
+      allow create: if isValidId(userId)
+        && isValidKaderLocation(incoming())
+        && incoming().userId == userId
+        && incoming().lastUpdated == request.time;
+      allow update: if isValidId(userId)
+        && isValidKaderLocation(incoming())
+        && incoming().userId == userId
+        && incoming().userId == existing().userId
+        && incoming().lastUpdated == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'namaKader', 'latitude', 'longitude', 'accuracy', 'address', 'gpsStatus', 'lastUpdated'
+        ]);
+      allow delete: if isSuperAdmin() && isValidId(userId);
     }
 
     // DATA VOTERS OCR & PETA SUARA (Tim Kampanye & Admin)
