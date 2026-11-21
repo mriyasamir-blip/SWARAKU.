@@ -124,7 +124,7 @@ export const QuickCountModal: React.FC<QuickCountModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Tabulasi real-time perolehan suara berdasarkan formulir C1 Plano (TPS) &amp; Formulir B1 (Kecamatan) yang diunggah
+                Tabulasi real-time perolehan suara berdasarkan formulir C1 (Kelurahan) &amp; Formulir B1 (Kecamatan) yang diunggah
               </p>
             </div>
           </div>
@@ -151,11 +151,11 @@ export const QuickCountModal: React.FC<QuickCountModalProps> = ({
                 <span className="text-xs font-bold text-slate-900 block group-hover:text-cyan-800">
                   + Unggah Form C1
                 </span>
-                <span className="text-[10px] text-slate-500">Lembar Plano TPS ({c1Records.length} Masuk)</span>
+                <span className="text-[10px] text-slate-500">Rekap Kelurahan ({c1Records.length} Masuk)</span>
               </div>
             </div>
             <span className="text-[11px] font-bold text-cyan-700 bg-white px-2 py-0.5 rounded-lg border border-cyan-200">
-              Input TPS
+              Input Kelurahan
             </span>
           </button>
 
@@ -200,7 +200,7 @@ export const QuickCountModal: React.FC<QuickCountModalProps> = ({
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            Form C1 TPS ({c1Records.length})
+            Form C1 Kelurahan ({c1Records.length})
           </button>
           <button
             onClick={() => setActiveTab('b1')}
@@ -218,9 +218,9 @@ export const QuickCountModal: React.FC<QuickCountModalProps> = ({
         <div className="p-4 sm:p-5 bg-gradient-to-br from-slate-900 via-slate-800 to-cyan-950 text-white rounded-3xl shadow-md space-y-4">
           <div className="flex items-center justify-between pb-2 border-b border-slate-700/60 text-xs">
             <span className="text-cyan-400 font-bold tracking-wide uppercase text-[11px]">
-              {activeTab === 'all' && 'Tabulasi Gabungan C1 (TPS) & B1 (Kecamatan)'}
-              {activeTab === 'c1' && 'Tabulasi Khusus Hasil Form C1 Plano Saksi TPS'}
-              {activeTab === 'b1' && 'Tabulasi Khusus Hasil Form B1 Rekapitulasi PPK'}
+              {activeTab === 'all' && 'Tabulasi Gabungan C1 (Kelurahan) & B1 (Kecamatan)'}
+              {activeTab === 'c1' && 'Tabulasi Khusus Hasil Form C1 Tingkat Kelurahan'}
+              {activeTab === 'b1' && 'Tabulasi Khusus Hasil Form B1 Rekapitulasi Kecamatan'}
             </span>
             <div className="flex items-center gap-1.5 text-emerald-400 font-mono text-[11px] font-bold">
               <CheckCircle2 className="w-3.5 h-3.5" />
@@ -297,15 +297,15 @@ export const QuickCountModal: React.FC<QuickCountModalProps> = ({
               </span>
             </div>
             <div className="p-2 bg-slate-800/80 rounded-xl border border-slate-700">
-              <span className="text-[10px] text-slate-400 block">Total C1 TPS</span>
+              <span className="text-[10px] text-slate-400 block">Total C1 Kelurahan</span>
               <span className="text-xs font-black font-mono text-cyan-300">
-                {c1Records.length} TPS
+                {c1Records.length} Berkas
               </span>
             </div>
             <div className="p-2 bg-slate-800/80 rounded-xl border border-slate-700">
-              <span className="text-[10px] text-slate-400 block">Total B1 PPK</span>
+              <span className="text-[10px] text-slate-400 block">Total B1 Kecamatan</span>
               <span className="text-xs font-black font-mono text-indigo-300">
-                {b1Records.length} Kec ({b1TotalTps} TPS)
+                {b1Records.length} Kec ({b1TotalTps} Kel)
               </span>
             </div>
           </div>
@@ -399,7 +399,7 @@ export const QuickCountModal: React.FC<QuickCountModalProps> = ({
                         title: `Formulir Model B1-KWK ${b.kecamatan}`,
                         type: 'B1',
                         wilayah: `${b.kecamatan} (${b.kelurahan})`,
-                        pelapor: `Koordinator: ${b.koordinatorNama} · ${b.totalTpsTercakup} TPS`,
+                        pelapor: `Koordinator: ${b.koordinatorNama} · ${b.totalTpsTercakup} Kelurahan`,
                         fileUrl: b.fotoB1Url,
                         fileName: b.fileName || `${b.kecamatan}-Form-B1.jpg`,
                         p1: b.suaraPaslon1,
@@ -421,7 +421,7 @@ export const QuickCountModal: React.FC<QuickCountModalProps> = ({
                             {b.kecamatan}
                           </span>
                           <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100 px-1.5 py-0.2 rounded-md">
-                            Form B1 ({b.totalTpsTercakup} TPS)
+                            Form B1 ({b.totalTpsTercakup} Kel)
                           </span>
                         </div>
                         <p className="text-[10px] text-slate-500 truncate">
@@ -520,7 +520,7 @@ export const QuickCountModal: React.FC<QuickCountModalProps> = ({
         <div className="pt-1 flex items-center justify-between border-t border-slate-100 text-xs">
           <span className="text-[11px] text-slate-500 flex items-center gap-1">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Terhubung otomatis dengan seluruh saksi TPS</span>
+            <span>Terhubung otomatis dengan seluruh rekap Kelurahan &amp; Kecamatan</span>
           </span>
           <button
             onClick={onClose}

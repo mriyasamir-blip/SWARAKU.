@@ -118,7 +118,7 @@ export const MonitoringPetaSuaraScreen: React.FC<MonitoringPetaSuaraScreenProps>
         return updated;
       });
     }
-    triggerToast(`Tim Sukses ${newTs.nama} berhasil didaftarkan & terhubung ke Peta Suara!`);
+    triggerToast(`Korwil ${newTs.nama} berhasil didaftarkan & terhubung ke Peta Suara!`);
   };
 
   const handleSaveVoterInternal = (newVoter: VoterOcrRecord) => {
@@ -257,7 +257,7 @@ export const MonitoringPetaSuaraScreen: React.FC<MonitoringPetaSuaraScreenProps>
             }`}
           >
             <Users className="w-3.5 h-3.5 text-indigo-700" />
-            <span>Tim Sukses &amp; Korcam ({activeTimSuksesList.length})</span>
+            <span>Korwil &amp; Korcam ({activeTimSuksesList.length})</span>
           </button>
         </div>
 
@@ -269,8 +269,8 @@ export const MonitoringPetaSuaraScreen: React.FC<MonitoringPetaSuaraScreenProps>
             className="px-3 py-1.5 bg-cyan-700 hover:bg-cyan-800 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Daftar Tim Sukses</span>
-            <span className="sm:hidden">Tim Sukses</span>
+            <span className="hidden sm:inline">Daftar Korwil</span>
+            <span className="sm:hidden">Korwil</span>
           </button>
 
           <button
@@ -307,7 +307,7 @@ export const MonitoringPetaSuaraScreen: React.FC<MonitoringPetaSuaraScreenProps>
                 Struktur Wilayah Kerja Dinamis
               </h3>
               <p className="text-xs text-slate-500">
-                Tercatat dari penugasan Tim Sukses dan pendaftaran Voter aktif
+                Tercatat dari penugasan Korwil dan pendaftaran Voter aktif
               </p>
             </div>
             <span className="text-xs font-bold text-cyan-800 bg-cyan-50 px-3 py-1 rounded-full border border-cyan-200">
@@ -324,7 +324,7 @@ export const MonitoringPetaSuaraScreen: React.FC<MonitoringPetaSuaraScreenProps>
                 Belum Ada Wilayah Terdaftar (0 Data)
               </h4>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
-                Daftarkan Tim Sukses untuk menetapkan Kecamatan &amp; Kelurahan yang dipegang, atau input Voter baru untuk memunculkan wilayah secara dinamis.
+                Daftarkan Korwil untuk menetapkan Kecamatan &amp; Kelurahan yang dipegang, atau input Voter baru untuk memunculkan wilayah secara dinamis.
               </p>
               <div className="flex items-center justify-center gap-2 pt-1">
                 <button
@@ -332,7 +332,7 @@ export const MonitoringPetaSuaraScreen: React.FC<MonitoringPetaSuaraScreenProps>
                   onClick={() => handleOpenTimSuksesModal()}
                   className="px-4 py-2 bg-cyan-700 hover:bg-cyan-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
                 >
-                  + Daftarkan Tim Sukses
+                  + Daftarkan Korwil
                 </button>
                 <button
                   type="button"
@@ -409,7 +409,7 @@ export const MonitoringPetaSuaraScreen: React.FC<MonitoringPetaSuaraScreenProps>
           <div className="flex items-center justify-between pb-2 border-b border-slate-100">
             <div>
               <h3 className="text-sm font-black text-slate-900">
-                Daftar Tim Sukses &amp; Koordinator Kecamatan / Kelurahan
+                Daftar Korwil &amp; Koordinator Kecamatan / Kelurahan
               </h3>
               <p className="text-xs text-slate-500">
                 Terhubung langsung sebagai pemegang wilayah di Peta Suara Google Maps
@@ -421,7 +421,7 @@ export const MonitoringPetaSuaraScreen: React.FC<MonitoringPetaSuaraScreenProps>
               className="px-3.5 py-1.5 bg-cyan-700 hover:bg-cyan-800 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>+ Daftarkan Tim Sukses</span>
+              <span>+ Daftarkan Korwil</span>
             </button>
           </div>
 
@@ -431,17 +431,17 @@ export const MonitoringPetaSuaraScreen: React.FC<MonitoringPetaSuaraScreenProps>
                 <Users className="w-6 h-6" />
               </div>
               <h4 className="font-extrabold text-slate-800 text-sm">
-                Belum Ada Tim Sukses Terdaftar (0 Data)
+                Belum Ada Korwil Terdaftar (0 Data)
               </h4>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
-                Setiap Tim Sukses yang didaftarkan akan otomatis menghubungkan wilayah kerja (Kecamatan &amp; Kelurahan) serta koordinat ke Peta Suara Google Maps.
+                Setiap Korwil yang didaftarkan akan otomatis menghubungkan wilayah kerja (Kecamatan &amp; Kelurahan) serta koordinat ke Peta Suara Google Maps.
               </p>
               <button
                 type="button"
                 onClick={() => handleOpenTimSuksesModal()}
                 className="mt-2 px-4 py-2 bg-cyan-700 hover:bg-cyan-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
               >
-                + Daftarkan Tim Sukses Pertama
+                + Daftarkan Korwil Pertama
               </button>
             </div>
           ) : (

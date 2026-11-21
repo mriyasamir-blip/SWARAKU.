@@ -189,11 +189,11 @@ const MarkerWithAnchor: React.FC<MarkerWithAnchorProps> = ({
                 </span>
               </div>
 
-              {/* Rincian: Tim Sukses vs Kader vs Daftar Online */}
+              {/* Rincian: Korwil vs Korcam vs Daftar Online */}
               <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-cyan-200/70 text-[11px]">
                 <div className="p-1.5 bg-white/80 rounded-lg border border-cyan-200">
                   <span className="text-[9px] text-slate-500 block leading-tight font-semibold">
-                    Tim Sukses
+                    Korwil
                   </span>
                   <span className="text-xs font-black font-mono text-cyan-700 block mt-0.5">
                     {markerData.voterTimSuksesCount}
@@ -202,7 +202,7 @@ const MarkerWithAnchor: React.FC<MarkerWithAnchorProps> = ({
 
                 <div className="p-1.5 bg-white/80 rounded-lg border border-teal-200">
                   <span className="text-[9px] text-slate-500 block leading-tight font-semibold">
-                    Kader
+                    Korcam
                   </span>
                   <span className="text-xs font-black font-mono text-emerald-700 block mt-0.5">
                     {markerData.voterKaderCount}
@@ -676,7 +676,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
             className="px-3.5 py-2 bg-gradient-to-r from-cyan-700 to-teal-700 hover:from-cyan-800 hover:to-teal-800 text-white font-extrabold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
           >
             <Users className="w-3.5 h-3.5" />
-            <span>+ Daftar Tim Sukses</span>
+            <span>+ Daftar Korwil</span>
           </button>
 
           <button
@@ -729,7 +729,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
 
         <div className="p-3 bg-white rounded-2xl border border-cyan-200 shadow-2xs">
           <span className="text-[10px] uppercase font-bold text-cyan-700 block">
-            Input Tim Sukses
+            Input Korwil
           </span>
           <span className="text-xl font-black font-mono text-cyan-700 mt-1 block">
             {totalVoterByTimSukses}
@@ -741,7 +741,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
 
         <div className="p-3 bg-white rounded-2xl border border-emerald-200 shadow-2xs">
           <span className="text-[10px] uppercase font-bold text-emerald-700 block">
-            Input Kader Lapangan
+            Input Korcam &amp; Relawan
           </span>
           <span className="text-xl font-black font-mono text-emerald-700 mt-1 block">
             {totalVoterByKader}
@@ -764,7 +764,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
                 Peta Suara Bersih (0 Data Awal)
               </h4>
               <p className="text-xs text-slate-600 mt-0.5 max-w-xl leading-relaxed">
-                Tidak ada data wilayah statis/dummy. Mulai dengan mendaftarkan <strong>Tim Sukses</strong> untuk menetapkan wilayah kerja (Kecamatan &amp; Kelurahan) atau input <strong>Data Voter</strong> baru. Titik koordinat dan marker Google Maps akan otomatis muncul secara dinamis.
+                Tidak ada data wilayah statis/dummy. Mulai dengan mendaftarkan <strong>Korwil</strong> untuk menetapkan wilayah kerja (Kota, Kecamatan &amp; Kelurahan) atau input <strong>Data Voter</strong> baru. Titik koordinat dan marker Google Maps akan otomatis muncul secara dinamis.
               </p>
             </div>
           </div>
@@ -775,7 +775,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
               onClick={() => onOpenDaftarTimSukses()}
               className="px-3.5 py-2 bg-cyan-700 hover:bg-cyan-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
             >
-              + Daftar Tim Sukses
+              + Daftar Korwil
             </button>
             <button
               type="button"
@@ -981,7 +981,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
             </div>
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-md bg-cyan-600 shrink-0"></span>
-              <span>Koordinator Tim Sukses Aktif</span>
+              <span>Koordinator Korwil Aktif</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-md bg-rose-600 shrink-0"></span>

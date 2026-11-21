@@ -1,10 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { VoterOcrRecord } from '../../types/vore';
-import {
-  LAPORAN_VOTER_PER_TPS,
-  HASIL_QUICK_COUNT_PEMETAAN,
-  RINCIAN_OCR_CALEG_PASLON,
-} from '../../data/accountsData';
+import React, { useMemo, useState } from 'react';
+import type { FormB1Upload, FormC1Upload, UserAccount, VoterOcrRecord } from '../../types/vore';
 import {
   Map as GoogleMap,
   AdvancedMarker,
@@ -15,36 +10,24 @@ import { SwarakuMapsProvider, SwarakuMapsDiagnosticNotice } from '../maps/Swarak
 import { lookupSmartCoordinates } from '../../utils/geocoding';
 import {
   Search,
-  Filter,
-  Download,
   Users,
   CheckCircle2,
   Building2,
   MapPin,
-  TrendingUp,
   FileSpreadsheet,
-  FileText,
-  PieChart,
   BarChart3,
-  Calendar,
   X,
-  Share2,
-  Printer,
   ChevronRight,
-  ShieldCheck,
   UserCheck,
   CreditCard,
-  Camera,
   Eye,
-  Maximize2,
   Compass,
   Phone,
-  Sparkles,
-  ExternalLink,
   RefreshCw,
+  UserPlus,
+  Award,
 } from 'lucide-react';
 
-// Map Camera Pan & Zoom Handler to focus accurately on selected voter
 const MapCameraPanHandler: React.FC<{
   target: { lat: number; lng: number } | null;
 }> = ({ target }) => {
@@ -60,197 +43,283 @@ const MapCameraPanHandler: React.FC<{
 
 interface DatabaseVotersViewProps {
   voterList: VoterOcrRecord[];
+  userAccounts?: UserAccount[];
+  c1Records?: FormC1Upload[];
+  b1Records?: FormB1Upload[];
+  canAddRelawan?: boolean;
   onOpenDaftarVoterModal?: () => void;
+  onOpenCommandRegist?: () => void;
   onTriggerCloudSync?: () => Promise<void>;
   isSyncingCloud?: boolean;
 }
 
+type DatabaseSubTab =
+  | 'daftar_voter'
+  | 'daftar_relawan'
+  | 'laporan_kelurahan'
+  | 'quick_count_paslon';
+
 export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
   voterList,
+  userAccounts = [],
+  c1Records = [],
+  b1Records = [],
+  canAddRelawan = false,
   onOpenDaftarVoterModal,
+  onOpenCommandRegist,
   onTriggerCloudSync,
   isSyncingCloud,
 }) => {
+  const [activeSubTab, setActiveSubTab] = useState<DatabaseSubTab>('daftar_voter');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedKota, setSelectedKota] = useState<string>('Semua');
   const [selectedKecamatan, setSelectedKecamatan] = useState<string>('Semua');
-  const [selectedTps, setSelectedTps] = useState<string>('Semua');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'valid' | 'perlu_cek'>('all');
-  const [activeSubTab, setActiveSubTab] = useState<
-    'voters' | 'peta_voters' | 'rekap_tps' | 'quick_count_pemetaan' | 'rincian_ocr'
-  >('voters');
+  const [selectedKelurahan, setSelectedKelurahan] = useState<string>('Semua');
+  const [relawanSearch, setRelawanSearch] = useState('');
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
-  // Modal Preview Foto KTP & Detail Voter
+  // Modal Detail Voter & Peta Lokasi Cepat
   const [selectedVoterPreview, setSelectedVoterPreview] = useState<VoterOcrRecord | null>(null);
+  const [mapModalVoter, setMapModalVoter] = useState<(VoterOcrRecord & { resolvedLat: number; resolvedLng: number }) | null>(null);
 
-  // Selected Voter for Map Focus / InfoWindow
-  const [selectedMapVoter, setSelectedMapVoter] = useState<VoterOcrRecord | null>(null);
-
-  // Dynamic filter options derived from active data
+  // Dynamic hierarchical filter options (Kota -> Kecamatan -> Kelurahan)
   const kotaOptions = useMemo(() => {
-    return Array.from(new Set(voterList.map((v) => v.kabupatenKota).filter(Boolean)));
+    return Array.from(new Set(voterList.map((v) => v.kabupatenKota).filter(Boolean))).sort();
   }, [voterList]);
 
   const kecamatanOptions = useMemo(() => {
-    let relevant = voterList;
-    if (selectedKota !== 'Semua') {
-      relevant = relevant.filter((v) => v.kabupatenKota === selectedKota);
-    }
-    return Array.from(new Set(relevant.map((v) => v.kecamatan).filter(Boolean)));
+    const base =
+      selectedKota === 'Semua'
+        ? voterList
+        : voterList.filter((v) => v.kabupatenKota === selectedKota);
+    return Array.from(new Set(base.map((v) => v.kecamatan).filter(Boolean))).sort();
   }, [voterList, selectedKota]);
 
-  const tpsOptions = useMemo(() => {
-    return Array.from(new Set(voterList.map((v) => v.tps).filter(Boolean)));
-  }, [voterList]);
+  const kelurahanOptions = useMemo(() => {
+    let base = voterList;
+    if (selectedKota !== 'Semua') base = base.filter((v) => v.kabupatenKota === selectedKota);
+    if (selectedKecamatan !== 'Semua') base = base.filter((v) => v.kecamatan === selectedKecamatan);
+    return Array.from(new Set(base.map((v) => v.kelurahan).filter(Boolean))).sort();
+  }, [voterList, selectedKota, selectedKecamatan]);
 
-  // Filtered Voters
   const filteredVoters = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
     return voterList.filter((voter) => {
-      const q = searchQuery.toLowerCase().trim();
       if (q) {
-        const matchSearch =
-          voter.nama.toLowerCase().includes(q) ||
-          voter.nik.includes(q) ||
-          voter.tps.toLowerCase().includes(q) ||
-          voter.kelurahan.toLowerCase().includes(q) ||
-          voter.kecamatan.toLowerCase().includes(q) ||
-          (voter.alamat && voter.alamat.toLowerCase().includes(q));
-
-        if (!matchSearch) return false;
+        const match =
+          (voter.nama || '').toLowerCase().includes(q) ||
+          (voter.nik || '').includes(q) ||
+          (voter.kelurahan || '').toLowerCase().includes(q) ||
+          (voter.kecamatan || '').toLowerCase().includes(q) ||
+          (voter.kabupatenKota || '').toLowerCase().includes(q) ||
+          (voter.alamat || '').toLowerCase().includes(q) ||
+          (voter.terdaftarOleh || '').toLowerCase().includes(q);
+        if (!match) return false;
       }
-
       if (selectedKota !== 'Semua' && voter.kabupatenKota !== selectedKota) return false;
       if (selectedKecamatan !== 'Semua' && voter.kecamatan !== selectedKecamatan) return false;
-      if (selectedTps !== 'Semua' && voter.tps !== selectedTps) return false;
-
-      if (statusFilter === 'valid' && voter.statusDpt !== 'DPT valid') return false;
-      if (statusFilter === 'perlu_cek' && voter.statusDpt !== 'Perlu cek') return false;
-
+      if (selectedKelurahan !== 'Semua' && voter.kelurahan !== selectedKelurahan) return false;
       return true;
     });
-  }, [voterList, searchQuery, selectedKota, selectedKecamatan, selectedTps, statusFilter]);
+  }, [voterList, searchQuery, selectedKota, selectedKecamatan, selectedKelurahan]);
 
-  // Demographic stats
-  const totalCount = filteredVoters.length;
-  const lakiCount = filteredVoters.filter((v) => v.jenisKelamin === 'Laki-laki').length;
-  const perempuanCount = totalCount - lakiCount;
-  const pctLaki = totalCount > 0 ? Math.round((lakiCount / totalCount) * 100) : 0;
-  const pctPerempuan = totalCount > 0 ? 100 - pctLaki : 0;
+  // Relawan list from Cloud userAccounts
+  const relawanList = useMemo(() => {
+    const base = userAccounts.filter((u) => u.role === 'relawan');
+    const q = relawanSearch.trim().toLowerCase();
+    if (!q) return base;
+    return base.filter(
+      (r) =>
+        (r.nama || '').toLowerCase().includes(q) ||
+        (r.username || '').toLowerCase().includes(q) ||
+        (r.email || '').toLowerCase().includes(q) ||
+        (r.kota || '').toLowerCase().includes(q) ||
+        (r.kecamatan || '').toLowerCase().includes(q) ||
+        (r.kelurahan || '').toLowerCase().includes(q) ||
+        (r.wilayah || '').toLowerCase().includes(q)
+    );
+  }, [userAccounts, relawanSearch]);
 
-  // Voters with accurate coordinates for Google Maps
-  const votersWithCoords = useMemo(() => {
-    return filteredVoters.map((v) => {
-      let lat = v.lat;
-      let lng = v.lng;
-      const isErroneousJaksel =
-        lat !== undefined &&
-        Math.abs(lat - -6.2615) < 0.001 &&
-        !v.kabupatenKota.toLowerCase().includes('selatan') &&
-        !v.kecamatan.toLowerCase().includes('cilandak');
-
-      if (!lat || !lng || isErroneousJaksel) {
-        const smart = lookupSmartCoordinates(v.kelurahan, v.kecamatan, v.kabupatenKota);
-        if (smart) {
-          lat = smart.lat;
-          lng = smart.lng;
-        } else {
-          lat = v.kabupatenKota.toLowerCase().includes('utara') || v.kecamatan.toLowerCase().includes('penjaringan')
-            ? -6.1264
-            : -6.1754; // Monas
-          lng = v.kabupatenKota.toLowerCase().includes('utara') || v.kecamatan.toLowerCase().includes('penjaringan')
-            ? 106.7885
-            : 106.8272;
-        }
+  // Live Aggregation: Laporan Voter per Kelurahan (Kota -> Kecamatan -> Kelurahan)
+  const laporanPerKelurahan = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        kota: string;
+        kecamatan: string;
+        kelurahan: string;
+        terdaftar: number;
+        dptValid: number;
+        relawanPenginput: Set<string>;
       }
-      return { ...v, resolvedLat: lat, resolvedLng: lng };
+    >();
+
+    voterList.forEach((v) => {
+      const kota = v.kabupatenKota || 'Belum Diisi';
+      const kecamatan = v.kecamatan || 'Belum Diisi';
+      const kelurahan = v.kelurahan || 'Belum Diisi';
+      const key = `${kota}||${kecamatan}||${kelurahan}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.terdaftar += 1;
+        if (v.statusDpt === 'DPT valid') existing.dptValid += 1;
+        if (v.terdaftarOleh) existing.relawanPenginput.add(v.terdaftarOleh);
+      } else {
+        map.set(key, {
+          kota,
+          kecamatan,
+          kelurahan,
+          terdaftar: 1,
+          dptValid: v.statusDpt === 'DPT valid' ? 1 : 0,
+          relawanPenginput: new Set(v.terdaftarOleh ? [v.terdaftarOleh] : []),
+        });
+      }
     });
-  }, [filteredVoters]);
 
-  // Default Map Center
-  const defaultMapCenter = useMemo(() => {
-    if (selectedMapVoter) {
-      const lat = selectedMapVoter.lat || (selectedMapVoter as any).resolvedLat;
-      const lng = selectedMapVoter.lng || (selectedMapVoter as any).resolvedLng;
-      if (typeof lat === 'number' && typeof lng === 'number') {
-        return { lat, lng };
+    return Array.from(map.values()).sort((a, b) => b.terdaftar - a.terdaftar);
+  }, [voterList]);
+
+  // Live Aggregation: Hasil Quick Count Paslon grouped by Kelurahan & Kecamatan (Zero TPS/Dapil)
+  const quickCountSummary = useMemo(() => {
+    let p1 = 0;
+    let p2 = 0;
+    let p3 = 0;
+    let tidakSah = 0;
+    const perKelurahan = new Map<
+      string,
+      { kelurahan: string; kecamatan: string; p1: number; p2: number; p3: number; tidakSah: number; jumlahLaporan: number }
+    >();
+
+    const addRow = (kel: string, kec: string, s1: number, s2: number, s3: number, ts: number) => {
+      p1 += s1;
+      p2 += s2;
+      p3 += s3;
+      tidakSah += ts;
+      const kelClean = (kel || 'Belum Diisi').replace(/^kel\.?\s*/i, '');
+      const kecClean = (kec || 'Belum Diisi').replace(/^kec\.?\s*/i, '');
+      const key = `${kecClean}||${kelClean}`;
+      const cur = perKelurahan.get(key);
+      if (cur) {
+        cur.p1 += s1;
+        cur.p2 += s2;
+        cur.p3 += s3;
+        cur.tidakSah += ts;
+        cur.jumlahLaporan += 1;
+      } else {
+        perKelurahan.set(key, {
+          kelurahan: kelClean,
+          kecamatan: kecClean,
+          p1: s1,
+          p2: s2,
+          p3: s3,
+          tidakSah: ts,
+          jumlahLaporan: 1,
+        });
       }
-    }
-    if (votersWithCoords.length > 0) {
-      return { lat: votersWithCoords[0].resolvedLat, lng: votersWithCoords[0].resolvedLng };
-    }
-    return { lat: -6.1264, lng: 106.7885 }; // Penjaringan, Jakarta Utara
-  }, [selectedMapVoter, votersWithCoords]);
+    };
 
-  // Handle Export to CSV
-  const handleExport = (format: 'Excel' | 'PDF' | 'CSV') => {
+    c1Records.forEach((r) =>
+      addRow(r.kelurahan, r.kecamatan, Number(r.suaraPaslon1) || 0, Number(r.suaraPaslon2) || 0, Number(r.suaraPaslon3) || 0, Number(r.suaraTidakSah) || 0)
+    );
+    b1Records.forEach((r) =>
+      addRow(r.kelurahan, r.kecamatan, Number(r.suaraPaslon1) || 0, Number(r.suaraPaslon2) || 0, Number(r.suaraPaslon3) || 0, Number(r.suaraTidakSah) || 0)
+    );
+
+    const totalSah = p1 + p2 + p3;
+    const pct = (v: number) => (totalSah > 0 ? ((v / totalSah) * 100).toFixed(1) : '0.0');
+
+    return {
+      p1,
+      p2,
+      p3,
+      tidakSah,
+      totalSah,
+      p1Pct: pct(p1),
+      p2Pct: pct(p2),
+      p3Pct: pct(p3),
+      perKelurahan: Array.from(perKelurahan.values()).sort(
+        (a, b) => b.p1 + b.p2 + b.p3 - (a.p1 + a.p2 + a.p3)
+      ),
+    };
+  }, [c1Records, b1Records]);
+
+  const resolveVoterCoords = (v: VoterOcrRecord) => {
+    if (typeof v.lat === 'number' && typeof v.lng === 'number' && Number.isFinite(v.lat) && Number.isFinite(v.lng)) {
+      return { resolvedLat: v.lat, resolvedLng: v.lng };
+    }
+    const smart = lookupSmartCoordinates(v.kelurahan, v.kecamatan, v.kabupatenKota);
+    return {
+      resolvedLat: smart?.lat ?? -6.2088,
+      resolvedLng: smart?.lng ?? 106.8456,
+    };
+  };
+
+  const handleExportCsv = () => {
     const headers = [
       'NIK',
-      'Nama',
-      'Jenis Kelamin',
-      'TPS',
-      'Kelurahan',
-      'Kecamatan',
+      'Nama Voter',
+      'No HP',
       'Kota',
+      'Kecamatan',
+      'Kelurahan',
+      'Alamat Lengkap',
+      'Penginput',
       'Status DPT',
-      'Status Master',
       'Waktu Daftar',
     ];
     const rows = filteredVoters.map((v) => [
-      v.nik,
-      v.nama,
-      v.jenisKelamin,
-      v.tps,
-      v.kelurahan,
-      v.kecamatan,
-      v.kabupatenKota,
-      v.statusDpt,
-      v.statusRegistrasi,
-      v.waktuDaftar,
+      `"${v.nik || ''}"`,
+      `"${v.nama || ''}"`,
+      `"${v.noHp || ''}"`,
+      `"${v.kabupatenKota || ''}"`,
+      `"${v.kecamatan || ''}"`,
+      `"${v.kelurahan || ''}"`,
+      `"${(v.alamat || '').replace(/"/g, "'")}"`,
+      `"${v.terdaftarOleh || ''}"`,
+      `"${v.statusDpt || 'DPT valid'}"`,
+      `"${v.waktuDaftar || ''}"`,
     ]);
 
     const csvContent =
       'data:text/csv;charset=utf-8,' +
       [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
 
-    const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Database_Voters_${format}_${Date.now()}.csv`);
+    link.setAttribute('href', encodeURI(csvContent));
+    link.setAttribute('download', `Database_Voter_Kelurahan_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
 
-    setExportNotice(`Laporan Database Voters (${format}) berhasil diekspor!`);
+    setExportNotice('Data Database Voter per Kelurahan berhasil diekspor ke CSV/Excel!');
     setTimeout(() => setExportNotice(null), 3500);
   };
 
+  const totalRelawanCount = userAccounts.filter((u) => u.role === 'relawan').length;
+
   return (
     <div className="space-y-6 text-slate-800">
-      {/* Toast Notification */}
       {exportNotice && (
-        <div className="fixed top-20 right-4 z-50 bg-slate-900 text-white border border-teal-400 px-4 py-2.5 rounded-2xl shadow-xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+        <div className="fixed top-20 right-4 z-50 bg-slate-900 text-white border border-teal-400 px-4 py-2.5 rounded-2xl shadow-xl text-xs font-bold flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           <span>{exportNotice}</span>
         </div>
       )}
 
       {/* Header Banner */}
-      <div className="p-5 sm:p-7 rounded-3xl bg-gradient-to-r from-slate-950 via-slate-900 to-cyan-950 text-white shadow-xl relative overflow-hidden border border-slate-800">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
-
+      <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-slate-950 via-slate-900 to-cyan-950 text-white shadow-xl border border-slate-800">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/10 rounded-full text-xs font-mono text-cyan-300 font-bold border border-white/10">
-              <span>MODUL 02</span>
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/10 rounded-full text-[11px] font-mono text-cyan-300 font-bold border border-white/10">
+              <span>DATABASE TERPADU</span>
               <span>·</span>
-              <span>TIM SUKSES &amp; KADER</span>
+              <span>KOTA → KECAMATAN → KELURAHAN</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white mt-1">
-              Database Voters • Master Pemilih &amp; Peta Sebaran
+              Database Voter, Relawan &amp; Rekap Kelurahan
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-              Data pemilih terdaftar (Daftar Online, Google SSO, &amp; scan e-KTP), titik lokasi koordinat Google Maps, dan verifikasi wilayah tersinkronisasi secara real-time.
+              Seluruh data Voter/Konstituen, daftar akun Relawan, laporan per Kelurahan, serta hasil Quick Count Paslon tersinkronisasi real-time.
             </p>
           </div>
 
@@ -260,164 +329,149 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
                 type="button"
                 onClick={onTriggerCloudSync}
                 disabled={isSyncingCloud}
-                className="px-3.5 py-2.5 bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-200 border border-cyan-400/30 font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
-                title="Sinkronkan database lokal ke Cloud Database Firestore agar identik di semua perangkat"
+                className="px-3.5 py-2.5 bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-200 border border-cyan-400/30 font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`w-4 h-4 ${isSyncingCloud ? 'animate-spin' : ''}`} />
-                <span>{isSyncingCloud ? 'Menyinkronkan...' : 'Sinkronkan Cloud'}</span>
+                <span>{isSyncingCloud ? 'Menyinkronkan...' : 'Sinkron Cloud'}</span>
               </button>
             )}
 
-            {onOpenDaftarVoterModal && (
+            {(onOpenCommandRegist || onOpenDaftarVoterModal) && (
               <button
                 type="button"
-                onClick={onOpenDaftarVoterModal}
-                className="px-4 py-2.5 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                onClick={onOpenCommandRegist || onOpenDaftarVoterModal}
+                className="px-4 py-2.5 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer"
               >
-                <Camera className="w-4 h-4" />
-                <span>+ Scan e-KTP Pemilih Baru</span>
+                <UserPlus className="w-4 h-4" />
+                <span>+ Registrasi Baru</span>
               </button>
             )}
 
             <button
-              onClick={() => handleExport('Excel')}
-              className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-98"
+              type="button"
+              onClick={handleExportCsv}
+              className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer"
             >
               <FileSpreadsheet className="w-4 h-4" />
-              <span>Ekspor Excel</span>
-            </button>
-            <button
-              onClick={() => handleExport('PDF')}
-              className="px-3.5 py-2.5 bg-white/10 hover:bg-white/20 text-white border border-white/20 font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-98"
-            >
-              <Download className="w-4 h-4" />
-              <span>Ekspor PDF</span>
+              <span>Ekspor CSV</span>
             </button>
           </div>
         </div>
 
-        {/* 4 Cards Summary */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-6 mt-2 border-t border-white/10">
+        {/* 4 KPI Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-5 mt-4 border-t border-white/10">
           <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
             <span className="text-[10px] text-slate-400 font-semibold block uppercase">
-              Total Voters Terdata
+              Total Voter Terdaftar
             </span>
             <span className="text-2xl font-black font-mono text-cyan-400 mt-0.5 block">
               {voterList.length.toLocaleString('id-ID')}
             </span>
             <span className="text-[10px] text-emerald-400 font-medium block mt-0.5">
-              100% Real-Time Sync
+              Tersinkron ke Peta Suara
             </span>
           </div>
 
           <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
             <span className="text-[10px] text-slate-400 font-semibold block uppercase">
-              Demografi Laki-laki
+              Total Relawan Aktif
             </span>
-            <span className="text-2xl font-black font-mono text-white mt-0.5 block">
-              {pctLaki}%
-            </span>
-            <span className="text-[10px] text-slate-400 font-medium block mt-0.5">
-              {lakiCount} Pemilih
-            </span>
-          </div>
-
-          <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
-            <span className="text-[10px] text-slate-400 font-semibold block uppercase">
-              Demografi Perempuan
-            </span>
-            <span className="text-2xl font-black font-mono text-white mt-0.5 block">
-              {pctPerempuan}%
-            </span>
-            <span className="text-[10px] text-slate-400 font-medium block mt-0.5">
-              {perempuanCount} Pemilih
-            </span>
-          </div>
-
-          <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
-            <span className="text-[10px] text-slate-400 font-semibold block uppercase">
-              Titik Wilayah / TPS
-            </span>
-            <span className="text-2xl font-black font-mono text-emerald-400 mt-0.5 block">
-              {tpsOptions.length} TPS
+            <span className="text-2xl font-black font-mono text-amber-300 mt-0.5 block">
+              {totalRelawanCount.toLocaleString('id-ID')}
             </span>
             <span className="text-[10px] text-slate-300 font-medium block mt-0.5">
-              {kecamatanOptions.length} Kecamatan Terpetakan
+              Akun Whitelist Terdaftar
+            </span>
+          </div>
+
+          <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
+            <span className="text-[10px] text-slate-400 font-semibold block uppercase">
+              Kelurahan Tercakup
+            </span>
+            <span className="text-2xl font-black font-mono text-emerald-400 mt-0.5 block">
+              {laporanPerKelurahan.length}
+            </span>
+            <span className="text-[10px] text-slate-300 font-medium block mt-0.5">
+              {kecamatanOptions.length} Kecamatan · {kotaOptions.length} Kota
+            </span>
+          </div>
+
+          <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
+            <span className="text-[10px] text-slate-400 font-semibold block uppercase">
+              Total Suara Quick Count
+            </span>
+            <span className="text-2xl font-black font-mono text-white mt-0.5 block">
+              {quickCountSummary.totalSah.toLocaleString('id-ID')}
+            </span>
+            <span className="text-[10px] text-slate-300 font-medium block mt-0.5">
+              {c1Records.length + b1Records.length} Laporan Masuk
             </span>
           </div>
         </div>
       </div>
 
-      {/* Navigation Sub-Tabs */}
+      {/* 4 Required Database Sub-Menus */}
       <div className="flex items-center gap-2 border-b border-slate-200 pb-2 overflow-x-auto text-xs font-bold bg-slate-100 p-1.5 rounded-2xl">
         <button
-          onClick={() => setActiveSubTab('voters')}
-          className={`px-4 py-2 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-            activeSubTab === 'voters'
-              ? 'bg-white text-cyan-800 shadow-xs'
+          type="button"
+          onClick={() => setActiveSubTab('daftar_voter')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeSubTab === 'daftar_voter'
+              ? 'bg-white text-cyan-900 shadow-xs'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
-          <Users className="w-3.5 h-3.5 text-cyan-600" />
+          <Users className="w-4 h-4 text-cyan-600" />
           <span>Daftar Voter ({filteredVoters.length})</span>
         </button>
 
         <button
-          onClick={() => setActiveSubTab('peta_voters')}
-          className={`px-4 py-2 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-            activeSubTab === 'peta_voters'
-              ? 'bg-white text-cyan-800 shadow-xs'
+          type="button"
+          onClick={() => setActiveSubTab('daftar_relawan')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeSubTab === 'daftar_relawan'
+              ? 'bg-white text-cyan-900 shadow-xs'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
-          <Compass className="w-3.5 h-3.5 text-teal-600" />
-          <span>Peta Sebaran Voter Google Maps ({votersWithCoords.length})</span>
+          <UserCheck className="w-4 h-4 text-amber-600" />
+          <span>Daftar Relawan ({totalRelawanCount})</span>
         </button>
 
         <button
-          onClick={() => setActiveSubTab('rekap_tps')}
-          className={`px-4 py-2 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-            activeSubTab === 'rekap_tps'
-              ? 'bg-white text-cyan-800 shadow-xs'
+          type="button"
+          onClick={() => setActiveSubTab('laporan_kelurahan')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeSubTab === 'laporan_kelurahan'
+              ? 'bg-white text-cyan-900 shadow-xs'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
-          <Building2 className="w-3.5 h-3.5 text-teal-600" />
-          <span>Laporan Voter per TPS</span>
+          <Building2 className="w-4 h-4 text-teal-600" />
+          <span>Laporan Voter per Kelurahan ({laporanPerKelurahan.length})</span>
         </button>
 
         <button
-          onClick={() => setActiveSubTab('quick_count_pemetaan')}
-          className={`px-4 py-2 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-            activeSubTab === 'quick_count_pemetaan'
-              ? 'bg-white text-cyan-800 shadow-xs'
+          type="button"
+          onClick={() => setActiveSubTab('quick_count_paslon')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeSubTab === 'quick_count_paslon'
+              ? 'bg-white text-cyan-900 shadow-xs'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
-          <BarChart3 className="w-3.5 h-3.5 text-indigo-600" />
+          <BarChart3 className="w-4 h-4 text-indigo-600" />
           <span>Hasil Quick Count Paslon</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('rincian_ocr')}
-          className={`px-4 py-2 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-            activeSubTab === 'rincian_ocr'
-              ? 'bg-white text-cyan-800 shadow-xs'
-              : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <FileText className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Rincian OCR Caleg</span>
         </button>
       </div>
 
-      {/* SUB TAB 1: DAFTAR DATA VOTER DENGAN KOLOM FOTO & LOKASI MAPS */}
-      {activeSubTab === 'voters' && (
+      {/* SUB-MENU 1: DAFTAR VOTER (Nama, Kota, Kecamatan, Kelurahan, Alamat, Penginput) */}
+      {activeSubTab === 'daftar_voter' && (
         <div className="space-y-4">
-          {/* Breadcrumb Filter Bertingkat Dinamis */}
+          {/* Cascading Filter Bar: Kota -> Kecamatan -> Kelurahan */}
           <div className="p-4 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-3">
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 overflow-x-auto pb-1">
-              <span className="text-slate-900 font-bold">Wilayah Terdaftar:</span>
+              <span className="text-slate-900 font-bold">Filter Wilayah:</span>
               <span className="text-cyan-700 font-bold">
                 {selectedKota !== 'Semua' ? selectedKota : 'Semua Kota'}
               </span>
@@ -426,94 +480,90 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
                 {selectedKecamatan !== 'Semua' ? selectedKecamatan : 'Semua Kecamatan'}
               </span>
               <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              <span className="bg-cyan-100 text-cyan-900 px-2 py-0.5 rounded-md font-mono font-bold">
-                {selectedTps !== 'Semua' ? selectedTps : 'Semua TPS'}
+              <span className="bg-cyan-100 text-cyan-900 px-2 py-0.5 rounded-md font-bold">
+                {selectedKelurahan !== 'Semua' ? `Kel. ${selectedKelurahan}` : 'Semua Kelurahan'}
               </span>
             </div>
 
-            {/* Search and Filters Dinamis */}
-            <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5">
               <div className="sm:col-span-2 relative">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="⌕ Cari nama voter / NIK / TPS / alamat..."
+                  placeholder="Cari nama voter, NIK, Kelurahan, alamat, atau penginput..."
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:border-cyan-500 focus:outline-hidden"
                 />
               </div>
 
-              {/* Kota Dropdown */}
-              <div>
-                <select
-                  value={selectedKota}
-                  onChange={(e) => setSelectedKota(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-hidden"
-                >
-                  <option value="Semua">Semua Kota ({kotaOptions.length})</option>
-                  {kotaOptions.map((k) => (
-                    <option key={k} value={k}>
-                      {k}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <select
+                value={selectedKota}
+                onChange={(e) => {
+                  setSelectedKota(e.target.value);
+                  setSelectedKecamatan('Semua');
+                  setSelectedKelurahan('Semua');
+                }}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+              >
+                <option value="Semua">Semua Kota ({kotaOptions.length})</option>
+                {kotaOptions.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
 
-              {/* Kecamatan Dropdown */}
-              <div>
-                <select
-                  value={selectedKecamatan}
-                  onChange={(e) => setSelectedKecamatan(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-hidden"
-                >
-                  <option value="Semua">Semua Kecamatan ({kecamatanOptions.length})</option>
-                  {kecamatanOptions.map((kec) => (
-                    <option key={kec} value={kec}>
-                      {kec}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <select
+                value={selectedKecamatan}
+                onChange={(e) => {
+                  setSelectedKecamatan(e.target.value);
+                  setSelectedKelurahan('Semua');
+                }}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+              >
+                <option value="Semua">Semua Kecamatan ({kecamatanOptions.length})</option>
+                {kecamatanOptions.map((kec) => (
+                  <option key={kec} value={kec}>
+                    {kec}
+                  </option>
+                ))}
+              </select>
 
-              {/* TPS Dropdown */}
-              <div>
-                <select
-                  value={selectedTps}
-                  onChange={(e) => setSelectedTps(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-hidden font-mono"
-                >
-                  <option value="Semua">Semua TPS ({tpsOptions.length})</option>
-                  {tpsOptions.map((tps) => (
-                    <option key={tps} value={tps}>
-                      {tps}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <select
+                value={selectedKelurahan}
+                onChange={(e) => setSelectedKelurahan(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+              >
+                <option value="Semua">Semua Kelurahan ({kelurahanOptions.length})</option>
+                {kelurahanOptions.map((kel) => (
+                  <option key={kel} value={kel}>
+                    Kel. {kel}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
-          {/* Table Voters */}
+          {/* Voter Table */}
           <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+            <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-sm font-black text-slate-900">
-                  Daftar Voter Terdaftar ({filteredVoters.length} Orang)
+                  Daftar Voter / Konstituen Terdaftar ({filteredVoters.length} Orang)
                 </h3>
                 <p className="text-[11px] text-slate-500">
-                  Data hasil OCR foto e-KTP lapangan yang telah diverifikasi saksi dan kader TPS secara otomatis.
+                  Menampilkan struktur wilayah lengkap: Kota, Kecamatan, Kelurahan, Alamat Lengkap, serta nama penginput.
                 </p>
               </div>
-
-              {onOpenDaftarVoterModal && (
+              {onOpenCommandRegist && (
                 <button
                   type="button"
-                  onClick={onOpenDaftarVoterModal}
-                  className="px-3.5 py-1.5 bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 text-white font-bold text-xs rounded-xl shadow-2xs cursor-pointer flex items-center gap-1.5 active:scale-95 transition-all"
+                  onClick={onOpenCommandRegist}
+                  className="px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>+ Scan e-KTP Baru</span>
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>+ Daftarkan Voter</span>
                 </button>
               )}
             </div>
@@ -522,171 +572,366 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] uppercase tracking-wider text-slate-500 font-bold">
                   <tr>
-                    <th className="py-3 px-3 text-center">Foto KTP</th>
-                    <th className="py-3 px-4">Nama Voter &amp; Verifikasi</th>
-                    <th className="py-3 px-4">NIK e-KTP</th>
-                    <th className="py-3 px-4">Gender &amp; TTL</th>
-                    <th className="py-3 px-4">Wilayah &amp; TPS</th>
-                    <th className="py-3 px-4 text-center">Lokasi / Maps</th>
-                    <th className="py-3 px-4 text-center">Status DPT</th>
-                    <th className="py-3 px-4 text-center">Status Master</th>
+                    <th className="py-3 px-4">Nama Voter &amp; NIK</th>
+                    <th className="py-3 px-4">Kelurahan</th>
+                    <th className="py-3 px-4">Kecamatan</th>
+                    <th className="py-3 px-4">Kota / Kabupaten</th>
+                    <th className="py-3 px-4">Alamat Lengkap</th>
+                    <th className="py-3 px-4">Penginput</th>
+                    <th className="py-3 px-4 text-center">Detail &amp; Peta</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                   {filteredVoters.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-12 px-4 text-center text-slate-500">
-                        <div className="flex flex-col items-center justify-center space-y-2.5 max-w-sm mx-auto">
-                          <div className="w-12 h-12 rounded-2xl bg-cyan-50 border border-cyan-100 text-cyan-600 flex items-center justify-center">
-                            <CreditCard className="w-6 h-6" />
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-sm font-bold text-slate-800">
-                              {searchQuery || selectedKota !== 'Semua' || selectedTps !== 'Semua'
-                                ? 'Tidak ada data voter yang cocok dengan filter'
-                                : 'Belum Ada Data Pemilih yang Diinput'}
-                            </p>
-                            <p className="text-xs text-slate-400">
-                              Gunakan fitur Auto Scan e-KTP untuk mendaftarkan pemilih pertama Anda. Foto KTP, data identitas, dan titik Google Maps akan langsung tersimpan.
-                            </p>
-                          </div>
-                          {onOpenDaftarVoterModal && (
-                            <button
-                              type="button"
-                              onClick={onOpenDaftarVoterModal}
-                              className="mt-2 px-4 py-2 bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5"
-                            >
-                              <Camera className="w-4 h-4" />
-                              <span>+ Scan e-KTP Pemilih Sekarang</span>
-                            </button>
-                          )}
+                      <td colSpan={7} className="py-12 px-4 text-center text-slate-500">
+                        <div className="flex flex-col items-center justify-center space-y-2 max-w-sm mx-auto">
+                          <CreditCard className="w-8 h-8 text-slate-300" />
+                          <p className="text-sm font-bold text-slate-800">
+                            {searchQuery || selectedKota !== 'Semua' || selectedKelurahan !== 'Semua'
+                              ? 'Tidak ada data Voter yang cocok dengan filter.'
+                              : 'Belum ada data Voter yang terdaftar.'}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            Gunakan Menu Registrasi untuk mendaftarkan Konstituen/Voter baru agar langsung tampil di sini dan di Peta Suara.
+                          </p>
                         </div>
                       </td>
                     </tr>
                   ) : (
-                    filteredVoters.map((voter) => (
-                      <tr key={voter.id} className="hover:bg-slate-50/70 transition-colors">
-                        {/* 1. Kolom Foto KTP Thumbnail */}
-                        <td className="py-3 px-3 text-center">
-                          {voter.fotoKtpUrl ? (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedVoterPreview(voter)}
-                              className="relative group inline-block cursor-pointer"
-                              title="Klik untuk melihat foto fisik e-KTP dan detail lengkap"
-                            >
-                              <img
-                                src={voter.fotoKtpUrl}
-                                alt={`KTP ${voter.nama}`}
-                                className="w-14 h-9 object-cover rounded-lg border border-slate-200 group-hover:scale-105 group-hover:border-teal-500 transition-all shadow-2xs"
-                              />
-                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-lg flex items-center justify-center transition-opacity text-white text-[10px]">
-                                <Eye className="w-3.5 h-3.5" />
-                              </div>
-                            </button>
-                          ) : voter.diinputOlehRole === 'voter' ||
-                            voter.registrationSource === 'google_sso' ||
-                            voter.registrationSource === 'manual_signup' ? (
-                            <div
-                              title="Pemilih Terdaftar Online"
-                              className="w-14 h-9 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700 mx-auto"
-                            >
-                              <UserCheck className="w-4 h-4" />
-                            </div>
-                          ) : (
-                            <div className="w-14 h-9 rounded-lg bg-slate-100 border border-dashed border-slate-300 flex items-center justify-center text-slate-400 mx-auto">
-                              <Camera className="w-3.5 h-3.5" />
-                            </div>
-                          )}
-                        </td>
-
-                        {/* 2. Kolom Nama Voter & Badge Terverifikasi */}
-                        <td className="py-3 px-4">
-                          <span className="font-extrabold text-slate-900 block text-xs">
-                            {voter.nama}
-                          </span>
-                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                            {voter.registrationSource === 'manual_signup' ? (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-blue-50 text-blue-800 border border-blue-200 text-[9px] font-bold">
-                                <UserCheck className="w-2.5 h-2.5 text-blue-600" />
-                                <span>Daftar Mandiri Online</span>
-                              </span>
-                            ) : voter.registrationSource === 'google_sso' || voter.diinputOlehRole === 'voter' ? (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-indigo-50 text-indigo-800 border border-indigo-200 text-[9px] font-bold">
-                                <ShieldCheck className="w-2.5 h-2.5 text-indigo-600" />
-                                <span>Terdaftar Google SSO</span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-teal-50 text-teal-800 border border-teal-200 text-[9px] font-bold">
-                                <Sparkles className="w-2.5 h-2.5 text-teal-600" />
-                                <span>Terverifikasi (Scan AI)</span>
+                    filteredVoters.map((voter) => {
+                      const coords = resolveVoterCoords(voter);
+                      return (
+                        <tr key={voter.id} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="py-3 px-4">
+                            <span className="font-extrabold text-slate-900 block">
+                              {voter.nama}
+                            </span>
+                            <span className="text-[11px] font-mono text-slate-500 block">
+                              {voter.nikMasked || voter.nik || '-'}
+                            </span>
+                            {voter.noHp && voter.noHp !== '-' && (
+                              <span className="text-[10px] font-mono text-slate-400 inline-flex items-center gap-1">
+                                <Phone className="w-2.5 h-2.5" /> {voter.noHp}
                               </span>
                             )}
-                            <span className="text-[9px] text-slate-400 font-mono">
-                              {voter.waktuDaftar || 'Tersimpan'}
+                          </td>
+                          <td className="py-3 px-4 font-bold text-cyan-800">
+                            {voter.kelurahan || '-'}
+                          </td>
+                          <td className="py-3 px-4 font-semibold text-slate-700">
+                            {voter.kecamatan || '-'}
+                          </td>
+                          <td className="py-3 px-4 text-slate-700">
+                            {voter.kabupatenKota || '-'}
+                          </td>
+                          <td className="py-3 px-4 max-w-xs">
+                            <p className="text-slate-700 line-clamp-2">{voter.alamat || '-'}</p>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="font-bold text-slate-800 block">
+                              {voter.terdaftarOleh || voter.diinputOlehNama || '-'}
                             </span>
-                          </div>
-                        </td>
-
-                        {/* 3. Kolom NIK */}
-                        <td className="py-3 px-4 font-mono font-semibold text-slate-700 text-xs">
-                          {voter.nikMasked || voter.nik}
-                        </td>
-
-                        {/* 4. Kolom Gender & TTL */}
-                        <td className="py-3 px-4 text-[11px]">
-                          <span className="font-semibold block">{voter.jenisKelamin}</span>
-                          <span className="text-slate-400">{voter.tempatTglLahir || '-'}</span>
-                        </td>
-
-                        {/* 5. Kolom Wilayah & TPS */}
-                        <td className="py-3 px-4 text-[11px]">
-                          <span className="font-extrabold text-cyan-800 block">{voter.tps}</span>
-                          <span className="text-slate-500">
-                            {voter.kelurahan}, {voter.kecamatan}
-                          </span>
-                          {voter.kabupatenKota && (
-                            <span className="text-[10px] text-slate-400 block">
-                              {voter.kabupatenKota}
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {voter.waktuDaftar || '-'}
                             </span>
-                          )}
-                        </td>
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedVoterPreview(voter)}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Eye className="w-3 h-3" />
+                                <span>Detail</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setMapModalVoter({
+                                    ...voter,
+                                    resolvedLat: coords.resolvedLat,
+                                    resolvedLng: coords.resolvedLng,
+                                  })
+                                }
+                                className="px-2.5 py-1.5 rounded-lg bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <MapPin className="w-3 h-3" />
+                                <span>Peta</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
-                        {/* 6. Kolom Lokasi / Maps Button */}
-                        <td className="py-3 px-4 text-center">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedMapVoter(voter);
-                              setActiveSubTab('peta_voters');
-                            }}
-                            className="px-2.5 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition-colors active:scale-95"
-                            title="Lihat titik lokasi pemilih pada Google Maps"
-                          >
-                            <MapPin className="w-3 h-3 text-cyan-600 shrink-0" />
-                            <span>Lihat Titik Lokasi</span>
-                          </button>
-                        </td>
+      {/* SUB-MENU 2: DAFTAR RELAWAN */}
+      {activeSubTab === 'daftar_relawan' && (
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm sm:text-base font-black text-slate-900">
+                Daftar Akun Relawan Terdaftar ({relawanList.length} Orang)
+              </h3>
+              <p className="text-xs text-slate-500">
+                Seluruh Relawan aktif di whitelist login beserta wilayah Kelurahan, Kecamatan, dan Kota tugasnya.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={relawanSearch}
+                  onChange={(e) => setRelawanSearch(e.target.value)}
+                  placeholder="Cari nama Relawan / Kelurahan..."
+                  className="pl-9 pr-3 py-2 rounded-xl border border-slate-300 bg-slate-50 text-xs w-56"
+                />
+              </div>
+              {canAddRelawan && onOpenCommandRegist && (
+                <button
+                  type="button"
+                  onClick={onOpenCommandRegist}
+                  className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>+ Tambah Relawan</span>
+                </button>
+              )}
+            </div>
+          </div>
 
-                        {/* 7. Kolom Status DPT */}
-                        <td className="py-3 px-4 text-center">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                              voter.statusDpt === 'DPT valid'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-teal-50 text-teal-700 border border-teal-200'
-                            }`}
-                          >
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                            <span>{voter.statusDpt || 'DPT valid'}</span>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase text-slate-500 font-bold">
+                <tr>
+                  <th className="py-3 px-4">Nama Relawan</th>
+                  <th className="py-3 px-4">Username &amp; Email</th>
+                  <th className="py-3 px-4">Wilayah Tugas (Kota / Kec / Kel)</th>
+                  <th className="py-3 px-4">Koordinator Pembina</th>
+                  <th className="py-3 px-4 text-center">Poin</th>
+                  <th className="py-3 px-4 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {relawanList.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-10 px-4 text-center text-slate-400">
+                      Belum ada akun Relawan yang terdaftar. Daftarkan melalui Menu Registrasi.
+                    </td>
+                  </tr>
+                ) : (
+                  relawanList.map((rel) => (
+                    <tr key={rel.id} className="hover:bg-slate-50/70">
+                      <td className="py-3 px-4">
+                        <span className="font-extrabold text-slate-900 block">{rel.nama}</span>
+                        <span className="text-[11px] font-mono text-slate-500">{rel.noHp || '-'}</span>
+                      </td>
+                      <td className="py-3 px-4 font-mono text-slate-700">
+                        <span className="font-bold block">@{rel.username}</span>
+                        <span className="text-[11px] text-slate-400">{rel.email || '-'}</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="font-bold text-cyan-800 block">
+                          {rel.kelurahan ? `Kel. ${rel.kelurahan}` : rel.wilayah || '-'}
+                        </span>
+                        {(rel.kecamatan || rel.kota) && (
+                          <span className="text-[11px] text-slate-500">
+                            {[rel.kecamatan ? `Kec. ${rel.kecamatan}` : '', rel.kota || ''].filter(Boolean).join(', ')}
                           </span>
-                        </td>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-slate-600">
+                        {rel.korcamNama ? (
+                          <span className="block">Korcam: <strong>{rel.korcamNama}</strong></span>
+                        ) : null}
+                        {rel.timSuksesNama ? (
+                          <span className="block text-[11px] text-slate-500">Korwil: {rel.timSuksesNama}</span>
+                        ) : !rel.korcamNama ? (
+                          <span>-</span>
+                        ) : null}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 font-mono font-bold">
+                          <Award className="w-3 h-3" />
+                          {(rel.points || 0).toLocaleString('id-ID')}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            rel.status === 'Nonaktif'
+                              ? 'bg-rose-100 text-rose-700'
+                              : 'bg-emerald-100 text-emerald-700'
+                          }`}
+                        >
+                          {rel.status || 'Aktif'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
-                        {/* 8. Kolom Status Master */}
-                        <td className="py-3 px-4 text-center">
-                          <span className="px-2.5 py-0.5 bg-cyan-100 text-cyan-800 font-mono font-extrabold text-[10px] rounded-full border border-cyan-200">
-                            TERDAFTAR
-                          </span>
+      {/* SUB-MENU 3: LAPORAN VOTER PER KELURAHAN */}
+      {activeSubTab === 'laporan_kelurahan' && (
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-5 space-y-4">
+          <div>
+            <span className="text-[10px] font-mono font-black text-cyan-600 uppercase tracking-widest">
+              REKAPITULASI WILAYAH LIVE
+            </span>
+            <h3 className="text-base font-black text-slate-900 mt-0.5">
+              Laporan Voter Terdaftar per Kelurahan
+            </h3>
+            <p className="text-xs text-slate-500">
+              Ringkasan jumlah Konstituen/Voter per Kelurahan, Kecamatan, dan Kota yang tersinkronisasi langsung dari Menu Registrasi.
+            </p>
+          </div>
+
+          <div className="overflow-x-auto rounded-2xl border border-slate-200">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider">
+                <tr>
+                  <th className="py-3 px-4">Kelurahan</th>
+                  <th className="py-3 px-4">Kecamatan</th>
+                  <th className="py-3 px-4">Kota / Kabupaten</th>
+                  <th className="py-3 px-4 font-mono text-center">Total Voter</th>
+                  <th className="py-3 px-4 font-mono text-center">DPT Valid</th>
+                  <th className="py-3 px-4 font-mono text-center">Penginput Aktif</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium">
+                {laporanPerKelurahan.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-10 px-4 text-center text-slate-400">
+                      Belum ada data Voter masuk untuk diringkas per Kelurahan.
+                    </td>
+                  </tr>
+                ) : (
+                  <>
+                    {laporanPerKelurahan.map((row) => (
+                      <tr
+                        key={`${row.kota}-${row.kecamatan}-${row.kelurahan}`}
+                        className="hover:bg-slate-50"
+                      >
+                        <td className="py-3 px-4 font-extrabold text-cyan-900">
+                          Kel. {row.kelurahan}
+                        </td>
+                        <td className="py-3 px-4 text-slate-700">{row.kecamatan}</td>
+                        <td className="py-3 px-4 text-slate-600">{row.kota}</td>
+                        <td className="py-3 px-4 font-mono text-center font-black text-slate-900">
+                          {row.terdaftar.toLocaleString('id-ID')}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-center font-bold text-emerald-700">
+                          {row.dptValid.toLocaleString('id-ID')}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-center text-slate-600">
+                          {row.relawanPenginput.size} Orang
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="bg-teal-50 font-black text-slate-900">
+                      <td colSpan={3} className="py-3 px-4 uppercase">
+                        TOTAL SELURUH KELURAHAN ({laporanPerKelurahan.length} Kelurahan)
+                      </td>
+                      <td className="py-3 px-4 font-mono text-center text-cyan-900">
+                        {voterList.length.toLocaleString('id-ID')}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-center text-emerald-800">
+                        {voterList.filter((v) => v.statusDpt === 'DPT valid').length.toLocaleString('id-ID')}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-center">—</td>
+                    </tr>
+                  </>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* SUB-MENU 4: HASIL QUICK COUNT PASLON (Per Kelurahan & Kecamatan) */}
+      {activeSubTab === 'quick_count_paslon' && (
+        <div className="space-y-5">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-5 space-y-4">
+            <div>
+              <h3 className="text-base font-black text-slate-900">
+                Hasil Quick Count Paslon (Rekap per Kelurahan &amp; Kecamatan)
+              </h3>
+              <p className="text-xs text-slate-500">
+                Total suara sah: <strong className="font-mono text-slate-900">{quickCountSummary.totalSah.toLocaleString('id-ID')}</strong> · Tidak sah: <strong className="font-mono text-slate-900">{quickCountSummary.tidakSah.toLocaleString('id-ID')}</strong>
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+              {[
+                { label: 'Paslon 01 (Kandidat Utama)', suara: quickCountSummary.p1, pct: quickCountSummary.p1Pct, bar: 'bg-teal-600', bg: 'bg-teal-50 border-teal-200' },
+                { label: 'Paslon 02', suara: quickCountSummary.p2, pct: quickCountSummary.p2Pct, bar: 'bg-slate-600', bg: 'bg-slate-50 border-slate-200' },
+                { label: 'Paslon 03', suara: quickCountSummary.p3, pct: quickCountSummary.p3Pct, bar: 'bg-slate-400', bg: 'bg-slate-50 border-slate-200' },
+              ].map((p) => (
+                <div key={p.label} className={`p-4 rounded-2xl border ${p.bg} space-y-2`}>
+                  <p className="text-xs font-extrabold text-slate-800">{p.label}</p>
+                  <p className="text-2xl font-black font-mono text-slate-900">
+                    {p.suara.toLocaleString('id-ID')}{' '}
+                    <span className="text-sm font-bold text-slate-600">({p.pct}%)</span>
+                  </p>
+                  <div className="h-2 rounded-full bg-white overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${p.bar}`}
+                      style={{ width: `${Math.min(100, Number(p.pct))}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase text-slate-500 font-bold">
+                  <tr>
+                    <th className="py-3 px-4">Kelurahan</th>
+                    <th className="py-3 px-4">Kecamatan</th>
+                    <th className="py-3 px-4 text-center font-mono">Paslon 01</th>
+                    <th className="py-3 px-4 text-center font-mono">Paslon 02</th>
+                    <th className="py-3 px-4 text-center font-mono">Paslon 03</th>
+                    <th className="py-3 px-4 text-center font-mono">Total Sah</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {quickCountSummary.perKelurahan.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 px-4 text-center text-slate-400">
+                        Belum ada laporan Quick Count yang masuk per Kelurahan.
+                      </td>
+                    </tr>
+                  ) : (
+                    quickCountSummary.perKelurahan.map((row) => (
+                      <tr key={`${row.kecamatan}-${row.kelurahan}`} className="hover:bg-slate-50">
+                        <td className="py-3 px-4 font-bold text-slate-900">Kel. {row.kelurahan}</td>
+                        <td className="py-3 px-4 text-slate-600">Kec. {row.kecamatan}</td>
+                        <td className="py-3 px-4 text-center font-mono font-bold text-teal-700">
+                          {row.p1.toLocaleString('id-ID')}
+                        </td>
+                        <td className="py-3 px-4 text-center font-mono text-slate-700">
+                          {row.p2.toLocaleString('id-ID')}
+                        </td>
+                        <td className="py-3 px-4 text-center font-mono text-slate-700">
+                          {row.p3.toLocaleString('id-ID')}
+                        </td>
+                        <td className="py-3 px-4 text-center font-mono font-black text-slate-900">
+                          {(row.p1 + row.p2 + row.p3).toLocaleString('id-ID')}
                         </td>
                       </tr>
                     ))
@@ -698,464 +943,138 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
         </div>
       )}
 
-      {/* SUB TAB 2: PETA SEBARAN VOTER GOOGLE MAPS */}
-      {activeSubTab === 'peta_voters' && (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-6 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-mono font-bold text-teal-800 bg-teal-100 px-2 py-0.5 rounded-full uppercase">
-                  GIS SEBARAN VOTER
-                </span>
-                <span className="text-xs text-slate-500 font-semibold">
-                  Google Maps JavaScript API
-                </span>
-              </div>
-              <h3 className="text-base font-black text-slate-900 mt-0.5">
-                Peta Titik Lokasi Pemilih Terdaftar ({votersWithCoords.length} Titik)
-              </h3>
-              <p className="text-xs text-slate-500">
-                Setiap pemilih yang di-scan e-KTP langsung di-geocoding presisi dan dimapping ke koordinat kelurahan/kecamatan.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {selectedMapVoter && (
-                <div className="px-3 py-1 bg-cyan-50 border border-cyan-200 rounded-xl text-xs text-cyan-900 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-cyan-600 animate-ping"></span>
-                  <span>Fokus: <strong>{selectedMapVoter.nama}</strong> ({selectedMapVoter.tps})</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedMapVoter(null)}
-                    className="ml-1 text-slate-400 hover:text-slate-600 text-xs font-bold"
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setActiveSubTab('voters')}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
-              >
-                ← Kembali ke Tabel
-              </button>
-            </div>
-          </div>
-
-          {/* Container Google Map */}
-          <div className="relative w-full h-[520px] rounded-2xl overflow-hidden border border-slate-200 shadow-inner bg-slate-100">
-            <SwarakuMapsProvider
-              fallback={
-                <div className="h-full w-full p-5 overflow-y-auto space-y-3 bg-slate-50">
-                  <SwarakuMapsDiagnosticNotice
-                    title="Peta interaktif Google Maps sedang tidak dapat dimuat"
-                    subtitle="Daftar koordinat pemilih tetap tersedia di bawah:"
-                  />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {votersWithCoords.map((voter) => (
-                      <div key={voter.id} className="p-3 rounded-xl bg-white border border-slate-200 text-xs space-y-1">
-                        <p className="font-bold text-slate-900">{voter.nama}</p>
-                        <p className="text-slate-600">{voter.tps} · {voter.kelurahan}, {voter.kecamatan}</p>
-                        <p className="font-mono text-[11px] text-slate-500">
-                          {voter.resolvedLat.toFixed(5)}, {voter.resolvedLng.toFixed(5)}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              }
-            >
-              <GoogleMap
-                mapId="DEMO_MAP_ID"
-                defaultCenter={defaultMapCenter}
-                center={defaultMapCenter}
-                defaultZoom={selectedMapVoter ? 15 : 12}
-                gestureHandling="greedy"
-                disableDefaultUI={false}
-                internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-                style={{ width: '100%', height: '100%' }}
-              >
-                {/* Auto pan and zoom to selected voter */}
-                <MapCameraPanHandler
-                  target={
-                    selectedMapVoter
-                      ? {
-                          lat: selectedMapVoter.lat || (selectedMapVoter as any).resolvedLat,
-                          lng: selectedMapVoter.lng || (selectedMapVoter as any).resolvedLng,
-                        }
-                      : null
-                  }
-                />
-                {votersWithCoords.map((voter) => (
-                  <AdvancedMarker
-                    key={voter.id}
-                    position={{ lat: voter.resolvedLat, lng: voter.resolvedLng }}
-                    onClick={() => setSelectedMapVoter(voter)}
-                    title={`${voter.nama} (${voter.tps})`}
-                  >
-                    <div className="relative group cursor-pointer transform hover:scale-110 transition-transform">
-                      <div className="w-9 h-9 rounded-full bg-teal-700 border-2 border-white shadow-lg flex items-center justify-center text-white">
-                        <MapPin className="w-4 h-4 text-white" />
-                      </div>
-                      <span className="absolute -top-1 -right-1 px-1.5 py-0.2 bg-emerald-600 text-[8px] font-black text-white rounded-full border border-white font-mono">
-                        {voter.tps.replace(/TPS\s*/i, '')}
-                      </span>
-                    </div>
-                  </AdvancedMarker>
-                ))}
-
-                {/* InfoWindow saat marker voter dipilih */}
-                {selectedMapVoter && (
-                  <InfoWindow
-                    position={{
-                      lat: selectedMapVoter.lat || -6.1264,
-                      lng: selectedMapVoter.lng || 106.7885,
-                    }}
-                    onCloseClick={() => setSelectedMapVoter(null)}
-                    maxWidth={280}
-                  >
-                    <div className="p-1 space-y-2 text-slate-800 text-xs">
-                      {selectedMapVoter.fotoKtpUrl && (
-                        <div
-                          className="relative rounded-lg overflow-hidden border border-slate-200 cursor-pointer group"
-                          onClick={() => setSelectedVoterPreview(selectedMapVoter)}
-                        >
-                          <img
-                            src={selectedMapVoter.fotoKtpUrl}
-                            alt="KTP"
-                            className="w-full h-24 object-cover group-hover:scale-102 transition-transform"
-                          />
-                          <span className="absolute bottom-1 right-1 px-1.5 py-0.5 bg-black/70 text-white text-[8px] font-bold rounded">
-                            🔍 Perbesar
-                          </span>
-                        </div>
-                      )}
-
-                      <div>
-                        <span className="text-[9px] font-mono font-bold text-teal-800 uppercase block">
-                          VOTER TERVERIFIKASI (SCAN AI)
-                        </span>
-                        <h4 className="text-sm font-black text-slate-900 leading-tight">
-                          {selectedMapVoter.nama}
-                        </h4>
-                        <p className="text-[10px] font-mono text-slate-500 mt-0.5">
-                          NIK: {selectedMapVoter.nikMasked || selectedMapVoter.nik}
-                        </p>
-                      </div>
-
-                      <div className="p-2 bg-slate-50 rounded-lg border border-slate-200 text-[11px] space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-500">Penugasan TPS:</span>
-                          <span className="font-extrabold text-cyan-800">{selectedMapVoter.tps}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-500">Kelurahan:</span>
-                          <span className="font-semibold">{selectedMapVoter.kelurahan}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-500">Kecamatan:</span>
-                          <span className="font-semibold">{selectedMapVoter.kecamatan}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-500">Alamat:</span>
-                          <span className="font-medium text-slate-700 truncate max-w-[140px]">
-                            {selectedMapVoter.alamat || '-'}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="pt-1 flex items-center justify-between text-[10px]">
-                        <span className="text-slate-400">Pencatat:</span>
-                        <span className="font-bold text-slate-700">{selectedMapVoter.terdaftarOleh || 'Kader'}</span>
-                      </div>
-                    </div>
-                  </InfoWindow>
-                )}
-              </GoogleMap>
-            </SwarakuMapsProvider>
-          </div>
-        </div>
-      )}
-
-      {/* SUB TAB 3: LAPORAN VOTER PER TPS */}
-      {activeSubTab === 'rekap_tps' && (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-5 space-y-4">
-          <div>
-            <span className="text-[10px] font-mono font-black text-cyan-600 uppercase tracking-widest">
-              SLIDE 11 · LAPORAN TERINTEGRASI
-            </span>
-            <h3 className="text-base font-black text-slate-900 mt-0.5">
-              Laporan Voter Terdaftar per TPS
-            </h3>
-            <p className="text-xs text-slate-500">
-              Target pemilih, voter terdaftar, validasi DPT KPU, dan persentase capaian per TPS.
-            </p>
-          </div>
-
-          <div className="overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider">
-                <tr>
-                  <th className="py-3 px-4">Wilayah</th>
-                  <th className="py-3 px-4 font-mono text-center">Target</th>
-                  <th className="py-3 px-4 font-mono text-center">Terdaftar</th>
-                  <th className="py-3 px-4 font-mono text-center">DPT Valid</th>
-                  <th className="py-3 px-4 text-center">Capaian</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
-                {LAPORAN_VOTER_PER_TPS.map((row, idx) => {
-                  const isTotal = row.wilayah.includes('TOTAL');
-                  return (
-                    <tr
-                      key={idx}
-                      className={isTotal ? 'bg-teal-50 font-black text-slate-900' : 'hover:bg-slate-50'}
-                    >
-                      <td className="py-3 px-4 font-bold">{row.wilayah}</td>
-                      <td className="py-3 px-4 font-mono text-center">{row.target}</td>
-                      <td className="py-3 px-4 font-mono text-center text-cyan-800 font-bold">
-                        {row.terdaftar}
-                      </td>
-                      <td className="py-3 px-4 font-mono text-center text-emerald-700 font-bold">
-                        {row.dptValid}
-                      </td>
-                      <td className="py-3 px-4 text-center font-extrabold text-teal-800">
-                        {row.capaian}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* SUB TAB 4: HASIL QUICK COUNT & PEMETAAN PASLON */}
-      {activeSubTab === 'quick_count_pemetaan' && (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-5 space-y-4">
-          <div>
-            <span className="text-[10px] font-mono font-black text-cyan-600 uppercase tracking-widest">
-              SLIDE 12 · LAPORAN TERINTEGRASI
-            </span>
-            <h3 className="text-base font-black text-slate-900 mt-0.5">
-              Hasil Quick Count &amp; Pemetaan Paslon
-            </h3>
-            <p className="text-xs text-slate-500">
-              Perolehan suara berdasarkan formulir C1 Plano saksi TPS yang telah terverifikasi OCR.
-            </p>
-          </div>
-
-          <div className="overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider">
-                <tr>
-                  <th className="py-3 px-4">Paslon</th>
-                  <th className="py-3 px-4 font-mono text-center">Suara</th>
-                  <th className="py-3 px-4 font-mono text-center">Persentase</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
-                {HASIL_QUICK_COUNT_PEMETAAN.map((p, idx) => (
-                  <tr
-                    key={idx}
-                    className={p.isUtama ? 'bg-teal-50/80 font-bold text-teal-950' : 'hover:bg-slate-50'}
-                  >
-                    <td className="py-3 px-4 font-black flex items-center gap-2">
-                      {p.isUtama && <CheckCircle2 className="w-4 h-4 text-teal-600" />}
-                      <span>{p.paslon}</span>
-                    </td>
-                    <td className="py-3 px-4 font-mono text-center font-black">
-                      {p.suara.toLocaleString('id-ID')}
-                    </td>
-                    <td className="py-3 px-4 font-mono text-center font-extrabold text-teal-800">
-                      {p.persentase}
-                    </td>
-                  </tr>
-                ))}
-                <tr className="bg-slate-100 font-black text-slate-900">
-                  <td className="py-3 px-4">TOTAL SUARA SAH</td>
-                  <td className="py-3 px-4 font-mono text-center">44.085</td>
-                  <td className="py-3 px-4 font-mono text-center">100%</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* SUB TAB 5: RINCIAN OCR CALEG & PASLON LAIN */}
-      {activeSubTab === 'rincian_ocr' && (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-5 space-y-4">
-          <div>
-            <span className="text-[10px] font-mono font-black text-cyan-600 uppercase tracking-widest">
-              SLIDE 13 · LAPORAN TERINTEGRASI
-            </span>
-            <h3 className="text-base font-black text-slate-900 mt-0.5">
-              Rincian OCR • Caleg &amp; Paslon Lain
-            </h3>
-            <p className="text-xs text-slate-500">
-              Rincian audit angka suara tiap kandidat kompetitor serta nomor urut partai.
-            </p>
-          </div>
-
-          <div className="overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider">
-                <tr>
-                  <th className="py-3 px-4">Nama</th>
-                  <th className="py-3 px-4 text-center">Partai / No.</th>
-                  <th className="py-3 px-4 font-mono text-center">Suara</th>
-                  <th className="py-3 px-4 text-center">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
-                {RINCIAN_OCR_CALEG_PASLON.map((c, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50">
-                    <td className="py-3 px-4 font-bold text-slate-900">{c.nama}</td>
-                    <td className="py-3 px-4 text-center font-mono font-semibold text-slate-700">
-                      {c.partaiNo}
-                    </td>
-                    <td className="py-3 px-4 font-mono text-center font-black text-slate-900">
-                      {c.suara.toLocaleString('id-ID')}
-                    </td>
-                    <td className="py-3 px-4 text-center">
-                      <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 font-mono font-bold text-[10px] rounded-full border border-emerald-300">
-                        {c.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL FULL PREVIEW FOTO FISIK e-KTP & DETAIL DATA LENGKAP */}
+      {/* MODAL DETAIL PROFIL VOTER */}
       {selectedVoterPreview && (
-        <div className="fixed inset-0 z-60 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 my-auto text-slate-800 animate-in fade-in zoom-in-95 duration-200 space-y-4 max-h-[92vh] overflow-y-auto">
-            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-start justify-between gap-3">
               <div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-teal-800 bg-teal-100 px-2.5 py-0.5 rounded-full font-mono">
-                  ARSIP e-KTP RESMI
+                <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-700">
+                  Detail Profil Voter / Konstituen
                 </span>
-                <h3 className="text-base sm:text-lg font-black text-slate-900 mt-1">
-                  Detail Identitas Pemilih &amp; Hasil Scan Fisik
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Foto dan data kartu tanda penduduk diverifikasi langsung oleh Kader TPS.
+                <h3 className="text-lg font-black text-slate-900">{selectedVoterPreview.nama}</h3>
+                <p className="text-xs font-mono text-slate-500">
+                  NIK: {selectedVoterPreview.nikMasked || selectedVoterPreview.nik || '-'}
                 </p>
               </div>
-
               <button
                 type="button"
                 onClick={() => setSelectedVoterPreview(null)}
-                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center font-bold text-sm cursor-pointer transition-colors"
+                className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Foto KTP Display */}
-            {selectedVoterPreview.fotoKtpUrl ? (
-              <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 shadow-md">
-                <img
-                  src={selectedVoterPreview.fotoKtpUrl}
-                  alt={selectedVoterPreview.nama}
-                  className="w-full max-h-64 object-contain mx-auto"
-                />
-                <div className="absolute bottom-2 left-2 px-2.5 py-1 bg-black/75 backdrop-blur-md rounded-lg text-white text-[10px] font-bold border border-white/20 flex items-center gap-1.5">
-                  <Camera className="w-3 h-3 text-teal-300" />
-                  <span>Foto e-KTP Fisik Asli</span>
-                </div>
-              </div>
-            ) : (
-              <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-300 text-slate-400 text-xs">
-                Tidak ada lampiran foto untuk pemilih ini
-              </div>
+            {selectedVoterPreview.fotoKtpUrl && (
+              <img
+                src={selectedVoterPreview.fotoKtpUrl}
+                alt={`Foto ${selectedVoterPreview.nama}`}
+                className="w-full max-h-52 object-cover rounded-2xl border border-slate-200"
+              />
             )}
 
-            {/* Detail Identity Table */}
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-2">
-              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Nomor Induk Kependudukan (NIK):</span>
-                <span className="font-mono font-black text-slate-900 text-sm tracking-wide">
-                  {selectedVoterPreview.nik}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-slate-500 block">Kota / Kabupaten</span>
+                <span className="font-bold text-slate-900">{selectedVoterPreview.kabupatenKota || '-'}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-slate-500 block">Kecamatan</span>
+                <span className="font-bold text-slate-900">{selectedVoterPreview.kecamatan || '-'}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-slate-500 block">Kelurahan</span>
+                <span className="font-bold text-cyan-800">{selectedVoterPreview.kelurahan || '-'}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-slate-500 block">No. HP / WhatsApp</span>
+                <span className="font-mono font-bold text-slate-900">{selectedVoterPreview.noHp || '-'}</span>
+              </div>
+              <div className="sm:col-span-2 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-slate-500 block">Alamat Lengkap</span>
+                <span className="font-semibold text-slate-900">{selectedVoterPreview.alamat || '-'}</span>
+              </div>
+              <div className="sm:col-span-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+                <div>
+                  <span className="text-emerald-700 block">Diinput Oleh</span>
+                  <span className="font-bold text-slate-900">
+                    {selectedVoterPreview.terdaftarOleh || selectedVoterPreview.diinputOlehNama || '-'}
+                  </span>
+                </div>
+                <span className="text-[11px] font-mono text-slate-600">
+                  {selectedVoterPreview.waktuDaftar || '-'}
                 </span>
-              </div>
-              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Nama Lengkap:</span>
-                <span className="font-black text-slate-900 text-sm">{selectedVoterPreview.nama}</span>
-              </div>
-              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Tempat / Tgl Lahir:</span>
-                <span className="font-semibold text-slate-800">{selectedVoterPreview.tempatTglLahir || '-'}</span>
-              </div>
-              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Jenis Kelamin:</span>
-                <span className="font-semibold text-slate-800">{selectedVoterPreview.jenisKelamin}</span>
-              </div>
-              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Alamat:</span>
-                <span className="font-semibold text-slate-800">
-                  {selectedVoterPreview.alamat} (RT {selectedVoterPreview.rtRw || '-'})
-                </span>
-              </div>
-              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Kelurahan &amp; Kecamatan:</span>
-                <span className="font-bold text-teal-800">
-                  {selectedVoterPreview.kelurahan}, {selectedVoterPreview.kecamatan}
-                </span>
-              </div>
-              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Kota / Kabupaten:</span>
-                <span className="font-bold text-slate-800">{selectedVoterPreview.kabupatenKota || 'DKI Jakarta'}</span>
-              </div>
-              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">TPS Penugasan:</span>
-                <span className="font-black text-cyan-800 font-mono text-sm">{selectedVoterPreview.tps}</span>
-              </div>
-              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">No. WhatsApp / HP:</span>
-                <span className="font-mono font-bold text-slate-800">{selectedVoterPreview.noHp || '-'}</span>
-              </div>
-              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Koordinat Google Maps:</span>
-                <span className="font-mono text-xs text-teal-700 font-bold">
-                  {selectedVoterPreview.lat ? `${selectedVoterPreview.lat.toFixed(4)}, ${selectedVoterPreview.lng?.toFixed(4)}` : 'Tersinkron'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500 font-medium">Diinput Oleh:</span>
-                <span className="font-medium text-slate-700">{selectedVoterPreview.terdaftarOleh || 'Kader'} ({selectedVoterPreview.waktuDaftar})</span>
               </div>
             </div>
+          </div>
+        </div>
+      )}
 
-            <div className="pt-1 flex items-center justify-end gap-2">
+      {/* MODAL QUICK MAP VIEW FOR SELECTED VOTER */}
+      {mapModalVoter && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-5 shadow-2xl border border-slate-200 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-bold text-teal-700">
+                  <Compass className="w-4 h-4" />
+                  <span>Titik Lokasi Voter (Google Maps)</span>
+                </div>
+                <h3 className="text-base font-black text-slate-900">{mapModalVoter.nama}</h3>
+                <p className="text-xs text-slate-500">
+                  {mapModalVoter.alamat}, Kel. {mapModalVoter.kelurahan}, Kec. {mapModalVoter.kecamatan}, {mapModalVoter.kabupatenKota}
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={() => {
-                  setSelectedMapVoter(selectedVoterPreview);
-                  setSelectedVoterPreview(null);
-                  setActiveSubTab('peta_voters');
-                }}
-                className="px-4 py-2.5 bg-cyan-700 hover:bg-cyan-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer"
+                onClick={() => setMapModalVoter(null)}
+                className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
               >
-                <MapPin className="w-3.5 h-3.5" />
-                <span>Lihat di Peta Suara</span>
+                <X className="w-4 h-4" />
               </button>
+            </div>
 
-              <button
-                type="button"
-                onClick={() => setSelectedVoterPreview(null)}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+            <div className="w-full h-[360px] rounded-2xl overflow-hidden border border-slate-200 bg-slate-100">
+              <SwarakuMapsProvider
+                fallback={
+                  <div className="h-full w-full p-4 bg-slate-50 flex flex-col justify-center">
+                    <SwarakuMapsDiagnosticNotice
+                      title="Peta interaktif sedang tidak dapat dimuat"
+                      subtitle={`Koordinat terpetakan: ${mapModalVoter.resolvedLat.toFixed(5)}, ${mapModalVoter.resolvedLng.toFixed(5)}`}
+                    />
+                  </div>
+                }
               >
-                Tutup
-              </button>
+                <GoogleMap
+                  mapId="DEMO_MAP_ID"
+                  defaultCenter={{ lat: mapModalVoter.resolvedLat, lng: mapModalVoter.resolvedLng }}
+                  defaultZoom={16}
+                  gestureHandling="greedy"
+                  style={{ width: '100%', height: '100%' }}
+                >
+                  <MapCameraPanHandler
+                    target={{ lat: mapModalVoter.resolvedLat, lng: mapModalVoter.resolvedLng }}
+                  />
+                  <AdvancedMarker
+                    position={{ lat: mapModalVoter.resolvedLat, lng: mapModalVoter.resolvedLng }}
+                    title={mapModalVoter.nama}
+                  >
+                    <div className="w-9 h-9 rounded-full bg-teal-700 border-2 border-white shadow-lg flex items-center justify-center text-white">
+                      <MapPin className="w-4 h-4" />
+                    </div>
+                  </AdvancedMarker>
+                  <InfoWindow
+                    position={{ lat: mapModalVoter.resolvedLat, lng: mapModalVoter.resolvedLng }}
+                  >
+                    <div className="text-xs text-slate-800 space-y-0.5 max-w-[220px]">
+                      <p className="font-black text-slate-900">{mapModalVoter.nama}</p>
+                      <p>Kel. {mapModalVoter.kelurahan}, Kec. {mapModalVoter.kecamatan}</p>
+                      <p className="text-slate-500">{mapModalVoter.kabupatenKota}</p>
+                    </div>
+                  </InfoWindow>
+                </GoogleMap>
+              </SwarakuMapsProvider>
             </div>
           </div>
         </div>

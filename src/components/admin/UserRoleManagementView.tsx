@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { UserAccount, UserRole } from '../../types/vore';
 import { TimSuksesWilayahRecord } from '../../data/petaSuaraData';
 import { lookupSmartCoordinates } from '../../utils/geocoding';
+import { WilayahSelector, type WilayahValue } from '../common/WilayahSelector';
+import { formatWilayahLabel } from '../../data/wilayahIndonesia';
 import {
   Users,
   UserPlus,
@@ -9,7 +11,6 @@ import {
   Building2,
   UserCheck,
   Search,
-  Filter,
   CheckCircle2,
   XCircle,
   Trash2,
@@ -21,69 +22,68 @@ import {
   KeyRound,
   MapPin,
   Phone,
+  Mail,
   Sparkles,
-  Lock,
   X,
   Check,
-  Database,
   RefreshCw,
-  Cloud,
-  Globe,
-  ExternalLink,
-  Sliders,
+  Award,
 } from 'lucide-react';
-import {
-  getActiveScriptUrl,
-  isScriptUrlConfigured,
-  setCustomScriptUrl,
-  SCRIPT_URL,
-} from '../../config/apiConfig';
 
 interface UserRoleManagementViewProps {
   userAccounts: UserAccount[];
   currentUser: UserAccount;
+  mode?: 'full' | 'korcam_relawan';
   onAddUser: (user: UserAccount) => Promise<boolean | void> | void;
   onUpdateUser?: (user: UserAccount) => Promise<boolean | void> | void;
   onDeleteUser: (userId: string) => Promise<boolean | void> | void;
   onToggleUserStatus: (userId: string) => Promise<boolean | void> | void;
   onSaveTimSukses?: (ts: TimSuksesWilayahRecord) => void;
   onRefreshUsers?: () => Promise<void>;
+  onAwardPoints?: (delta: number) => Promise<void> | void;
 }
+
+type CreatableRole = 'tim_sukses' | 'kader' | 'relawan' | 'admin';
 
 export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
   userAccounts,
   currentUser,
+  mode = 'full',
   onAddUser,
   onUpdateUser,
   onDeleteUser,
   onToggleUserStatus,
   onSaveTimSukses,
   onRefreshUsers,
+  onAwardPoints,
 }) => {
+  const isKorcamRelawanMode = mode === 'korcam_relawan';
+
   const [searchQuery, setSearchQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState<'all' | UserRole>('all');
+  const [roleFilter, setRoleFilter] = useState<'all' | UserRole>(
+    isKorcamRelawanMode ? 'relawan' : 'all'
+  );
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isRefreshingUsers, setIsRefreshingUsers] = useState(false);
 
-  // Cloud API Config Modal State
-  const [isApiConfigOpen, setIsApiConfigOpen] = useState(false);
-  const [customUrlInput, setCustomUrlInput] = useState(() => getActiveScriptUrl());
-  const [configToast, setConfigToast] = useState<string | null>(null);
-
   // Edit Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editRole, setEditRole] = useState<UserRole>('tim_sukses');
+  const [editRole, setEditRole] = useState<UserRole>('relawan');
   const [editNama, setEditNama] = useState('');
   const [editUsername, setEditUsername] = useState('');
+  const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editJabatan, setEditJabatan] = useState('');
   const [editIdPegawai, setEditIdPegawai] = useState('');
   const [editDivisi, setEditDivisi] = useState('');
-  const [editWilayah, setEditWilayah] = useState('');
-  const [editTps, setEditTps] = useState('');
+  const [editWilayahObj, setEditWilayahObj] = useState<WilayahValue>({
+    kota: '',
+    kecamatan: '',
+    kelurahan: '',
+  });
   const [editNoHp, setEditNoHp] = useState('');
   const [editStatus, setEditStatus] = useState<'Aktif' | 'Nonaktif'>('Aktif');
   const [editError, setEditError] = useState<string | null>(null);
@@ -97,82 +97,110 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
   const [isDeletingUser, setIsDeletingUser] = useState(false);
 
   // Add Form State
-  const [formRole, setFormRole] = useState<'tim_sukses' | 'kader' | 'admin'>('tim_sukses');
+  const [formRole, setFormRole] = useState<CreatableRole>(
+    isKorcamRelawanMode ? 'relawan' : 'tim_sukses'
+  );
   const [formNama, setFormNama] = useState('');
   const [formUsername, setFormUsername] = useState('');
+  const [formEmail, setFormEmail] = useState('');
   const [formPassword, setFormPassword] = useState('123456');
   const [formJabatan, setFormJabatan] = useState('');
   const [formIdPegawai, setFormIdPegawai] = useState('');
   const [formDivisi, setFormDivisi] = useState('');
-  const [formWilayah, setFormWilayah] = useState('DAPIL DKI JAKARTA II');
-  const [formTps, setFormTps] = useState('TPS 048');
+  const [formWilayahObj, setFormWilayahObj] = useState<WilayahValue>({
+    kota: currentUser.kota || 'Jakarta Selatan',
+    kecamatan: currentUser.kecamatan || 'Cilandak',
+    kelurahan: currentUser.kelurahan || 'Cilandak Barat',
+  });
   const [formNoHp, setFormNoHp] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Opsi Tambah Kader Binaan Otomatis saat Mendaftarkan Tim Sukses
-  interface KaderInputItem {
+  // Opsi Tambah Korcam Binaan Otomatis saat Mendaftarkan Korwil
+  interface KorcamInputItem {
     id: string;
     nama: string;
     noHp: string;
-    tps: string;
+    kelurahan: string;
     username: string;
     password?: string;
   }
-  const [kaderInputs, setKaderInputs] = useState<KaderInputItem[]>([]);
+  const [korcamInputs, setKorcamInputs] = useState<KorcamInputItem[]>([]);
   const [createdSummaryModal, setCreatedSummaryModal] = useState<{
-    timSukses: UserAccount;
-    kaders: UserAccount[];
+    korwil: UserAccount;
+    korcams: UserAccount[];
   } | null>(null);
 
+  // Scoped base list (for Korcam mode, only Relawan under this Korcam or unassigned Relawan)
+  const scopedUsers = useMemo(() => {
+    if (!isKorcamRelawanMode) return userAccounts;
+    return userAccounts.filter(
+      (u) =>
+        u.role === 'relawan' &&
+        (!u.korcamId ||
+          u.korcamId === currentUser.id ||
+          u.korcamNama === currentUser.nama)
+    );
+  }, [userAccounts, isKorcamRelawanMode, currentUser.id, currentUser.nama]);
+
   // Statistics
-  const totalUsers = userAccounts.length;
-  const superAdminCount = userAccounts.filter((u) => u.role === 'super_admin').length;
-  const adminCount = userAccounts.filter((u) => u.role === 'admin').length;
-  const timSuksesCount = userAccounts.filter((u) => u.role === 'tim_sukses').length;
-  const kaderCount = userAccounts.filter((u) => u.role === 'kader').length;
+  const totalUsers = scopedUsers.length;
+  const superAdminCount = scopedUsers.filter((u) => u.role === 'super_admin').length;
+  const adminCount = scopedUsers.filter((u) => u.role === 'admin').length;
+  const korwilCount = scopedUsers.filter((u) => u.role === 'tim_sukses').length;
+  const korcamCount = scopedUsers.filter((u) => u.role === 'kader').length;
+  const relawanCount = scopedUsers.filter((u) => u.role === 'relawan').length;
+  const activeCount = scopedUsers.filter((u) => u.status !== 'Nonaktif').length;
 
   // Filtered List
-  const filteredUsers = userAccounts.filter((user) => {
-    const matchesRole = roleFilter === 'all' || user.role === roleFilter;
+  const filteredUsers = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    const matchesSearch =
-      !q ||
-      user.nama.toLowerCase().includes(q) ||
-      user.username.toLowerCase().includes(q) ||
-      user.wilayah.toLowerCase().includes(q) ||
-      (user.tps && user.tps.toLowerCase().includes(q)) ||
-      (user.jabatan && user.jabatan.toLowerCase().includes(q)) ||
-      (user.idPegawai && user.idPegawai.toLowerCase().includes(q)) ||
-      (user.divisi && user.divisi.toLowerCase().includes(q)) ||
-      (user.noHp && user.noHp.includes(q)) ||
-      (user.timSuksesNama && user.timSuksesNama.toLowerCase().includes(q)) ||
-      (user.kaderList && user.kaderList.some((k) => k.toLowerCase().includes(q)));
-    return matchesRole && matchesSearch;
-  });
+    return scopedUsers.filter((user) => {
+      const matchesRole =
+        isKorcamRelawanMode || roleFilter === 'all' || user.role === roleFilter;
+      const matchesSearch =
+        !q ||
+        user.nama.toLowerCase().includes(q) ||
+        user.username.toLowerCase().includes(q) ||
+        (user.email && user.email.toLowerCase().includes(q)) ||
+        (user.wilayah && user.wilayah.toLowerCase().includes(q)) ||
+        (user.kota && user.kota.toLowerCase().includes(q)) ||
+        (user.kecamatan && user.kecamatan.toLowerCase().includes(q)) ||
+        (user.kelurahan && user.kelurahan.toLowerCase().includes(q)) ||
+        (user.jabatan && user.jabatan.toLowerCase().includes(q)) ||
+        (user.noHp && user.noHp.includes(q)) ||
+        (user.timSuksesNama && user.timSuksesNama.toLowerCase().includes(q)) ||
+        (user.korcamNama && user.korcamNama.toLowerCase().includes(q));
+      return matchesRole && matchesSearch;
+    });
+  }, [scopedUsers, isKorcamRelawanMode, roleFilter, searchQuery]);
 
-  const handleAddKaderRow = () => {
-    const newId = `kd-item-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    setKaderInputs((prev) => [
+  const handleAddKorcamRow = () => {
+    const newId = `kc-item-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    setKorcamInputs((prev) => [
       ...prev,
       {
         id: newId,
         nama: '',
         noHp: '',
-        tps: formTps || 'TPS 048',
+        kelurahan: formWilayahObj.kelurahan || '',
         username: '',
         password: '123456',
       },
     ]);
   };
 
-  const handleUpdateKaderRow = (id: string, field: keyof KaderInputItem, value: string) => {
-    setKaderInputs((prev) =>
+  const handleUpdateKorcamRow = (
+    id: string,
+    field: keyof KorcamInputItem,
+    value: string
+  ) => {
+    setKorcamInputs((prev) =>
       prev.map((item) => {
         if (item.id === id) {
           const updated = { ...item, [field]: value };
-          if (field === 'nama' && (!item.username || item.username.startsWith('kader_'))) {
+          if (field === 'nama' && (!item.username || item.username.startsWith('korcam_'))) {
             const slug = value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-            updated.username = slug ? `kader_${slug.slice(0, 10)}` : '';
+            updated.username = slug ? `korcam_${slug.slice(0, 10)}` : '';
           }
           return updated;
         }
@@ -181,72 +209,60 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
     );
   };
 
-  const handleRemoveKaderRow = (id: string) => {
-    setKaderInputs((prev) => prev.filter((item) => item.id !== id));
+  const handleRemoveKorcamRow = (id: string) => {
+    setKorcamInputs((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const handleOpenAddModal = (defaultRole?: 'tim_sukses' | 'kader' | 'admin') => {
-    const targetRole = defaultRole || 'tim_sukses';
+  const applyRoleDefaults = (role: CreatableRole) => {
     const randomCode = Math.floor(1000 + Math.random() * 9000);
-    setFormRole(targetRole);
-    setFormNama('');
-    setFormUsername('');
-    setFormPassword('123456');
-    setKaderInputs([]);
-    setFormJabatan(
-      targetRole === 'tim_sukses'
-        ? 'Koordinator Pemenangan Wilayah'
-        : targetRole === 'kader'
-        ? 'Relawan Saksi TPS'
-        : 'Staf Admin Operasional'
-    );
+    setFormRole(role);
     setFormIdPegawai(
-      targetRole === 'tim_sukses'
-        ? `TS-${randomCode}`
-        : targetRole === 'kader'
-        ? `KAD-${randomCode}`
+      role === 'tim_sukses'
+        ? `KW-${randomCode}`
+        : role === 'kader'
+        ? `KC-${randomCode}`
+        : role === 'relawan'
+        ? `RL-${randomCode}`
         : `ADM-${randomCode}`
     );
     setFormDivisi(
-      targetRole === 'tim_sukses'
-        ? 'Divisi Bappilu & Teritori'
-        : targetRole === 'kader'
-        ? 'Divisi Saksi & Penggalangan'
-        : 'Divisi Administrasi & IT'
+      role === 'tim_sukses'
+        ? 'Divisi Koordinator Wilayah'
+        : role === 'kader'
+        ? 'Divisi Koordinator Kecamatan'
+        : role === 'relawan'
+        ? 'Divisi Relawan Lapangan'
+        : 'Divisi Administrasi & Operasional'
     );
-    setFormWilayah('DAPIL DKI JAKARTA II');
-    setFormTps('TPS 048');
+    setFormJabatan(
+      role === 'tim_sukses'
+        ? 'Koordinator Wilayah (Korwil)'
+        : role === 'kader'
+        ? 'Koordinator Kecamatan (Korcam)'
+        : role === 'relawan'
+        ? 'Relawan Lapangan'
+        : 'Admin Operasional'
+    );
+  };
+
+  const handleOpenAddModal = (defaultRole?: CreatableRole) => {
+    const targetRole: CreatableRole = isKorcamRelawanMode
+      ? 'relawan'
+      : defaultRole || 'tim_sukses';
+    applyRoleDefaults(targetRole);
+    setFormNama('');
+    setFormUsername('');
+    setFormEmail('');
+    setFormPassword('123456');
+    setKorcamInputs([]);
+    setFormWilayahObj({
+      kota: currentUser.kota || 'Jakarta Selatan',
+      kecamatan: currentUser.kecamatan || 'Cilandak',
+      kelurahan: currentUser.kelurahan || 'Cilandak Barat',
+    });
     setFormNoHp('');
     setFormError(null);
     setIsAddModalOpen(true);
-  };
-
-  const handleRoleSelection = (role: 'tim_sukses' | 'kader' | 'admin') => {
-    setFormRole(role);
-    const randomCode = Math.floor(1000 + Math.random() * 9000);
-    setFormIdPegawai(
-      role === 'tim_sukses'
-        ? `TS-${randomCode}`
-        : role === 'kader'
-        ? `KAD-${randomCode}`
-        : `ADM-${randomCode}`
-    );
-    setFormDivisi(
-      role === 'tim_sukses'
-        ? 'Divisi Bappilu & Teritori'
-        : role === 'kader'
-        ? 'Divisi Saksi & Penggalangan'
-        : 'Divisi Administrasi & IT'
-    );
-    if (!formJabatan || formJabatan === 'Koordinator Pemenangan Wilayah' || formJabatan === 'Relawan Saksi TPS' || formJabatan === 'Staf Admin Operasional') {
-      setFormJabatan(
-        role === 'tim_sukses'
-          ? 'Koordinator Pemenangan Wilayah'
-          : role === 'kader'
-          ? 'Relawan Saksi TPS'
-          : 'Staf Admin Operasional'
-      );
-    }
   };
 
   const handleSubmitNewUser = async (e: React.FormEvent) => {
@@ -257,51 +273,87 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
     }
 
     const cleanUsername = formUsername.trim().toLowerCase().replace(/\s+/g, '');
+    const cleanEmail = (formEmail.trim() || `${cleanUsername}@swaraku.com`).toLowerCase();
+
     const isDuplicate = userAccounts.some(
-      (u) => u.username.toLowerCase() === cleanUsername
+      (u) =>
+        u.username.toLowerCase() === cleanUsername ||
+        (u.email && u.email.toLowerCase() === cleanEmail)
     );
 
     if (isDuplicate) {
-      setFormError(`Username "${cleanUsername}" sudah digunakan. Silakan gunakan username lain.`);
+      setFormError(
+        `Username "${cleanUsername}" atau email "${cleanEmail}" sudah terdaftar. Gunakan yang lain.`
+      );
       return;
     }
 
-    const validKaders = formRole === 'tim_sukses'
-      ? kaderInputs.filter((k) => k.nama.trim().length > 0)
-      : [];
+    const effectiveRole: CreatableRole = isKorcamRelawanMode ? 'relawan' : formRole;
+    const validKorcams =
+      effectiveRole === 'tim_sukses'
+        ? korcamInputs.filter((k) => k.nama.trim().length > 0)
+        : [];
+
+    const wilayahLabel =
+      formatWilayahLabel(formWilayahObj) ||
+      formWilayahObj.kota ||
+      currentUser.wilayah ||
+      'Indonesia';
 
     const nowTs = Date.now();
     const newAccount: UserAccount = {
       id: `acc-${nowTs}`,
-      role: formRole,
+      role: effectiveRole,
       nama: formNama.trim(),
       username: cleanUsername,
-      email: `${cleanUsername}@swaraku.com`,
+      email: cleanEmail,
       password: formPassword || '123456',
       idPegawai: formIdPegawai.trim() || `ID-${nowTs.toString().slice(-4)}`,
-      divisi: formDivisi.trim() || (formRole === 'tim_sukses' ? 'Divisi Bappilu' : 'Divisi Saksi'),
-      jabatan:
-        formJabatan.trim() ||
-        (formRole === 'tim_sukses' ? 'Tim Sukses Pemenangan' : 'Relawan Saksi TPS'),
-      wilayah: formWilayah.trim() || 'Dapil Terkait',
-      tps: formRole === 'kader' ? formTps.trim() || 'TPS 048' : undefined,
-      noHp: formNoHp.trim() || '0812' + Math.floor(10000000 + Math.random() * 90000000),
+      divisi: formDivisi.trim(),
+      jabatan: formJabatan.trim(),
+      wilayah: wilayahLabel,
+      kota: formWilayahObj.kota,
+      kecamatan: formWilayahObj.kecamatan,
+      kelurahan: formWilayahObj.kelurahan,
+      tps: formWilayahObj.kelurahan || undefined,
+      noHp: formNoHp.trim() || '',
       status: 'Aktif',
+      points: 0,
       dibuatPada: new Date().toLocaleDateString('id-ID', {
         day: 'numeric',
         month: 'short',
         year: 'numeric',
       }),
-      fotoUrl: '', // Tanpa foto bawaan sistem, user dapat upload foto sendiri nanti
-      kaderList: validKaders.map((k) => k.nama.trim()),
-      kaderIds: validKaders.map((_, idx) => `acc-kader-${nowTs}-${idx + 1}`),
+      fotoUrl: '',
+      ...(effectiveRole === 'relawan' && currentUser.role === 'kader'
+        ? {
+            korcamId: currentUser.id,
+            korcamNama: currentUser.nama,
+            timSuksesId: currentUser.timSuksesId,
+            timSuksesNama: currentUser.timSuksesNama,
+          }
+        : {}),
+      ...(effectiveRole === 'relawan' && currentUser.role === 'tim_sukses'
+        ? {
+            timSuksesId: currentUser.id,
+            timSuksesNama: currentUser.nama,
+          }
+        : {}),
+      ...(effectiveRole === 'kader' && currentUser.role === 'tim_sukses'
+        ? {
+            timSuksesId: currentUser.id,
+            timSuksesNama: currentUser.nama,
+            didaftarkanOlehTimSukses: currentUser.nama,
+          }
+        : {}),
+      kaderList: validKorcams.map((k) => k.nama.trim()),
+      kaderIds: validKorcams.map((_, idx) => `acc-korcam-${nowTs}-${idx + 1}`),
     };
 
     setIsSavingUser(true);
     setFormError(null);
 
     try {
-      // 1. Simpan Akun Utama (Tim Sukses / Admin / Kader) ke Cloud Database
       const res = await onAddUser(newAccount);
       if (res === false) {
         setFormError('Gagal menyimpan ke Database Server. Silakan periksa koneksi.');
@@ -309,94 +361,95 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
         return;
       }
 
-      // 2. OTOMATIS BUAT AKUN KADER BINAAN JIKA DITAMBAHKAN PADA PENDAFTARAN TIM SUKSES
-      const createdKaders: UserAccount[] = [];
-      if (formRole === 'tim_sukses' && validKaders.length > 0) {
-        for (let i = 0; i < validKaders.length; i++) {
-          const k = validKaders[i];
+      if (onAwardPoints) {
+        const delta =
+          effectiveRole === 'relawan'
+            ? 25
+            : effectiveRole === 'kader' || effectiveRole === 'tim_sukses'
+            ? 50
+            : 0;
+        if (delta > 0) {
+          await Promise.resolve(onAwardPoints(delta));
+        }
+      }
+
+      // Auto-create Korcam binaan if added under Korwil
+      const createdKorcams: UserAccount[] = [];
+      if (effectiveRole === 'tim_sukses' && validKorcams.length > 0) {
+        for (let i = 0; i < validKorcams.length; i++) {
+          const k = validKorcams[i];
           const kCleanNama = k.nama.trim();
           let baseKUsername = (k.username || '').trim().toLowerCase().replace(/\s+/g, '');
           if (!baseKUsername) {
             const slug = kCleanNama.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
-            baseKUsername = `kader_${slug || 'user'}_${Math.floor(100 + Math.random() * 900)}`;
+            baseKUsername = `korcam_${slug || 'user'}_${Math.floor(100 + Math.random() * 900)}`;
           }
 
-          // Pastikan username unik
           let finalUsername = baseKUsername;
           let counter = 1;
           while (
             userAccounts.some((u) => u.username.toLowerCase() === finalUsername) ||
-            createdKaders.some((u) => u.username.toLowerCase() === finalUsername) ||
+            createdKorcams.some((u) => u.username.toLowerCase() === finalUsername) ||
             finalUsername === cleanUsername
           ) {
             finalUsername = `${baseKUsername}${counter}`;
             counter++;
           }
 
-          const kaderAcc: UserAccount = {
-            id: `acc-kader-${nowTs}-${i + 1}`,
+          const korcamKel = k.kelurahan.trim() || formWilayahObj.kelurahan;
+          const korcamAcc: UserAccount = {
+            id: `acc-korcam-${nowTs}-${i + 1}`,
             role: 'kader',
             nama: kCleanNama,
             username: finalUsername,
             email: `${finalUsername}@swaraku.com`,
             password: (k.password || '123456').trim(),
-            idPegawai: `KD-${Math.floor(1000 + Math.random() * 9000)}`,
-            divisi: 'Divisi Saksi & Penggalangan',
-            jabatan: 'Kader Lapangan / Saksi TPS',
-            wilayah: formWilayah.trim() || 'Dapil Terkait',
-            tps: k.tps.trim() || formTps.trim() || 'TPS 048',
-            noHp: k.noHp.trim() || '0813' + Math.floor(10000000 + Math.random() * 90000000),
-            status: 'Aktif',
-            dibuatPada: new Date().toLocaleDateString('id-ID', {
-              day: 'numeric',
-              month: 'short',
-              year: 'numeric',
+            idPegawai: `KC-${Math.floor(1000 + Math.random() * 9000)}`,
+            divisi: 'Divisi Koordinator Kecamatan',
+            jabatan: 'Koordinator Kecamatan (Korcam)',
+            wilayah: formatWilayahLabel({
+              kota: formWilayahObj.kota,
+              kecamatan: formWilayahObj.kecamatan,
+              kelurahan: korcamKel,
             }),
+            kota: formWilayahObj.kota,
+            kecamatan: formWilayahObj.kecamatan,
+            kelurahan: korcamKel,
+            tps: korcamKel || undefined,
+            noHp: k.noHp.trim() || '',
+            status: 'Aktif',
+            points: 0,
+            dibuatPada: newAccount.dibuatPada,
             fotoUrl: '',
             timSuksesId: newAccount.id,
             timSuksesNama: newAccount.nama,
             didaftarkanOlehTimSukses: newAccount.nama,
           };
 
-          // Simpan akun kader otomatis ke Cloud Database
-          await onAddUser(kaderAcc);
-          createdKaders.push(kaderAcc);
+          await onAddUser(korcamAcc);
+          createdKorcams.push(korcamAcc);
         }
       }
 
-      // Otomatis terhubung ke Peta Suara Swaraku jika role Tim Sukses
-      if (formRole === 'tim_sukses' && onSaveTimSukses) {
-        const parsedWilayah = formWilayah.trim();
-        let detectedKec = 'Kecamatan Penjaringan';
-        let detectedKota = 'Jakarta Utara';
-
-        if (parsedWilayah) {
-          if (parsedWilayah.toLowerCase().includes('penjaringan')) {
-            detectedKec = 'Kecamatan Penjaringan';
-            detectedKota = 'Jakarta Utara';
-          } else if (parsedWilayah.includes(',')) {
-            const parts = parsedWilayah.split(',').map((p) => p.trim());
-            detectedKec = parts[0] || 'Kecamatan Terdaftar';
-            detectedKota = parts[1] || 'DKI Jakarta';
-          } else {
-            detectedKec = parsedWilayah;
-            detectedKota = parsedWilayah.includes('Kota') || parsedWilayah.includes('Kab') ? parsedWilayah : 'DKI Jakarta';
-          }
-        }
-
-        const smartCoords = lookupSmartCoordinates('', detectedKec, detectedKota) || {
-          lat: -6.1264,
-          lng: 106.7885,
+      // Auto-sync Korwil to Peta Suara
+      if (effectiveRole === 'tim_sukses' && onSaveTimSukses) {
+        const smartCoords = lookupSmartCoordinates(
+          formWilayahObj.kelurahan,
+          formWilayahObj.kecamatan,
+          formWilayahObj.kota
+        ) || {
+          lat: -6.2088,
+          lng: 106.8456,
         };
 
         onSaveTimSukses({
           id: `ts-${newAccount.id}`,
           nama: newAccount.nama,
-          noHp: newAccount.noHp || '081288219901',
-          jabatan: newAccount.jabatan || 'Koordinator Tim Sukses',
-          kota: detectedKota,
-          kecamatanList: [detectedKec.toLowerCase().startsWith('kec') ? detectedKec : `Kecamatan ${detectedKec}`],
-          kelurahanList: ['Seluruh Kelurahan'],
+          noHp: newAccount.noHp || '-',
+          jabatan: newAccount.jabatan || 'Koordinator Wilayah (Korwil)',
+          kota: formWilayahObj.kota || 'Jakarta Selatan',
+          kecamatanList: formWilayahObj.kecamatan ? [formWilayahObj.kecamatan] : ['Semua Kecamatan'],
+          kelurahanList: formWilayahObj.kelurahan ? [formWilayahObj.kelurahan] : ['Semua Kelurahan'],
           lat: smartCoords.lat,
           lng: smartCoords.lng,
           waktuDaftar: newAccount.dibuatPada || 'Baru Didaftarkan',
@@ -405,17 +458,20 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
       }
 
       setIsAddModalOpen(false);
-      setKaderInputs([]);
+      setKorcamInputs([]);
 
-      // Tampilkan ringkasan kredensial akun kader jika ada kader yang dibuat otomatis
-      if (createdKaders.length > 0) {
+      if (createdKorcams.length > 0) {
         setCreatedSummaryModal({
-          timSukses: newAccount,
-          kaders: createdKaders,
+          korwil: newAccount,
+          korcams: createdKorcams,
         });
       }
-    } catch (err: any) {
-      setFormError(err?.message || 'Gagal menyimpan akun ke server Cloud Database.');
+    } catch (err: unknown) {
+      setFormError(
+        err instanceof Error
+          ? err.message
+          : 'Gagal menyimpan akun ke server Cloud Database.'
+      );
     } finally {
       setIsSavingUser(false);
     }
@@ -426,12 +482,16 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
     setEditRole(user.role);
     setEditNama(user.nama);
     setEditUsername(user.username);
+    setEditEmail(user.email || `${user.username}@swaraku.com`);
     setEditPassword(user.password || '123456');
     setEditIdPegawai(user.idPegawai || '');
     setEditDivisi(user.divisi || '');
     setEditJabatan(user.jabatan || '');
-    setEditWilayah(user.wilayah || 'DAPIL DKI JAKARTA II');
-    setEditTps(user.tps || 'TPS 048');
+    setEditWilayahObj({
+      kota: user.kota || '',
+      kecamatan: user.kecamatan || '',
+      kelurahan: user.kelurahan || '',
+    });
     setEditNoHp(user.noHp || '');
     setEditStatus(user.status || 'Aktif');
     setEditError(null);
@@ -447,31 +507,38 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
     }
 
     const cleanUsername = editUsername.trim().toLowerCase().replace(/\s+/g, '');
+    const cleanEmail = (editEmail.trim() || `${cleanUsername}@swaraku.com`).toLowerCase();
     const isDuplicate = userAccounts.some(
       (u) => u.id !== editingUserId && u.username.toLowerCase() === cleanUsername
     );
 
     if (isDuplicate) {
-      setEditError(`Username "${cleanUsername}" sudah digunakan akun lain. Silakan pilih username unik.`);
+      setEditError(`Username "${cleanUsername}" sudah digunakan akun lain.`);
       return;
     }
 
     const targetUser = userAccounts.find((u) => u.id === editingUserId);
     if (!targetUser) return;
 
+    const wilayahLabel =
+      formatWilayahLabel(editWilayahObj) || targetUser.wilayah || 'Indonesia';
+
     const updatedAccount: UserAccount = {
       ...targetUser,
-      role: editRole,
+      role: isKorcamRelawanMode ? 'relawan' : editRole,
       nama: editNama.trim(),
       username: cleanUsername,
-      email: `${cleanUsername}@swaraku.com`,
+      email: cleanEmail,
       password: editPassword.trim() || targetUser.password || '123456',
       idPegawai: editIdPegawai.trim() || targetUser.idPegawai,
       divisi: editDivisi.trim() || targetUser.divisi,
       jabatan: editJabatan.trim() || targetUser.jabatan,
-      wilayah: editWilayah.trim() || targetUser.wilayah,
-      tps: editRole === 'kader' ? (editTps.trim() || 'TPS 048') : undefined,
-      noHp: editNoHp.trim() || targetUser.noHp,
+      wilayah: wilayahLabel,
+      kota: editWilayahObj.kota || targetUser.kota,
+      kecamatan: editWilayahObj.kecamatan || targetUser.kecamatan,
+      kelurahan: editWilayahObj.kelurahan || targetUser.kelurahan,
+      tps: editWilayahObj.kelurahan || targetUser.kelurahan || undefined,
+      noHp: editNoHp.trim(),
       status: editStatus,
     };
 
@@ -483,8 +550,8 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
         await onUpdateUser(updatedAccount);
       }
       setIsEditModalOpen(false);
-    } catch (err: any) {
-      setEditError(err?.message || 'Gagal menyimpan perubahan ke server.');
+    } catch (err: unknown) {
+      setEditError(err instanceof Error ? err.message : 'Gagal menyimpan perubahan.');
     } finally {
       setIsSavingEdit(false);
     }
@@ -503,16 +570,9 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
 
   const handleSubmitResetPassword = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resettingUser) return;
-    if (!newPasswordValue.trim()) return;
-
-    const updatedUser: UserAccount = {
-      ...resettingUser,
-      password: newPasswordValue.trim(),
-    };
-
+    if (!resettingUser || !newPasswordValue.trim()) return;
     if (onUpdateUser) {
-      onUpdateUser(updatedUser);
+      onUpdateUser({ ...resettingUser, password: newPasswordValue.trim() });
     }
     setIsResetModalOpen(false);
   };
@@ -529,13 +589,13 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200">
             <Shield className="w-3 h-3 text-purple-600" />
-            <span>Super Admin</span>
+            <span>SuperAdmin</span>
           </span>
         );
       case 'admin':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-teal-100 text-teal-800 border border-teal-200">
-            <Shield className="w-3 h-3 text-teal-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-800 border border-indigo-200">
+            <Shield className="w-3 h-3 text-indigo-600" />
             <span>Admin</span>
           </span>
         );
@@ -543,14 +603,21 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-cyan-100 text-cyan-800 border border-cyan-200">
             <Building2 className="w-3 h-3 text-cyan-600" />
-            <span>Tim Sukses</span>
+            <span>Korwil</span>
           </span>
         );
       case 'kader':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
             <UserCheck className="w-3 h-3 text-emerald-600" />
-            <span>Kader</span>
+            <span>Korcam</span>
+          </span>
+        );
+      case 'relawan':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200">
+            <Users className="w-3 h-3 text-amber-600" />
+            <span>Relawan</span>
           </span>
         );
       default:
@@ -559,31 +626,53 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
   };
 
   const generateWhatsAppShareLink = (user: UserAccount) => {
-    const text = `Halo Bapak/Ibu ${encodeURIComponent(user.nama)},%0A%0AAkun akses aplikasi pemenangan SWARAKU Anda telah aktif:%0A- Role: ${encodeURIComponent(user.role === 'tim_sukses' ? 'Tim Sukses' : user.role === 'kader' ? 'Kader / Saksi TPS' : 'Admin')}%0A- Username: ${encodeURIComponent(user.username)}%0A- Password / PIN: ${encodeURIComponent(user.password || '123456')}%0A- Wilayah: ${encodeURIComponent(user.wilayah)} ${user.tps ? `(${encodeURIComponent(user.tps)})` : ''}%0A%0ASilakan masuk melalui aplikasi SWARAKU. Terima kasih.`;
+    const roleLabel =
+      user.role === 'tim_sukses'
+        ? 'Korwil'
+        : user.role === 'kader'
+        ? 'Korcam'
+        : user.role === 'relawan'
+        ? 'Relawan'
+        : 'Admin';
+    const wilayahText =
+      formatWilayahLabel({
+        kota: user.kota || '',
+        kecamatan: user.kecamatan || '',
+        kelurahan: user.kelurahan || '',
+      }) || user.wilayah;
+    const text = `Halo Bapak/Ibu ${encodeURIComponent(user.nama)},%0A%0AAkun akses aplikasi SWARAKU Anda telah aktif:%0A- Role: ${encodeURIComponent(roleLabel)}%0A- Username: ${encodeURIComponent(user.username)}%0A- Email: ${encodeURIComponent(user.email || '-')}%0A- Password / PIN: ${encodeURIComponent(user.password || '123456')}%0A- Wilayah: ${encodeURIComponent(wilayahText)}%0A%0ASilakan masuk melalui aplikasi SWARAKU. Terima kasih.`;
     return `https://wa.me/${(user.noHp || '').replace(/\D/g, '')}?text=${text}`;
   };
 
   return (
     <div className="space-y-6">
-      {/* Top Banner: Module 08 Header */}
+      {/* Top Banner */}
       <div className="p-6 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl border border-indigo-700/50 shadow-md space-y-4 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-2">
               <span className="text-[10px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2.5 py-0.5 rounded-full font-mono">
-                KHUSUS SUPER ADMIN
+                {isKorcamRelawanMode ? 'KHUSUS KORCAM' : 'ADMIN & SUPERADMIN'}
               </span>
               <span className="text-xs text-slate-300 font-bold flex items-center gap-1">
                 <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span>Manajemen Hak Akses &amp; Akun Lapangan</span>
+                <span>
+                  {isKorcamRelawanMode
+                    ? 'Manajemen Relawan Tanpa Batas · Auto Whitelist Login'
+                    : 'Manajemen Hak Akses Korwil, Korcam, Relawan & Admin'}
+                </span>
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              Penambahan Role atau User Akun Tim Sukses &amp; Kader
+              {isKorcamRelawanMode
+                ? 'Kelola User Relawan Wilayah Anda'
+                : 'Kelola Role & User Akun (Korwil, Korcam & Relawan)'}
             </h1>
             <p className="text-xs text-slate-300 max-w-2xl mt-1 leading-relaxed">
-              Otoritas penuh Super Admin untuk mendaftarkan akun baru Tim Sukses dan Kader Lapangan, mengatur penempatan wilayah &amp; TPS, mengaktifkan/menonaktifkan akses, serta membagikan kredensial login langsung ke relawan.
+              {isKorcamRelawanMode
+                ? 'Tambahkan akun Relawan sebanyak yang dibutuhkan di Kelurahan/Kecamatan Anda. Akun yang dibuat langsung aktif di halaman Login Relawan, tersinkron ke Monitoring Relawan, dan memberikan +25 Poin otomatis.'
+                : 'Kelola seluruh akun terdaftar (Whitelist) untuk Korwil, Korcam, Relawan, dan Admin. Daftarkan email Google untuk akses SSO Tim Support serta atur struktur wilayah Kota → Kecamatan → Kelurahan.'}
             </p>
           </div>
 
@@ -600,126 +689,198 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                   }
                 }}
                 disabled={isRefreshingUsers}
-                className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
-                title="Muat ulang seluruh daftar akun langsung dari Server Cloud Database"
+                className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
               >
-                <RefreshCw className={`w-3.5 h-3.5 text-cyan-300 ${isRefreshingUsers ? 'animate-spin' : ''}`} />
+                <RefreshCw
+                  className={`w-3.5 h-3.5 text-cyan-300 ${isRefreshingUsers ? 'animate-spin' : ''}`}
+                />
                 <span className="hidden sm:inline">Refresh Cloud</span>
               </button>
             )}
 
-            <button
-              type="button"
-              onClick={() => setIsApiConfigOpen(true)}
-              className="px-3 py-2 bg-indigo-900/60 hover:bg-indigo-900 text-indigo-200 border border-indigo-400/30 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
-              title="Atur URL Web App Google Apps Script"
-            >
-              <Database className="w-3.5 h-3.5 text-indigo-300" />
-              <span className="hidden sm:inline">URL Cloud API</span>
-              <span className="sm:hidden">API</span>
-            </button>
-
-            <button
-              onClick={() => handleOpenAddModal('tim_sukses')}
-              className="px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
-            >
-              <Building2 className="w-4 h-4" />
-              <span>+ Tim Sukses</span>
-            </button>
-            <button
-              onClick={() => handleOpenAddModal('kader')}
-              className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
-            >
-              <UserCheck className="w-4 h-4" />
-              <span>+ Kader</span>
-            </button>
+            {isKorcamRelawanMode ? (
+              <button
+                type="button"
+                onClick={() => handleOpenAddModal('relawan')}
+                className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>+ Tambah Relawan (+25 Poin)</span>
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddModal('tim_sukses')}
+                  className="px-3 py-2 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Building2 className="w-3.5 h-3.5" />
+                  <span>+ Korwil</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddModal('kader')}
+                  className="px-3 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer"
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>+ Korcam</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddModal('relawan')}
+                  className="px-3 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>+ Relawan</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
 
         {/* Quick KPI Stat Counter */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-white/10 text-xs">
-          <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
-            <span className="text-[10px] text-slate-400 block font-mono">Total Akun Terdaftar</span>
-            <span className="text-xl font-black text-white font-mono mt-0.5 block">{totalUsers}</span>
-            <span className="text-[10px] text-teal-300">Semua Level Pengguna</span>
+        {isKorcamRelawanMode ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 border-t border-white/10 text-xs">
+            <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
+              <span className="text-[10px] text-amber-300 block font-mono">Total Relawan Binaan</span>
+              <span className="text-xl font-black text-white font-mono mt-0.5 block">
+                {relawanCount}
+              </span>
+              <span className="text-[10px] text-slate-300">Tanpa batas jumlah akun</span>
+            </div>
+            <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
+              <span className="text-[10px] text-emerald-300 block font-mono">Status Aktif Login</span>
+              <span className="text-xl font-black text-emerald-300 font-mono mt-0.5 block">
+                {activeCount}
+              </span>
+              <span className="text-[10px] text-slate-300">Terverifikasi di Whitelist</span>
+            </div>
+            <div className="p-3 bg-white/5 rounded-2xl border border-white/10 col-span-2 sm:col-span-1">
+              <span className="text-[10px] text-cyan-300 block font-mono">Wilayah Tugas Korcam</span>
+              <span className="text-sm font-black text-white mt-1 block truncate">
+                {formatWilayahLabel({
+                  kota: currentUser.kota || '',
+                  kecamatan: currentUser.kecamatan || '',
+                  kelurahan: currentUser.kelurahan || '',
+                }) || currentUser.wilayah}
+              </span>
+            </div>
           </div>
-          <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
-            <span className="text-[10px] text-purple-300 block font-mono">Akun Admin &amp; Super Admin</span>
-            <span className="text-xl font-black text-purple-200 font-mono mt-0.5 block">
-              {superAdminCount + adminCount}
-            </span>
-            <span className="text-[10px] text-purple-300 font-medium">{superAdminCount} Super, {adminCount} Admin</span>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2 border-t border-white/10 text-xs">
+            <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
+              <span className="text-[10px] text-slate-400 block font-mono">Total Akun</span>
+              <span className="text-xl font-black text-white font-mono mt-0.5 block">
+                {totalUsers}
+              </span>
+              <span className="text-[10px] text-teal-300">Whitelist Aktif</span>
+            </div>
+            <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
+              <span className="text-[10px] text-purple-300 block font-mono">Admin &amp; Super</span>
+              <span className="text-xl font-black text-purple-200 font-mono mt-0.5 block">
+                {superAdminCount + adminCount}
+              </span>
+              <span className="text-[10px] text-purple-300">
+                {superAdminCount} Super · {adminCount} Admin
+              </span>
+            </div>
+            <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
+              <span className="text-[10px] text-cyan-300 block font-mono">Korwil</span>
+              <span className="text-xl font-black text-cyan-300 font-mono mt-0.5 block">
+                {korwilCount}
+              </span>
+              <span className="text-[10px] text-slate-300">Koordinator Wilayah</span>
+            </div>
+            <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
+              <span className="text-[10px] text-emerald-300 block font-mono">Korcam</span>
+              <span className="text-xl font-black text-emerald-300 font-mono mt-0.5 block">
+                {korcamCount}
+              </span>
+              <span className="text-[10px] text-slate-300">Koordinator Kecamatan</span>
+            </div>
+            <div className="p-3 bg-white/5 rounded-2xl border border-white/10 col-span-2 sm:col-span-1">
+              <span className="text-[10px] text-amber-300 block font-mono">Relawan</span>
+              <span className="text-xl font-black text-amber-300 font-mono mt-0.5 block">
+                {relawanCount}
+              </span>
+              <span className="text-[10px] text-slate-300">Penggerak Lapangan</span>
+            </div>
           </div>
-          <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
-            <span className="text-[10px] text-cyan-300 block font-mono">Akun Tim Sukses</span>
-            <span className="text-xl font-black text-cyan-300 font-mono mt-0.5 block">{timSuksesCount}</span>
-            <span className="text-[10px] text-slate-300 font-medium">Bappilu &amp; Korwil</span>
-          </div>
-          <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
-            <span className="text-[10px] text-emerald-300 block font-mono">Akun Kader / Saksi TPS</span>
-            <span className="text-xl font-black text-emerald-300 font-mono mt-0.5 block">{kaderCount}</span>
-            <span className="text-[10px] text-slate-300 font-medium">Penggerak Lapangan</span>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Control Bar: Search & Role Filters */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-2xs">
-        {/* Search */}
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
           <input
             type="text"
-            placeholder="Cari user berdasarkan Nama, Username, Wilayah, TPS, atau No HP..."
+            placeholder="Cari berdasarkan Nama, Username, Email, Kelurahan, Kecamatan, Kota, atau No HP..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:border-cyan-500 font-medium"
           />
         </div>
 
-        {/* Role Filter Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-          <button
-            onClick={() => setRoleFilter('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
-              roleFilter === 'all'
-                ? 'bg-slate-900 text-white'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            Semua ({totalUsers})
-          </button>
-          <button
-            onClick={() => setRoleFilter('tim_sukses')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
-              roleFilter === 'tim_sukses'
-                ? 'bg-cyan-700 text-white'
-                : 'bg-cyan-50 text-cyan-800 hover:bg-cyan-100 border border-cyan-200'
-            }`}
-          >
-            Tim Sukses ({timSuksesCount})
-          </button>
-          <button
-            onClick={() => setRoleFilter('kader')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
-              roleFilter === 'kader'
-                ? 'bg-emerald-700 text-white'
-                : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
-            }`}
-          >
-            Kader ({kaderCount})
-          </button>
-          <button
-            onClick={() => setRoleFilter('admin')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
-              roleFilter === 'admin'
-                ? 'bg-teal-700 text-white'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            Admin ({adminCount})
-          </button>
-        </div>
+        {!isKorcamRelawanMode && (
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+            <button
+              type="button"
+              onClick={() => setRoleFilter('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                roleFilter === 'all'
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              Semua ({totalUsers})
+            </button>
+            <button
+              type="button"
+              onClick={() => setRoleFilter('tim_sukses')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                roleFilter === 'tim_sukses'
+                  ? 'bg-cyan-700 text-white'
+                  : 'bg-cyan-50 text-cyan-800 hover:bg-cyan-100 border border-cyan-200'
+              }`}
+            >
+              Korwil ({korwilCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setRoleFilter('kader')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                roleFilter === 'kader'
+                  ? 'bg-emerald-700 text-white'
+                  : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
+              }`}
+            >
+              Korcam ({korcamCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setRoleFilter('relawan')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                roleFilter === 'relawan'
+                  ? 'bg-amber-600 text-white'
+                  : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+              }`}
+            >
+              Relawan ({relawanCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setRoleFilter('admin')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                roleFilter === 'admin'
+                  ? 'bg-indigo-700 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              Admin ({adminCount})
+            </button>
+          </div>
+        )}
       </div>
 
       {/* User Accounts Table */}
@@ -728,11 +889,13 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4 text-cyan-700" />
             <h3 className="text-sm font-black text-slate-900">
-              Daftar Pengguna Sistem SWARAKU ({filteredUsers.length})
+              {isKorcamRelawanMode
+                ? `Daftar Akun Relawan Terdaftar (${filteredUsers.length})`
+                : `Daftar Akun Whitelist SWARAKU (${filteredUsers.length})`}
             </h3>
           </div>
           <span className="text-[11px] text-slate-500 font-medium">
-            Menampilkan pengguna aktif &amp; terdaftar
+            Tersinkron ke Login &amp; Monitoring Relawan
           </span>
         </div>
 
@@ -742,19 +905,23 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
               <tr>
                 <th className="p-3.5">Pengguna &amp; Identitas</th>
                 <th className="p-3.5">Role</th>
-                <th className="p-3.5 bg-purple-50/60 text-purple-900 font-bold">Username &amp; Password (Kredensial)</th>
-                <th className="p-3.5">Jabatan &amp; Posisi</th>
-                <th className="p-3.5">Wilayah Tugas &amp; TPS</th>
+                <th className="p-3.5 bg-purple-50/60 text-purple-900 font-bold">
+                  Kredensial Login (Whitelist)
+                </th>
+                <th className="p-3.5">Wilayah Tugas (Kota / Kec / Kel)</th>
                 <th className="p-3.5">Kontak WhatsApp</th>
+                <th className="p-3.5 text-center">Poin</th>
                 <th className="p-3.5 text-center">Status</th>
-                <th className="p-3.5 text-center">Aksi Super Admin</th>
+                <th className="p-3.5 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredUsers.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-slate-400">
-                    Tidak ada akun pengguna yang sesuai dengan filter pencarian.
+                    {isKorcamRelawanMode
+                      ? 'Belum ada akun Relawan terdaftar. Klik "+ Tambah Relawan" untuk menambahkan.'
+                      : 'Tidak ada akun pengguna yang sesuai dengan filter pencarian.'}
                   </td>
                 </tr>
               ) : (
@@ -762,6 +929,12 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                   const isCurrent = user.id === currentUser.id;
                   const isProtectedSuperAdmin = user.role === 'super_admin';
                   const isActive = user.status !== 'Nonaktif';
+                  const wilayahLine =
+                    formatWilayahLabel({
+                      kota: user.kota || '',
+                      kecamatan: user.kecamatan || '',
+                      kelurahan: user.kelurahan || '',
+                    }) || user.wilayah;
 
                   return (
                     <tr key={user.id} className="hover:bg-slate-50/70 transition-colors">
@@ -780,10 +953,12 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                                 user.role === 'super_admin'
                                   ? 'bg-purple-600'
                                   : user.role === 'admin'
-                                  ? 'bg-teal-600'
+                                  ? 'bg-indigo-600'
                                   : user.role === 'tim_sukses'
                                   ? 'bg-cyan-600'
-                                  : 'bg-slate-800'
+                                  : user.role === 'kader'
+                                  ? 'bg-emerald-600'
+                                  : 'bg-amber-600'
                               }`}
                             >
                               {(user.nama || 'SW').slice(0, 2).toUpperCase()}
@@ -798,9 +973,19 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                                 </span>
                               )}
                             </div>
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              ID: {user.id.slice(-6)}
+                            <span className="text-[10px] text-slate-500 block">
+                              {user.jabatan || '-'}
                             </span>
+                            {user.korcamNama && (
+                              <span className="text-[10px] text-emerald-700 font-semibold block">
+                                Korcam: {user.korcamNama}
+                              </span>
+                            )}
+                            {user.timSuksesNama && !user.korcamNama && (
+                              <span className="text-[10px] text-cyan-700 font-semibold block">
+                                Korwil: {user.timSuksesNama}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -808,12 +993,13 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                       {/* Role */}
                       <td className="p-3.5">{getRoleBadge(user.role)}</td>
 
-                      {/* Username & Password (Terlihat Langsung Khusus Super Admin) */}
+                      {/* Credentials */}
                       <td className="p-3.5 bg-purple-50/20">
-                        <div className="space-y-1.5 min-w-[170px]">
+                        <div className="space-y-1 min-w-[180px]">
                           <div className="flex items-center justify-between bg-white px-2 py-1 rounded-lg border border-slate-200 shadow-2xs">
-                            <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">User:</span>
-                            <span className="font-mono font-bold text-slate-900 text-xs">@{user.username}</span>
+                            <span className="font-mono font-bold text-slate-900 text-[11px] truncate">
+                              @{user.username}
+                            </span>
                             <button
                               type="button"
                               onClick={() => handleCopyText(user.username, `u-${user.id}`)}
@@ -827,17 +1013,21 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                               )}
                             </button>
                           </div>
-                          <div className="flex items-center justify-between bg-purple-50 px-2 py-1 rounded-lg border border-purple-200 shadow-2xs">
-                            <div className="flex items-center gap-1">
-                              <KeyRound className="w-3 h-3 text-purple-600 shrink-0" />
-                              <span className="text-[9px] text-purple-600 font-bold uppercase tracking-wider">Pass:</span>
-                            </div>
-                            <span className="font-mono font-black text-purple-950 text-xs tracking-wider">
+                          {user.email && (
+                            <p className="text-[10px] text-slate-500 truncate px-1">{user.email}</p>
+                          )}
+                          <div className="flex items-center justify-between bg-purple-50 px-2 py-1 rounded-lg border border-purple-200">
+                            <span className="text-[9px] text-purple-600 font-bold uppercase">
+                              Pass:
+                            </span>
+                            <span className="font-mono font-black text-purple-950 text-[11px]">
                               {user.password || '123456'}
                             </span>
                             <button
                               type="button"
-                              onClick={() => handleCopyText(user.password || '123456', `p-${user.id}`)}
+                              onClick={() =>
+                                handleCopyText(user.password || '123456', `p-${user.id}`)
+                              }
                               className="text-purple-400 hover:text-purple-700 ml-1 cursor-pointer p-0.5"
                               title="Salin Password"
                             >
@@ -851,61 +1041,24 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                         </div>
                       </td>
 
-                      {/* Jabatan & Divisi */}
+                      {/* Wilayah */}
                       <td className="p-3.5">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-semibold text-slate-800">{user.jabatan}</span>
-                          {user.idPegawai && (
-                            <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
-                              {user.idPegawai}
-                            </span>
-                          )}
+                        <div className="flex items-start gap-1.5 text-slate-700 font-medium max-w-[220px]">
+                          <MapPin className="w-3.5 h-3.5 text-cyan-600 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-semibold text-slate-900 leading-snug">
+                              {wilayahLine || '-'}
+                            </p>
+                            {user.kelurahan && (
+                              <span className="inline-block mt-0.5 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                Kel. {user.kelurahan}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        {user.divisi && (
-                          <span className="text-[10px] text-cyan-800 font-semibold block mt-0.5">
-                            {user.divisi}
-                          </span>
-                        )}
-
-                        {/* Indikator Relasi Tim Sukses & Kader */}
-                        {user.role === 'kader' && (user.timSuksesNama || user.didaftarkanOlehTimSukses) && (
-                          <div className="flex items-center gap-1 text-[10px] font-bold text-cyan-800 bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-200 mt-1 max-w-[220px]" title={`Didaftarkan oleh Tim Sukses: ${user.timSuksesNama || user.didaftarkanOlehTimSukses}`}>
-                            <Building2 className="w-3 h-3 text-cyan-600 shrink-0" />
-                            <span className="truncate">TS: {user.timSuksesNama || user.didaftarkanOlehTimSukses}</span>
-                          </div>
-                        )}
-
-                        {user.role === 'tim_sukses' && user.kaderList && user.kaderList.length > 0 && (
-                          <div className="mt-1">
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                              <Users className="w-3 h-3 text-emerald-600 shrink-0" />
-                              <span>{user.kaderList.length} Kader Binaan</span>
-                            </span>
-                            <span className="block text-[10px] text-slate-500 font-medium truncate max-w-[210px] mt-0.5" title={user.kaderList.join(', ')}>
-                              {user.kaderList.join(', ')}
-                            </span>
-                          </div>
-                        )}
-
-                        <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
-                          Dibuat: {user.dibuatPada || 'Sistem'}
-                        </span>
                       </td>
 
-                      {/* Wilayah & TPS */}
-                      <td className="p-3.5">
-                        <div className="flex items-center gap-1 text-slate-700 font-medium">
-                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>{user.wilayah}</span>
-                        </div>
-                        {user.tps && (
-                          <span className="inline-block mt-0.5 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                            {user.tps}
-                          </span>
-                        )}
-                      </td>
-
-                      {/* No HP & WA share */}
+                      {/* WA */}
                       <td className="p-3.5">
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono text-slate-800">{user.noHp || '-'}</span>
@@ -915,7 +1068,7 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                               target="_blank"
                               rel="noreferrer"
                               className="p-1 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors"
-                              title="Kirim info login akun ke WhatsApp relawan"
+                              title="Kirim kredensial login ke WhatsApp"
                             >
                               <MessageSquare className="w-3.5 h-3.5" />
                             </a>
@@ -923,7 +1076,15 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                         </div>
                       </td>
 
-                      {/* Status Toggle */}
+                      {/* Poin */}
+                      <td className="p-3.5 text-center">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 font-mono font-bold text-[11px]">
+                          <Award className="w-3 h-3" />
+                          {(user.points || 0).toLocaleString('id-ID')}
+                        </span>
+                      </td>
+
+                      {/* Status */}
                       <td className="p-3.5 text-center">
                         <button
                           type="button"
@@ -936,7 +1097,6 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                               ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 cursor-pointer'
                               : 'bg-rose-100 text-rose-800 hover:bg-rose-200 cursor-pointer'
                           }`}
-                          title={isProtectedSuperAdmin ? 'Akun Super Admin tidak dapat dinonaktifkan' : 'Klik untuk ubah status akun'}
                         >
                           {isActive ? (
                             <>
@@ -967,18 +1127,20 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                             type="button"
                             onClick={() => handleOpenResetModal(user)}
                             className="p-1.5 text-purple-700 hover:text-purple-950 hover:bg-purple-50 rounded-lg transition-colors cursor-pointer"
-                            title="Reset Password Akun"
+                            title="Reset Password"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
                           </button>
                           {isProtectedSuperAdmin || isCurrent ? (
-                            <span className="text-[10px] text-slate-400 font-mono px-1">Dilindungi</span>
+                            <span className="text-[10px] text-slate-400 font-mono px-1">
+                              Dilindungi
+                            </span>
                           ) : (
                             <button
                               type="button"
                               onClick={() => setConfirmDeleteUser(user)}
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                              title="Hapus Akun Pengguna"
+                              title="Hapus Akun"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -994,11 +1156,10 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
         </div>
       </div>
 
-      {/* Modal: Tambah User / Role Baru */}
+      {/* Modal: Tambah User Baru */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 my-auto animate-in fade-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto">
-            {/* Header */}
+          <div className="bg-white rounded-3xl max-w-xl w-full p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 my-auto max-h-[92vh] overflow-y-auto">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-xs">
@@ -1006,10 +1167,12 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
-                    Tambah Pengguna &amp; Penetapan Role
+                    {isKorcamRelawanMode
+                      ? 'Tambah Akun Relawan Baru (+25 Poin)'
+                      : 'Tambah Pengguna & Penetapan Role'}
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Buat akun login baru untuk Tim Sukses atau Kader Lapangan
+                    Akun langsung aktif di sistem login Whitelist &amp; Monitoring Relawan
                   </p>
                 </div>
               </div>
@@ -1030,63 +1193,73 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
             )}
 
             <form onSubmit={handleSubmitNewUser} className="space-y-4 text-xs">
-              {/* Role Selection Picker */}
-              <div>
-                <label className="text-xs font-bold text-slate-800 block mb-1.5">
-                  Pilih Role Pengguna:
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleRoleSelection('tim_sukses')}
-                    className={`p-3 rounded-2xl border-2 text-left cursor-pointer transition-all flex flex-col justify-between ${
-                      formRole === 'tim_sukses'
-                        ? 'border-cyan-600 bg-cyan-50/70 shadow-xs ring-2 ring-cyan-200'
-                        : 'border-slate-200 hover:border-slate-300 bg-slate-50/50'
-                    }`}
-                  >
-                    <Building2 className={`w-5 h-5 mb-1 ${formRole === 'tim_sukses' ? 'text-cyan-600' : 'text-slate-400'}`} />
-                    <div>
-                      <span className="font-extrabold text-slate-900 block text-xs">Tim Sukses</span>
-                      <span className="text-[10px] text-slate-500 block leading-tight">Direktur &amp; Korwil</span>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleRoleSelection('kader')}
-                    className={`p-3 rounded-2xl border-2 text-left cursor-pointer transition-all flex flex-col justify-between ${
-                      formRole === 'kader'
-                        ? 'border-emerald-600 bg-emerald-50/70 shadow-xs ring-2 ring-emerald-200'
-                        : 'border-slate-200 hover:border-slate-300 bg-slate-50/50'
-                    }`}
-                  >
-                    <UserCheck className={`w-5 h-5 mb-1 ${formRole === 'kader' ? 'text-emerald-600' : 'text-slate-400'}`} />
-                    <div>
-                      <span className="font-extrabold text-slate-900 block text-xs">Kader</span>
-                      <span className="text-[10px] text-slate-500 block leading-tight">Relawan Saksi TPS</span>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleRoleSelection('admin')}
-                    className={`p-3 rounded-2xl border-2 text-left cursor-pointer transition-all flex flex-col justify-between ${
-                      formRole === 'admin'
-                        ? 'border-teal-600 bg-teal-50/70 shadow-xs ring-2 ring-teal-200'
-                        : 'border-slate-200 hover:border-slate-300 bg-slate-50/50'
-                    }`}
-                  >
-                    <Shield className={`w-5 h-5 mb-1 ${formRole === 'admin' ? 'text-teal-600' : 'text-slate-400'}`} />
-                    <div>
-                      <span className="font-extrabold text-slate-900 block text-xs">Admin</span>
-                      <span className="text-[10px] text-slate-500 block leading-tight">Operasional 7 Modul</span>
-                    </div>
-                  </button>
+              {/* Role Selector (Hidden when Korcam is only creating Relawan) */}
+              {!isKorcamRelawanMode && (
+                <div>
+                  <label className="text-xs font-bold text-slate-800 block mb-1.5">
+                    Pilih Role Pengguna:
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      {
+                        role: 'tim_sukses' as CreatableRole,
+                        label: 'Korwil',
+                        sub: 'Koord. Wilayah',
+                        icon: Building2,
+                        activeClass: 'border-cyan-600 bg-cyan-50/70 ring-2 ring-cyan-200',
+                      },
+                      {
+                        role: 'kader' as CreatableRole,
+                        label: 'Korcam',
+                        sub: 'Koord. Kecamatan',
+                        icon: UserCheck,
+                        activeClass: 'border-emerald-600 bg-emerald-50/70 ring-2 ring-emerald-200',
+                      },
+                      {
+                        role: 'relawan' as CreatableRole,
+                        label: 'Relawan',
+                        sub: 'Lapangan',
+                        icon: Users,
+                        activeClass: 'border-amber-600 bg-amber-50/70 ring-2 ring-amber-200',
+                      },
+                      {
+                        role: 'admin' as CreatableRole,
+                        label: 'Admin',
+                        sub: 'Operasional',
+                        icon: Shield,
+                        activeClass: 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-200',
+                      },
+                    ].map((opt) => {
+                      const Icon = opt.icon;
+                      const active = formRole === opt.role;
+                      return (
+                        <button
+                          key={opt.role}
+                          type="button"
+                          onClick={() => applyRoleDefaults(opt.role)}
+                          className={`p-2.5 rounded-2xl border-2 text-left cursor-pointer transition-all ${
+                            active
+                              ? opt.activeClass
+                              : 'border-slate-200 hover:border-slate-300 bg-slate-50/50'
+                          }`}
+                        >
+                          <Icon
+                            className={`w-4 h-4 mb-1 ${active ? 'text-slate-900' : 'text-slate-400'}`}
+                          />
+                          <span className="font-extrabold text-slate-900 block text-xs">
+                            {opt.label}
+                          </span>
+                          <span className="text-[10px] text-slate-500 block leading-tight">
+                            {opt.sub}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Nama Lengkap & Username */}
+              {/* Nama & Username */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 block mb-1">
@@ -1098,7 +1271,7 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                     placeholder="Contoh: Hendra Pratama"
                     value={formNama}
                     onChange={(e) => setFormNama(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-semibold focus:outline-hidden focus:border-cyan-500"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-semibold"
                   />
                 </div>
                 <div>
@@ -1108,19 +1281,36 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="Contoh: hendra_kader"
+                    placeholder="Contoh: hendra_relawan"
                     value={formUsername}
-                    onChange={(e) => setFormUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono font-bold focus:outline-hidden focus:border-cyan-500"
+                    onChange={(e) =>
+                      setFormUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))
+                    }
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono font-bold"
                   />
                 </div>
               </div>
 
-              {/* Password & No HP */}
+              {/* Email (Whitelist Google SSO) & Password */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    Password / PIN Default
+                    Email (Wajib sesuai Google untuk SSO)
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="email"
+                      placeholder="nama@gmail.com"
+                      value={formEmail}
+                      onChange={(e) => setFormEmail(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                    Password / PIN Login
                   </label>
                   <div className="relative">
                     <KeyRound className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
@@ -1128,10 +1318,14 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                       type="text"
                       value={formPassword}
                       onChange={(e) => setFormPassword(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono font-bold focus:outline-hidden focus:border-cyan-500"
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono font-bold"
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* No HP & Jabatan */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 block mb-1">
                     Nomor WhatsApp / HP
@@ -1143,42 +1337,10 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                       placeholder="08123456789"
                       value={formNoHp}
                       onChange={(e) => setFormNoHp(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono focus:outline-hidden focus:border-cyan-500"
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono"
                     />
                   </div>
                 </div>
-              </div>
-
-              {/* ID Pegawai & Divisi */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    ID Pegawai / NIK Tim
-                  </label>
-                  <input
-                    type="text"
-                    value={formIdPegawai}
-                    onChange={(e) => setFormIdPegawai(e.target.value)}
-                    placeholder="Contoh: TS-4821"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono font-semibold focus:outline-hidden focus:border-cyan-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    Divisi / Bagian
-                  </label>
-                  <input
-                    type="text"
-                    value={formDivisi}
-                    onChange={(e) => setFormDivisi(e.target.value)}
-                    placeholder="Contoh: Divisi Bappilu & Teritori"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:outline-hidden focus:border-cyan-500"
-                  />
-                </div>
-              </div>
-
-              {/* Jabatan & Wilayah */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 block mb-1">
                     Jabatan / Posisi
@@ -1187,148 +1349,100 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                     type="text"
                     value={formJabatan}
                     onChange={(e) => setFormJabatan(e.target.value)}
-                    placeholder="Contoh: Koordinator Relawan Cilandak"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:outline-hidden focus:border-cyan-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    Wilayah / Dapil Penugasan
-                  </label>
-                  <input
-                    type="text"
-                    value={formWilayah}
-                    onChange={(e) => setFormWilayah(e.target.value)}
-                    placeholder="Contoh: Kel. Sukamaju, Kec. Cilandak"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:outline-hidden focus:border-cyan-500"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs"
                   />
                 </div>
               </div>
 
-              {/* TPS Penugasan (Only for Kader) */}
-              {formRole === 'kader' && (
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    Nomor TPS Penugasan Saksi
-                  </label>
-                  <input
-                    type="text"
-                    value={formTps}
-                    onChange={(e) => setFormTps(e.target.value)}
-                    placeholder="Contoh: TPS 048"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-bold focus:outline-hidden focus:border-cyan-500"
-                  />
-                </div>
-              )}
+              {/* Hierarchical Wilayah Selector: Kota -> Kecamatan -> Kelurahan */}
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                <p className="text-[11px] font-extrabold text-slate-800 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-cyan-600" />
+                  <span>Wilayah Penugasan (Kota → Kecamatan → Kelurahan)</span>
+                </p>
+                <WilayahSelector
+                  value={formWilayahObj}
+                  onChange={setFormWilayahObj}
+                  required
+                  compact
+                />
+              </div>
 
-              {/* Opsi Tambah Kader Binaan Otomatis (Khusus Pendaftaran Tim Sukses) */}
-              {formRole === 'tim_sukses' && (
+              {/* Optional Korcam Binaan when registering Korwil */}
+              {!isKorcamRelawanMode && formRole === 'tim_sukses' && (
                 <div className="p-4 bg-gradient-to-br from-cyan-50/70 via-teal-50/40 to-slate-50 rounded-2xl border-2 border-dashed border-cyan-300 space-y-3">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-cyan-600 text-white flex items-center justify-center shrink-0">
-                        <UserCheck className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-black text-cyan-950 flex items-center gap-1.5">
-                          <span>Sebutkan Nama Kader Binaan (Opsional)</span>
-                          <span className="text-[9px] font-bold bg-cyan-200/80 text-cyan-900 px-1.5 py-0.2 rounded-full uppercase">
-                            Auto Akun
-                          </span>
-                        </h4>
-                        <p className="text-[10px] text-slate-600 leading-tight mt-0.5">
-                          Setiap kader yang ditambahkan di sini akan <b>otomatis dibuatkan akun Kader</b> di server cloud dan langsung terhubung ke profil Tim Sukses ini.
-                        </p>
-                      </div>
+                    <div>
+                      <h4 className="text-xs font-black text-cyan-950">
+                        Tambah Korcam Binaan Otomatis (Opsional)
+                      </h4>
+                      <p className="text-[10px] text-slate-600 mt-0.5">
+                        Setiap Korcam di bawah akan otomatis dibuatkan akun login dan ditautkan ke Korwil ini.
+                      </p>
                     </div>
-
                     <button
                       type="button"
-                      onClick={handleAddKaderRow}
-                      className="px-2.5 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-xl text-xs flex items-center gap-1 cursor-pointer transition-colors shrink-0 shadow-2xs active:scale-95"
+                      onClick={handleAddKorcamRow}
+                      className="px-2.5 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white font-bold rounded-xl text-xs flex items-center gap-1 cursor-pointer shrink-0"
                     >
                       <UserPlus className="w-3.5 h-3.5" />
-                      <span>+ Tambah Kader</span>
+                      <span>+ Korcam</span>
                     </button>
                   </div>
 
-                  {kaderInputs.length === 0 ? (
-                    <div className="p-3 bg-white/70 rounded-xl border border-slate-200 text-center text-slate-500 text-[11px] space-y-1">
-                      <span>Belum ada kader binaan ditambahkan.</span>
-                      <p className="text-[10px] text-slate-400">
-                        Klik tombol <b>"+ Tambah Kader"</b> di atas jika ingin mendaftarkan kader yang dibawahi oleh Tim Sukses ini.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
-                      {kaderInputs.map((kader, idx) => (
+                  {korcamInputs.length > 0 && (
+                    <div className="space-y-2.5 max-h-52 overflow-y-auto pr-1">
+                      {korcamInputs.map((item, idx) => (
                         <div
-                          key={kader.id}
-                          className="p-3 bg-white rounded-xl border border-cyan-200 shadow-2xs space-y-2"
+                          key={item.id}
+                          className="p-3 bg-white rounded-xl border border-cyan-200 space-y-2"
                         >
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] font-bold font-mono text-cyan-800 bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-200">
-                              Kader Binaan #{idx + 1}
+                              Korcam Binaan #{idx + 1}
                             </span>
                             <button
                               type="button"
-                              onClick={() => handleRemoveKaderRow(kader.id)}
-                              className="text-slate-400 hover:text-rose-600 p-1 rounded-md transition-colors cursor-pointer"
-                              title="Hapus baris kader ini"
+                              onClick={() => handleRemoveKorcamRow(item.id)}
+                              className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
-
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-700 block mb-0.5">
-                                Nama Lengkap Kader <span className="text-rose-500">*</span>
-                              </label>
-                              <input
-                                type="text"
-                                value={kader.nama}
-                                onChange={(e) => handleUpdateKaderRow(kader.id, 'nama', e.target.value)}
-                                placeholder="Contoh: Ahmad Fauzi"
-                                required={kaderInputs.length > 0}
-                                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-hidden focus:border-cyan-500 text-slate-900"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-700 block mb-0.5">
-                                TPS Penugasan Saksi
-                              </label>
-                              <input
-                                type="text"
-                                value={kader.tps}
-                                onChange={(e) => handleUpdateKaderRow(kader.id, 'tps', e.target.value)}
-                                placeholder="TPS 048"
-                                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-900 focus:outline-hidden focus:border-cyan-500"
-                              />
-                            </div>
+                            <input
+                              type="text"
+                              value={item.nama}
+                              onChange={(e) =>
+                                handleUpdateKorcamRow(item.id, 'nama', e.target.value)
+                              }
+                              placeholder="Nama Lengkap Korcam *"
+                              required
+                              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold"
+                            />
+                            <input
+                              type="text"
+                              value={item.kelurahan}
+                              onChange={(e) =>
+                                handleUpdateKorcamRow(item.id, 'kelurahan', e.target.value)
+                              }
+                              placeholder="Kelurahan Penugasan"
+                              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                            />
                           </div>
-
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-700 block mb-0.5">
-                                Nomor WhatsApp / HP
-                              </label>
-                              <input
-                                type="tel"
-                                value={kader.noHp}
-                                onChange={(e) => handleUpdateKaderRow(kader.id, 'noHp', e.target.value)}
-                                placeholder="0812XXXXXXXX"
-                                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900 focus:outline-hidden focus:border-cyan-500"
-                              />
-                            </div>
-
-                            <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 flex flex-col justify-center text-[10px]">
-                              <span className="text-slate-400 font-bold uppercase text-[9px]">Kredensial Login Otomatis:</span>
-                              <div className="flex items-center justify-between text-slate-800 font-mono font-bold mt-0.5">
-                                <span>@{kader.username || 'kader_auto'}</span>
-                                <span className="text-purple-700">Pass: 123456</span>
-                              </div>
+                            <input
+                              type="tel"
+                              value={item.noHp}
+                              onChange={(e) =>
+                                handleUpdateKorcamRow(item.id, 'noHp', e.target.value)
+                              }
+                              placeholder="No. WA / HP"
+                              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono"
+                            />
+                            <div className="bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 text-[10px] font-mono font-bold text-slate-700 flex items-center justify-between">
+                              <span>@{item.username || 'korcam_auto'}</span>
+                              <span className="text-purple-700">123456</span>
                             </div>
                           </div>
                         </div>
@@ -1338,35 +1452,22 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 </div>
               )}
 
-              {/* Submit Buttons */}
+              {/* Submit */}
               <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingUser}
-                  className="px-5 py-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 text-white font-black rounded-xl text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 disabled:opacity-60"
+                  className="px-5 py-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 text-white font-black rounded-xl text-xs shadow-md cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
                 >
-                  {isSavingUser ? (
-                    <>
-                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>Menyimpan ke Cloud Database...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      <span>
-                        {formRole === 'tim_sukses' && kaderInputs.filter((k) => k.nama.trim().length > 0).length > 0
-                          ? `Daftarkan Tim Sukses & ${kaderInputs.filter((k) => k.nama.trim().length > 0).length} Kader ke Server`
-                          : 'Daftarkan Akun ke Server'}
-                      </span>
-                    </>
-                  )}
+                  <Check className="w-4 h-4" />
+                  <span>{isSavingUser ? 'Menyimpan...' : 'Daftarkan Akun ke Server'}</span>
                 </button>
               </div>
             </form>
@@ -1374,22 +1475,21 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
         </div>
       )}
 
-      {/* Modal: Edit User & Kredensial */}
+      {/* Modal: Edit User */}
       {isEditModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 my-auto animate-in fade-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto">
-            {/* Header */}
+          <div className="bg-white rounded-3xl max-w-xl w-full p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 my-auto max-h-[92vh] overflow-y-auto">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-600 to-teal-600 text-white flex items-center justify-center shadow-xs">
                   <Edit2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
+                  <h3 className="text-base sm:text-lg font-black text-slate-900">
                     Edit Akun &amp; Kredensial Pengguna
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Perubahan data akun langsung tersinkronisasi saat pengguna melakukan login
+                  <p className="text-xs text-slate-500">
+                    Perubahan langsung aktif di sistem login &amp; wilayah
                   </p>
                 </div>
               </div>
@@ -1402,7 +1502,6 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
               </button>
             </div>
 
-            {/* Error Message */}
             {editError && (
               <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-bold flex items-center gap-2">
                 <XCircle className="w-4 h-4 shrink-0 text-rose-600" />
@@ -1410,178 +1509,126 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
               </div>
             )}
 
-            <form onSubmit={handleSubmitEditUser} className="space-y-4 text-left">
-              {/* Role Selection */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1.5">
-                  Tingkatan Role / Akses
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditRole('tim_sukses')}
-                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                      editRole === 'tim_sukses'
-                        ? 'border-cyan-600 bg-cyan-50 text-cyan-900 font-bold ring-2 ring-cyan-500/20'
-                        : 'border-slate-200 hover:border-slate-300 text-slate-700'
-                    }`}
-                  >
-                    <Building2 className="w-4 h-4 text-cyan-600 mb-1" />
-                    <span className="text-xs block font-bold">Tim Sukses</span>
-                    <span className="text-[10px] text-slate-500">Akses Bappilu &amp; Peta</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setEditRole('kader')}
-                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                      editRole === 'kader'
-                        ? 'border-emerald-600 bg-emerald-50 text-emerald-900 font-bold ring-2 ring-emerald-500/20'
-                        : 'border-slate-200 hover:border-slate-300 text-slate-700'
-                    }`}
-                  >
-                    <UserCheck className="w-4 h-4 text-emerald-600 mb-1" />
-                    <span className="text-xs block font-bold">Kader Saksi</span>
-                    <span className="text-[10px] text-slate-500">Input KTP &amp; Form C1</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setEditRole('admin')}
-                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                      editRole === 'admin'
-                        ? 'border-teal-600 bg-teal-50 text-teal-900 font-bold ring-2 ring-teal-500/20'
-                        : 'border-slate-200 hover:border-slate-300 text-slate-700'
-                    }`}
-                  >
-                    <Shield className="w-4 h-4 text-teal-600 mb-1" />
-                    <span className="text-xs block font-bold">Admin</span>
-                    <span className="text-[10px] text-slate-500">7 Modul Operasional</span>
-                  </button>
+            <form onSubmit={handleSubmitEditUser} className="space-y-4 text-left text-xs">
+              {!isKorcamRelawanMode && editRole !== 'super_admin' && (
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1.5">
+                    Role / Tingkatan Akses
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {(
+                      [
+                        { role: 'tim_sukses', label: 'Korwil' },
+                        { role: 'kader', label: 'Korcam' },
+                        { role: 'relawan', label: 'Relawan' },
+                        { role: 'admin', label: 'Admin' },
+                      ] as { role: UserRole; label: string }[]
+                    ).map((r) => (
+                      <button
+                        key={r.role}
+                        type="button"
+                        onClick={() => setEditRole(r.role)}
+                        className={`p-2 rounded-xl border text-center font-bold cursor-pointer ${
+                          editRole === r.role
+                            ? 'border-cyan-600 bg-cyan-50 text-cyan-900'
+                            : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+              )}
+
+              {/* Status */}
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                  <input
+                    type="radio"
+                    name="editStatus"
+                    checked={editStatus === 'Aktif'}
+                    onChange={() => setEditStatus('Aktif')}
+                    className="accent-emerald-600"
+                  />
+                  <span className="text-emerald-700 font-bold">Aktif</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                  <input
+                    type="radio"
+                    name="editStatus"
+                    checked={editStatus === 'Nonaktif'}
+                    onChange={() => setEditStatus('Nonaktif')}
+                    className="accent-rose-600"
+                  />
+                  <span className="text-rose-700 font-bold">Nonaktif</span>
+                </label>
               </div>
 
-              {/* Status Akun */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                  Status Akses Akun
-                </label>
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-800 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="editStatus"
-                      checked={editStatus === 'Aktif'}
-                      onChange={() => setEditStatus('Aktif')}
-                      className="accent-emerald-600"
-                    />
-                    <span className="text-emerald-700 font-bold">Aktif (Dapat Login)</span>
-                  </label>
-                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-800 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="editStatus"
-                      checked={editStatus === 'Nonaktif'}
-                      onChange={() => setEditStatus('Nonaktif')}
-                      className="accent-rose-600"
-                    />
-                    <span className="text-rose-700 font-bold">Nonaktif (Blokir Login)</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Nama Lengkap & Username */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    Nama Lengkap <span className="text-rose-500">*</span>
+                    Nama Lengkap *
                   </label>
                   <input
                     type="text"
                     value={editNama}
                     onChange={(e) => setEditNama(e.target.value)}
                     required
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:outline-hidden focus:border-cyan-500"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs"
                   />
                 </div>
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    Username Login <span className="text-rose-500">*</span>
+                    Username Login *
                   </label>
                   <input
                     type="text"
                     value={editUsername}
                     onChange={(e) => setEditUsername(e.target.value)}
                     required
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono focus:outline-hidden focus:border-cyan-500"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono"
                   />
                 </div>
               </div>
 
-              {/* Password & WhatsApp */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    Password / PIN Login
+                    Email (Google SSO Whitelist)
                   </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={editPassword}
-                      onChange={(e) => setEditPassword(e.target.value)}
-                      placeholder="Password login akun"
-                      className="w-full px-3 py-2 pl-8 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono focus:outline-hidden focus:border-cyan-500"
-                    />
-                    <KeyRound className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                  </div>
+                  <input
+                    type="email"
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs"
+                  />
                 </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                    Password / PIN
+                  </label>
+                  <input
+                    type="text"
+                    value={editPassword}
+                    onChange={(e) => setEditPassword(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 block mb-1">
                     Nomor WhatsApp / HP
                   </label>
-                  <div className="relative">
-                    <input
-                      type="tel"
-                      value={editNoHp}
-                      onChange={(e) => setEditNoHp(e.target.value)}
-                      placeholder="Contoh: 0812XXXXXXXX"
-                      className="w-full px-3 py-2 pl-8 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono focus:outline-hidden focus:border-cyan-500"
-                    />
-                    <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                  </div>
-                </div>
-              </div>
-
-              {/* ID Pegawai & Divisi */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    ID Pegawai / NIK Tim
-                  </label>
                   <input
-                    type="text"
-                    value={editIdPegawai}
-                    onChange={(e) => setEditIdPegawai(e.target.value)}
-                    placeholder="Contoh: TS-4821"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono font-semibold focus:outline-hidden focus:border-cyan-500"
+                    type="tel"
+                    value={editNoHp}
+                    onChange={(e) => setEditNoHp(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-mono"
                   />
                 </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    Divisi / Bagian
-                  </label>
-                  <input
-                    type="text"
-                    value={editDivisi}
-                    onChange={(e) => setEditDivisi(e.target.value)}
-                    placeholder="Contoh: Divisi Bappilu & Teritori"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:outline-hidden focus:border-cyan-500"
-                  />
-                </div>
-              </div>
-
-              {/* Jabatan & Wilayah */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 block mb-1">
                     Jabatan / Posisi
@@ -1590,63 +1637,37 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                     type="text"
                     value={editJabatan}
                     onChange={(e) => setEditJabatan(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:outline-hidden focus:border-cyan-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    Wilayah Penugasan
-                  </label>
-                  <input
-                    type="text"
-                    value={editWilayah}
-                    onChange={(e) => setEditWilayah(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:outline-hidden focus:border-cyan-500"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs"
                   />
                 </div>
               </div>
 
-              {/* TPS Penugasan (Khusus Kader) */}
-              {editRole === 'kader' && (
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                    Nomor TPS Penugasan Saksi
-                  </label>
-                  <input
-                    type="text"
-                    value={editTps}
-                    onChange={(e) => setEditTps(e.target.value)}
-                    placeholder="Contoh: TPS 048"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs font-bold focus:outline-hidden focus:border-cyan-500"
-                  />
-                </div>
-              )}
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                <p className="text-[11px] font-extrabold text-slate-800">
+                  Wilayah Tugas (Kota → Kecamatan → Kelurahan)
+                </p>
+                <WilayahSelector
+                  value={editWilayahObj}
+                  onChange={setEditWilayahObj}
+                  compact
+                />
+              </div>
 
-              {/* Submit Buttons */}
               <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsEditModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingEdit}
-                  className="px-5 py-2 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-700 hover:to-teal-700 text-white font-black rounded-xl text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 disabled:opacity-60"
+                  className="px-5 py-2 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-700 hover:to-teal-700 text-white font-black rounded-xl text-xs shadow-md cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
                 >
-                  {isSavingEdit ? (
-                    <>
-                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>Menyimpan ke Cloud Database...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      <span>Simpan Perubahan ke Server</span>
-                    </>
-                  )}
+                  <Check className="w-4 h-4" />
+                  <span>{isSavingEdit ? 'Menyimpan...' : 'Simpan Perubahan'}</span>
                 </button>
               </div>
             </form>
@@ -1654,24 +1675,16 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
         </div>
       )}
 
-      {/* Modal: Reset Password Pengguna */}
+      {/* Modal: Reset Password */}
       {isResetModalOpen && resettingUser && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 my-auto animate-in fade-in zoom-in-95 duration-200 text-left">
-            {/* Header */}
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 text-left">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-xs">
-                  <RotateCcw className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
-                    Reset Password Pengguna
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Ubah password akses untuk {resettingUser.nama}
-                  </p>
-                </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900">Reset Password Pengguna</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {resettingUser.nama} (@{resettingUser.username})
+                </p>
               </div>
               <button
                 type="button"
@@ -1681,71 +1694,39 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-
-            {/* User Credential Info Box */}
-            <div className="p-3.5 bg-purple-50/70 rounded-2xl border border-purple-200 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600 font-medium">Nama Akun:</span>
-                <span className="font-bold text-slate-900">{resettingUser.nama}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600 font-medium">Username Login:</span>
-                <span className="font-mono font-bold text-purple-950">@{resettingUser.username}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600 font-medium">Password Saat Ini:</span>
-                <span className="font-mono font-black text-slate-900 bg-white px-2 py-0.5 rounded border border-purple-200">
-                  {resettingUser.password || '123456'}
-                </span>
-              </div>
-            </div>
-
             <form onSubmit={handleSubmitResetPassword} className="space-y-4">
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold text-slate-700">
-                    Password / PIN Baru
-                  </label>
+                  <label className="text-xs font-bold text-slate-700">Password / PIN Baru</label>
                   <button
                     type="button"
                     onClick={handleGenerateRandomPin}
-                    className="text-[11px] font-bold text-purple-700 hover:text-purple-900 flex items-center gap-1 cursor-pointer"
+                    className="text-[11px] font-bold text-purple-700 hover:text-purple-900 cursor-pointer"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Acak PIN 6-Digit</span>
+                    Acak PIN 6-Digit
                   </button>
                 </div>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={newPasswordValue}
-                    onChange={(e) => setNewPasswordValue(e.target.value)}
-                    required
-                    placeholder="Masukkan password baru..."
-                    className="w-full px-3.5 py-2.5 pl-9 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-hidden focus:border-purple-600 focus:bg-white"
-                  />
-                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                </div>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Setelah disimpan, user wajib memasukkan password baru ini untuk login. Password lama otomatis tidak berlaku.
-                </p>
+                <input
+                  type="text"
+                  value={newPasswordValue}
+                  onChange={(e) => setNewPasswordValue(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono font-bold text-slate-900"
+                />
               </div>
-
-              {/* Action Buttons */}
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsResetModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 text-white font-black rounded-xl text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
+                  className="px-5 py-2 bg-purple-700 hover:bg-purple-800 text-white font-black rounded-xl text-xs cursor-pointer"
                 >
-                  <Check className="w-4 h-4" />
-                  <span>Simpan Password Baru</span>
+                  Simpan Password Baru
                 </button>
               </div>
             </form>
@@ -1753,151 +1734,18 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
         </div>
       )}
 
-      {/* Modal: Konfigurasi Database Cloud (Google Apps Script Web App) */}
-      {isApiConfigOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 my-auto animate-in fade-in zoom-in-95 duration-200 text-left">
-            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-cyan-600 text-white flex items-center justify-center shadow-xs">
-                  <Database className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900 leading-tight">
-                    Pengaturan Cloud Database (Google Sheets API)
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Hubungkan database user terpusat via Google Apps Script Web App
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsApiConfigOpen(false)}
-                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Status Info */}
-            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-slate-600">Status Server:</span>
-                <span className={`inline-flex items-center gap-1 font-bold px-2 py-0.5 rounded-full text-[10px] ${
-                  isScriptUrlConfigured()
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : 'bg-amber-100 text-amber-800'
-                }`}>
-                  <span className={`w-2 h-2 rounded-full ${isScriptUrlConfigured() ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                  <span>{isScriptUrlConfigured() ? 'Tersambung ke Google Sheets' : 'Menggunakan Cloud Firestore'}</span>
-                </span>
-              </div>
-              <div className="text-[11px] text-slate-500 leading-relaxed">
-                URL ini digunakan untuk menyimpan seluruh akun user baru dan memvalidasi login secara lintas perangkat (multi-device) tanpa bergantung pada memori lokal browser.
-              </div>
-            </div>
-
-            {configToast && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{configToast}</span>
-              </div>
-            )}
-
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-slate-800 block mb-1">
-                  Google Apps Script Web App URL (SCRIPT_URL):
-                </label>
-                <div className="relative">
-                  <input
-                    type="url"
-                    value={customUrlInput}
-                    onChange={(e) => setCustomUrlInput(e.target.value)}
-                    placeholder="https://script.google.com/macros/s/AKfycb.../exec"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900 focus:outline-hidden focus:border-cyan-600 focus:bg-white"
-                  />
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Atau edit langsung konstanta <code className="bg-slate-100 px-1 py-0.5 rounded text-indigo-700 font-bold">SCRIPT_URL</code> di file <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">src/config/apiConfig.ts</code>.
-                </p>
-              </div>
-
-              {/* Quick Guide */}
-              <div className="p-3 bg-indigo-50/60 rounded-2xl border border-indigo-100 text-[11px] text-indigo-900 space-y-1">
-                <span className="font-bold block text-indigo-950">Panduan Deploy Google Apps Script:</span>
-                <ol className="list-decimal pl-4 space-y-0.5 text-slate-600">
-                  <li>Buka Google Sheets baru di <a href="https://sheets.new" target="_blank" rel="noreferrer" className="text-cyan-700 underline font-semibold">sheets.new</a></li>
-                  <li>Buka <b>Extensions &gt; Apps Script</b> dan paste kode dari file <code className="text-purple-700 font-mono">/backend/Code.gs</code></li>
-                  <li>Klik <b>Deploy &gt; New Deployment &gt; Web app</b></li>
-                  <li>Atur <i>Who has access</i> menjadi: <b>Anyone</b></li>
-                  <li>Salin Web App URL dan tempelkan di kotak atas</li>
-                </ol>
-              </div>
-            </div>
-
-            <div className="pt-2 flex items-center justify-between border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => {
-                  setCustomScriptUrl('');
-                  setCustomUrlInput('');
-                  setConfigToast('URL dikembalikan ke default.');
-                  setTimeout(() => setConfigToast(null), 2500);
-                  if (onRefreshUsers) onRefreshUsers();
-                }}
-                className="text-xs text-rose-600 hover:text-rose-800 font-bold cursor-pointer"
-              >
-                Reset ke Default
-              </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsApiConfigOpen(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
-                >
-                  Tutup
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setCustomScriptUrl(customUrlInput);
-                    setConfigToast('✅ URL Cloud API berhasil disimpan!');
-                    setTimeout(() => setConfigToast(null), 2500);
-                    if (onRefreshUsers) {
-                      await onRefreshUsers();
-                    }
-                  }}
-                  className="px-5 py-2 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-700 hover:to-cyan-700 text-white font-black rounded-xl text-xs shadow-md cursor-pointer flex items-center gap-1.5 active:scale-95"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>Simpan &amp; Uji Server</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Ringkasan Akun Tim Sukses & Kader yang Baru Saja Dibuat */}
+      {/* Modal: Ringkasan Korwil & Korcam Binaan */}
       {createdSummaryModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-xl w-full p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 my-auto animate-in fade-in zoom-in-95 duration-200 text-left">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200 my-auto text-left">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-600 text-white flex items-center justify-center shadow-xs">
-                  <CheckCircle2 className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
-                    Akun Berhasil Didaftarkan ke Server!
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    1 Akun Tim Sukses &amp; {createdSummaryModal.kaders.length} Akun Kader Binaan telah aktif di Cloud Database
-                  </p>
-                </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900">
+                  Akun Korwil &amp; Korcam Binaan Berhasil Dibuat!
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  1 Akun Korwil &amp; {createdSummaryModal.korcams.length} Akun Korcam aktif di Whitelist
+                </p>
               </div>
               <button
                 type="button"
@@ -1907,123 +1755,41 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-
-            {/* Tim Sukses Info Card */}
-            <div className="p-3.5 bg-cyan-50/70 rounded-2xl border border-cyan-200 space-y-1.5 text-xs">
-              <span className="text-[10px] font-black uppercase text-cyan-900 tracking-wider">
-                Akun Tim Sukses Pembina:
-              </span>
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="font-bold text-slate-900 block text-sm">{createdSummaryModal.timSukses.nama}</span>
-                  <span className="text-slate-500 font-mono text-[11px]">@{createdSummaryModal.timSukses.username}</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-[10px] text-slate-400 block font-mono">Password:</span>
-                  <span className="font-mono font-bold text-cyan-950 bg-white px-2 py-0.5 rounded border border-cyan-200">
-                    {createdSummaryModal.timSukses.password || '123456'}
-                  </span>
-                </div>
-              </div>
+            <div className="p-3.5 bg-cyan-50 rounded-2xl border border-cyan-200 text-xs">
+              <p className="font-bold text-slate-900">{createdSummaryModal.korwil.nama}</p>
+              <p className="font-mono text-slate-600">
+                @{createdSummaryModal.korwil.username} · Pass: {createdSummaryModal.korwil.password}
+              </p>
             </div>
-
-            {/* Kaders List */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                  <Users className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Kredensial Login Kader Binaan ({createdSummaryModal.kaders.length}):</span>
-                </span>
-                <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                  Tersimpan di Cloud Database
-                </span>
-              </div>
-
-              <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                {createdSummaryModal.kaders.map((k) => (
-                  <div
-                    key={k.id}
-                    className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
-                  >
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-slate-900">{k.nama}</span>
-                        {k.tps && (
-                          <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/70 px-1.5 py-0.2 rounded font-mono">
-                            {k.tps}
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[10px] text-slate-500 font-mono">
-                        User: <b className="text-slate-800">@{k.username}</b> · Pass: <b className="text-purple-700">{k.password}</b>
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                      <button
-                        type="button"
-                        onClick={() => handleCopyText(`User: ${k.username}\nPass: ${k.password}`, `sum-${k.id}`)}
-                        className="px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded-lg border border-slate-200 font-medium text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                        title="Salin Kredensial"
-                      >
-                        {copiedId === `sum-${k.id}` ? (
-                          <>
-                            <CheckCheck className="w-3 h-3 text-emerald-600" />
-                            <span className="text-emerald-700 font-bold">Tersalin</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3 h-3" />
-                            <span>Salin</span>
-                          </>
-                        )}
-                      </button>
-
-                      {k.noHp && (
-                        <a
-                          href={generateWhatsAppShareLink(k)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors"
-                          title="Kirim ke WhatsApp"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5" />
-                        </a>
-                      )}
-                    </div>
+            <div className="space-y-2 max-h-56 overflow-y-auto">
+              {createdSummaryModal.korcams.map((k) => (
+                <div
+                  key={k.id}
+                  className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs"
+                >
+                  <div>
+                    <p className="font-bold text-slate-900">{k.nama}</p>
+                    <p className="font-mono text-slate-600 text-[11px]">
+                      @{k.username} · Pass: {k.password}
+                    </p>
                   </div>
-                ))}
-              </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyText(`User: ${k.username}\nPass: ${k.password}`, `sum-${k.id}`)
+                    }
+                    className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 font-bold text-[11px] cursor-pointer"
+                  >
+                    {copiedId === `sum-${k.id}` ? 'Tersalin' : 'Salin'}
+                  </button>
+                </div>
+              ))}
             </div>
-
-            {/* Modal Bottom Actions */}
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  const allText = `=== KREDENSIAL LOGIN TIM SUKSES & KADER SWARAKU ===\n` +
-                    `TIM SUKSES: ${createdSummaryModal.timSukses.nama} (@${createdSummaryModal.timSukses.username})\n` +
-                    `Pass: ${createdSummaryModal.timSukses.password}\n\n` +
-                    `DAFTAR KADER BINAAN:\n` +
-                    createdSummaryModal.kaders
-                      .map((k, i) => `${i + 1}. ${k.nama} (TPS: ${k.tps || '-'}) -> Username: @${k.username} | Pass: ${k.password}`)
-                      .join('\n');
-                  handleCopyText(allText, 'copy-all-kaders');
-                }}
-                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
-              >
-                {copiedId === 'copy-all-kaders' ? (
-                  <CheckCheck className="w-3.5 h-3.5 text-emerald-600" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5" />
-                )}
-                <span>Salin Semua Kredensial</span>
-              </button>
-
+            <div className="flex justify-end">
               <button
                 type="button"
                 onClick={() => setCreatedSummaryModal(null)}
-                className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold rounded-xl text-xs cursor-pointer shadow-md active:scale-95 transition-all"
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs cursor-pointer"
               >
                 Selesai
               </button>
@@ -2032,7 +1798,7 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
         </div>
       )}
 
-      {/* Modal Konfirmasi Hapus Akun */}
+      {/* Modal: Konfirmasi Hapus */}
       {confirmDeleteUser && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl border border-slate-200">
@@ -2043,7 +1809,8 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">Hapus Akun Pengguna?</h3>
                 <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                  Akun <span className="font-bold text-slate-900">{confirmDeleteUser.nama}</span> (@{confirmDeleteUser.username}) akan dihapus permanen dari Cloud Database dan tidak dapat login kembali.
+                  Akun <span className="font-bold text-slate-900">{confirmDeleteUser.nama}</span> (@
+                  {confirmDeleteUser.username}) akan dihapus dari Whitelist dan tidak dapat login kembali.
                 </p>
               </div>
             </div>

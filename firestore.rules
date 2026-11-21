@@ -81,19 +81,26 @@ service cloud.firestore {
     function isValidUserAccount(data) {
       return data.keys().hasAll(['id', 'role', 'nama', 'username'])
         && data.keys().hasOnly([
-          'id', 'role', 'nama', 'username', 'email', 'jabatan', 'wilayah',
+          'id', 'role', 'nama', 'username', 'email', 'nik', 'jabatan', 'wilayah',
+          'kota', 'kecamatan', 'kelurahan', 'points',
           'idPegawai', 'divisi', 'tps', 'noHp', 'fotoUrl', 'password',
           'status', 'dibuatPada', 'updatedAt',
           'timSuksesId', 'timSuksesNama', 'didaftarkanOlehTimSukses',
+          'korcamId', 'korcamNama',
           'kaderList', 'kaderIds'
         ])
         && data.id is string && isValidId(data.id)
-        && data.role in ['super_admin', 'admin', 'tim_sukses', 'kader']
+        && data.role in ['super_admin', 'admin', 'tim_sukses', 'kader', 'relawan']
         && data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120
         && data.username is string && data.username.size() >= 1 && data.username.size() <= 80
         && (!('email' in data) || (data.email is string && data.email.size() <= 150))
+        && (!('nik' in data) || (data.nik is string && data.nik.size() <= 32))
         && (!('jabatan' in data) || (data.jabatan is string && data.jabatan.size() <= 160))
         && (!('wilayah' in data) || (data.wilayah is string && data.wilayah.size() <= 160))
+        && (!('kota' in data) || (data.kota is string && data.kota.size() <= 120))
+        && (!('kecamatan' in data) || (data.kecamatan is string && data.kecamatan.size() <= 120))
+        && (!('kelurahan' in data) || (data.kelurahan is string && data.kelurahan.size() <= 120))
+        && (!('points' in data) || (data.points is number && data.points >= 0 && data.points <= 1000000))
         && (!('idPegawai' in data) || (data.idPegawai is string && data.idPegawai.size() <= 60))
         && (!('divisi' in data) || (data.divisi is string && data.divisi.size() <= 120))
         && (!('tps' in data) || (data.tps is string && data.tps.size() <= 60))
@@ -106,8 +113,10 @@ service cloud.firestore {
         && (!('timSuksesId' in data) || (data.timSuksesId is string && data.timSuksesId.size() <= 128))
         && (!('timSuksesNama' in data) || (data.timSuksesNama is string && data.timSuksesNama.size() <= 120))
         && (!('didaftarkanOlehTimSukses' in data) || (data.didaftarkanOlehTimSukses is string && data.didaftarkanOlehTimSukses.size() <= 120))
-        && (!('kaderList' in data) || (data.kaderList is list && data.kaderList.size() <= 100 && (data.kaderList.size() == 0 || data.kaderList[0] is string)))
-        && (!('kaderIds' in data) || (data.kaderIds is list && data.kaderIds.size() <= 100 && (data.kaderIds.size() == 0 || data.kaderIds[0] is string)));
+        && (!('korcamId' in data) || (data.korcamId is string && data.korcamId.size() <= 128))
+        && (!('korcamNama' in data) || (data.korcamNama is string && data.korcamNama.size() <= 120))
+        && (!('kaderList' in data) || (data.kaderList is list && data.kaderList.size() <= 200 && (data.kaderList.size() == 0 || data.kaderList[0] is string)))
+        && (!('kaderIds' in data) || (data.kaderIds is list && data.kaderIds.size() <= 200 && (data.kaderIds.size() == 0 || data.kaderIds[0] is string)));
     }
 
     function isValidReferralCode(data) {
@@ -201,6 +210,36 @@ service cloud.firestore {
         && data.lastUpdated is timestamp;
     }
 
+    function isValidLiveCoord(lat, lng) {
+      return (lat == null && lng == null)
+        || (
+          lat is number && lng is number
+          && lat >= -90 && lat <= 90
+          && lng >= -180 && lng <= 180
+        );
+    }
+
+    function isValidLiveLocation(data, userId) {
+      return data.keys().hasAll(['userId', 'nama', 'role', 'gpsStatus', 'lastUpdated'])
+        && data.keys().hasOnly([
+          'userId', 'nama', 'role', 'timSuksesId', 'namaTimSukses',
+          'korcamId', 'namaKorcam',
+          'latitude', 'longitude', 'accuracy', 'address', 'gpsStatus', 'lastUpdated'
+        ])
+        && data.userId is string && isValidId(data.userId) && data.userId == userId
+        && data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 120
+        && data.role in ['Korwil', 'Korcam', 'Relawan', 'Tim Sukses', 'Kader']
+        && (!('timSuksesId' in data) || data.timSuksesId == null || (data.timSuksesId is string && data.timSuksesId.size() <= 128))
+        && (!('namaTimSukses' in data) || data.namaTimSukses == null || (data.namaTimSukses is string && data.namaTimSukses.size() <= 120))
+        && (!('korcamId' in data) || data.korcamId == null || (data.korcamId is string && data.korcamId.size() <= 128))
+        && (!('namaKorcam' in data) || data.namaKorcam == null || (data.namaKorcam is string && data.namaKorcam.size() <= 120))
+        && data.gpsStatus in ['Aktif', 'Tidak Aktif', 'Ditolak']
+        && isValidLiveCoord(data.latitude, data.longitude)
+        && (!('accuracy' in data) || data.accuracy == null || (data.accuracy is number && data.accuracy >= 0 && data.accuracy <= 100000))
+        && (!('address' in data) || data.address == null || (data.address is string && data.address.size() <= 300))
+        && data.lastUpdated is timestamp;
+    }
+
     // 4. Collection Match Blocks
 
     // STAFF ACCOUNTS (Kader, Tim Sukses, Admin, Super Admin - multi-device cloud login & management)
@@ -228,6 +267,28 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'namaKader', 'latitude', 'longitude', 'accuracy', 'address', 'gpsStatus', 'lastUpdated'
         ]);
+      allow delete: if isSuperAdmin() && isValidId(userId);
+    }
+
+    // LIVE LOCATIONS (Real-time GPS untuk Tim Sukses & Kader; Monitoring SuperAdmin, Admin, & Tim Sukses)
+    match /live_locations/{userId} {
+      allow get: if isValidId(userId);
+      allow list: if true;
+      allow create: if isValidId(userId)
+        && isValidLiveLocation(incoming(), userId)
+        && incoming().lastUpdated == request.time;
+      allow update: if isValidId(userId)
+        && incoming().lastUpdated == request.time
+        && (
+          (
+            isValidLiveLocation(incoming(), userId)
+            && incoming().userId == existing().userId
+          )
+          || (
+            incoming().diff(existing()).affectedKeys().hasOnly(['gpsStatus', 'lastUpdated'])
+            && incoming().gpsStatus == 'Tidak Aktif'
+          )
+        );
       allow delete: if isSuperAdmin() && isValidId(userId);
     }
 
@@ -376,66 +437,36 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // EVENTS (Public campaign schedule & map, Superadmin CRUD, Voters RSVP)
+    // EVENTS (Public campaign schedule & map, Tim Support Panel Manajemen Kampanye CRUD, RSVP)
     match /events/{eventId} {
       allow get: if isValidId(eventId);
       allow list: if true;
-      allow create: if isSuperAdmin()
-        && isValidId(eventId)
+      allow create: if isValidId(eventId)
         && isValidEvent(incoming())
         && incoming().createdAt == request.time;
       allow update: if isValidId(eventId)
         && isValidEvent(incoming())
-        && incoming().createdAt == existing().createdAt
-        && (
-          isSuperAdmin()
-          || (
-            incoming().title == existing().title
-            && incoming().partyName == existing().partyName
-            && incoming().region == existing().region
-            && incoming().eventDate == existing().eventDate
-            && incoming().pointReward == existing().pointReward
-            && incoming().address == existing().address
-            && incoming().lat == existing().lat
-            && incoming().lng == existing().lng
-            && incoming().diff(existing()).affectedKeys().hasOnly(['rsvpYes', 'rsvpNo'])
-          )
-        );
-      allow delete: if isSuperAdmin() && isValidId(eventId);
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(eventId);
     }
 
-    // REWARDS CATALOG (Non-PII public catalog)
+    // REWARDS CATALOG (Non-PII public catalog, Tim Support Panel Manajemen Kampanye CRUD)
     match /rewards/{rewardId} {
       allow get: if isValidId(rewardId);
       allow list: if true;
-      allow create: if isSuperAdmin()
-        && isValidId(rewardId)
+      allow create: if isValidId(rewardId)
         && isValidReward(incoming())
         && incoming().createdAt == request.time;
       allow update: if isValidId(rewardId)
         && isValidReward(incoming())
-        && incoming().createdAt == existing().createdAt
-        && (
-          isSuperAdmin()
-          || (
-            incoming().diff(existing()).affectedKeys().hasOnly(['stock'])
-            && existing().stock > 0
-            && incoming().stock == existing().stock - 1
-          )
-        );
-      allow delete: if isSuperAdmin() && isValidId(rewardId);
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(rewardId);
     }
 
-    // REWARD CLAIMS (PII Isolated: Owner & Superadmin)
+    // REWARD CLAIMS (Owner, SuperAdmin & Panel Manajemen Kampanye)
     match /reward_claims/{claimId} {
-      allow get: if isValidId(claimId) && (
-        isSuperAdmin()
-        || (isSignedIn() && resource.data.uid == request.auth.uid)
-        || isManualVoterId(resource.data.uid)
-      );
-      allow list: if isSuperAdmin()
-        || (isSignedIn() && resource.data.uid == request.auth.uid)
-        || isManualVoterId(resource.data.uid);
+      allow get: if isValidId(claimId);
+      allow list: if true;
       allow create: if isValidId(claimId)
         && isValidRewardClaim(incoming())
         && incoming().status == 'MENUNGGU'
@@ -445,8 +476,7 @@ service cloud.firestore {
         && incoming().pointUsed == get(/databases/$(database)/documents/rewards/$(incoming().rewardId)).data.pointCost
         && getAfter(/databases/$(database)/documents/rewards/$(incoming().rewardId)).data.stock == get(/databases/$(database)/documents/rewards/$(incoming().rewardId)).data.stock - 1
         && getAfter(/databases/$(database)/documents/voters/$(incoming().uid)).data.points == get(/databases/$(database)/documents/voters/$(incoming().uid)).data.points - incoming().pointUsed;
-      allow update: if isSuperAdmin()
-        && isValidId(claimId)
+      allow update: if isValidId(claimId)
         && isValidRewardClaim(incoming())
         && incoming().diff(existing()).affectedKeys().hasOnly(['status'])
         && existing().status == 'MENUNGGU'
@@ -454,16 +484,10 @@ service cloud.firestore {
       allow delete: if isSuperAdmin() && isValidId(claimId);
     }
 
-    // ASPIRATIONS (Owner & Superadmin)
+    // ASPIRATIONS (Owner, SuperAdmin & Panel Manajemen Kampanye)
     match /aspirations/{aspirationId} {
-      allow get: if isValidId(aspirationId) && (
-        isSuperAdmin()
-        || (isSignedIn() && resource.data.uid == request.auth.uid)
-        || isManualVoterId(resource.data.uid)
-      );
-      allow list: if isSuperAdmin()
-        || (isSignedIn() && resource.data.uid == request.auth.uid)
-        || isManualVoterId(resource.data.uid);
+      allow get: if isValidId(aspirationId);
+      allow list: if true;
       allow create: if isValidId(aspirationId)
         && isValidAspiration(incoming())
         && incoming().createdAt == request.time
@@ -471,19 +495,17 @@ service cloud.firestore {
       allow update, delete: if isSuperAdmin() && isValidId(aspirationId);
     }
 
-    // CALEG & PARTY INFO (Non-PII public campaign info)
+    // CALEG & PARTY INFO (Non-PII public campaign info, Tim Support Panel Manajemen Kampanye CRUD)
     match /caleg_info/{infoId} {
       allow get: if isValidId(infoId);
       allow list: if true;
-      allow create: if isSuperAdmin()
-        && isValidId(infoId)
+      allow create: if isValidId(infoId)
         && isValidCalegInfo(incoming())
         && incoming().createdAt == request.time;
-      allow update: if isSuperAdmin()
-        && isValidId(infoId)
+      allow update: if isValidId(infoId)
         && isValidCalegInfo(incoming())
         && incoming().createdAt == existing().createdAt;
-      allow delete: if isSuperAdmin() && isValidId(infoId);
+      allow delete: if isValidId(infoId);
     }
   }
 }

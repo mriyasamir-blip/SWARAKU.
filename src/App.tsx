@@ -15,12 +15,10 @@ import { auth } from './lib/firebase';
 import {
   findAndLinkPreRegisteredVoter,
   isSuperAdminEmail,
-  loginManualVoter,
   loginWithGoogleSSO,
   logoutFirebase,
   recordLoginActivity,
   redeemRewardAtomic,
-  registerManualVoterProfile,
   registerVoterProfile,
   rsvpEventAtomic,
   submitAspiration,
@@ -34,10 +32,12 @@ import {
   updateVoterProfile,
 } from './services/swarakuFirestore';
 import {
+  awardUserPointsOnCloud,
   createUserOnCloud,
   deleteUserOnCloud,
   fetchUserProfileById,
   fetchUsersFromCloud,
+  loginUserByGoogleEmailOnCloud,
   loginUserOnCloud,
   toggleUserStatusOnCloud,
   updateUserOnCloud,
@@ -59,9 +59,10 @@ import {
   syncLoyaltyVoterToPetaSuara,
 } from './services/cloudSyncService';
 import {
-  markKaderGpsInactive,
-  startKaderGpsTracking,
-} from './services/kaderLocationService';
+  isTrackedRole,
+  markLocationOffline,
+} from './services/locationService';
+import { GpsTrackerModal } from './components/GpsTrackerModal';
 import type {
   AspirationDoc,
   CalegInfoDoc,
@@ -161,7 +162,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [manualVoterId, setManualVoterId] = useState<string | null>(() => readSavedManualVoterId());
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => getInitialDisplayMode());
-  const [preferredPortalTab, setPreferredPortalTab] = useState<LoginPortalTab>('voters');
+  const [preferredPortalTab, setPreferredPortalTab] = useState<LoginPortalTab>('staff');
 
   const switchDisplayMode = useCallback(
     (nextMode: DisplayMode, portalTab?: LoginPortalTab) => {
@@ -225,7 +226,7 @@ export default function App() {
   const [myAspirations, setMyAspirations] = useState<AspirationDoc[]>([]);
 
   // Referral query param (?ref=CODE)
-  const [referralInput, setReferralInput] = useState<string>(() => {
+  const [referralInput] = useState<string>(() => {
     if (typeof window === 'undefined') return '';
     const params = new URLSearchParams(window.location.search);
     return (params.get('ref') || '').toUpperCase();
@@ -258,6 +259,9 @@ export default function App() {
   useEffect(() => {
     const saved = readSavedStaffSession();
     if (!saved) return;
+    if (typeof saved.points === 'number') {
+      setKaderPoints(saved.points);
+    }
     fetchUserProfileById(saved.id)
       .then((fresh) => {
         if (fresh) {
@@ -267,6 +271,9 @@ export default function App() {
             return;
           }
           setStaffUser(fresh);
+          if (typeof fresh.points === 'number') {
+            setKaderPoints(fresh.points);
+          }
           localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(fresh));
         }
       })
@@ -398,20 +405,6 @@ export default function App() {
     };
   }, [staffUser?.id, notify]);
 
-  // 5b. Real-Time GPS Writer (Firestore `kader_locations`) khusus saat login sebagai Kader
-  useEffect(() => {
-    if (!staffUser || staffUser.role !== 'kader') return;
-
-    const stopTracking = startKaderGpsTracking({
-      userId: staffUser.id || staffUser.username,
-      namaKader: staffUser.nama,
-    });
-
-    return () => {
-      stopTracking();
-    };
-  }, [staffUser?.id, staffUser?.username, staffUser?.nama, staffUser?.role]);
-
   // 5b. When Superadmin Google SSO is active in Staff Portal, mirror all registered Loyalty/Manual voters to Peta Suara
   useEffect(() => {
     if (
@@ -465,57 +458,104 @@ export default function App() {
     }
   };
 
-  const handleManualVoterSignUp = async (data: {
-    fullName: string;
-    phone: string;
-    email: string;
-    address: string;
-    region: string;
-    referralInput: string;
-  }) => {
-    setAuthError(null);
-    const { voter, appliedReferralBonus } = await registerManualVoterProfile(data);
-    loggedLoginForUidRef.current = voter.uid;
-    localStorage.setItem(MANUAL_VOTER_SESSION_KEY, voter.uid);
-    setManualVoterId(voter.uid);
-    setVoterProfile(voter);
-    notify(
-      appliedReferralBonus
-        ? 'Pendaftaran berhasil! Anda mendapat +100 Poin Awal dan pengundang Anda mendapat +50 Poin.'
-        : 'Pendaftaran berhasil! Selamat datang di Swaraku (+100 Poin Awal).'
-    );
-  };
-
-  const handleManualVoterLogin = async (email: string, phone: string) => {
-    setAuthError(null);
-    const voter = await loginManualVoter(email, phone);
-    loggedLoginForUidRef.current = voter.uid;
-    localStorage.setItem(MANUAL_VOTER_SESSION_KEY, voter.uid);
-    setManualVoterId(voter.uid);
-    setVoterProfile(voter);
-    notify(`Selamat datang kembali, ${voter.fullName}!`);
-  };
-
-  const handleStaffLogin = async (
+  const handleTimSupportLogin = async (
     usernameOrEmail: string,
     password: string
   ): Promise<{ success: boolean; message?: string }> => {
-    const res = await loginUserOnCloud(usernameOrEmail, password);
+    setAuthError(null);
+    const res = await loginUserOnCloud(usernameOrEmail, password, [
+      'super_admin',
+      'admin',
+      'tim_sukses',
+      'kader',
+    ]);
     if (res.success && res.user) {
       localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(res.user));
       setStaffUser(res.user);
+      setKaderPoints(res.user.points || 0);
       notify(`Selamat datang, ${res.user.nama}!`);
       return { success: true };
     }
     return { success: false, message: res.message };
   };
 
+  const handleTimSupportGoogleLogin = async (): Promise<{ success: boolean; message?: string }> => {
+    setAuthError(null);
+    setIsSigningIn(true);
+    try {
+      const googleUser = await loginWithGoogleSSO();
+      const email = googleUser?.email || '';
+      const res = await loginUserByGoogleEmailOnCloud(email, [
+        'super_admin',
+        'admin',
+        'tim_sukses',
+        'kader',
+      ]);
+      if (res.success && res.user) {
+        localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(res.user));
+        setStaffUser(res.user);
+        setKaderPoints(res.user.points || 0);
+        notify(`Login Google berhasil! Selamat datang, ${res.user.nama}.`);
+        return { success: true };
+      }
+      // Strict whitelist: immediately sign out unregistered Google accounts
+      await logoutFirebase().catch(() => {});
+      const errMsg =
+        res.message ||
+        'Akun Anda belum terdaftar. Silakan hubungi Admin atau Koordinator terkait.';
+      setAuthError(errMsg);
+      return { success: false, message: errMsg };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Login Google dibatalkan atau gagal.';
+      setAuthError(msg);
+      return { success: false, message: msg };
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleRelawanLogin = async (
+    usernameOrEmail: string,
+    password: string
+  ): Promise<{ success: boolean; message?: string }> => {
+    setAuthError(null);
+    const res = await loginUserOnCloud(usernameOrEmail, password, ['relawan']);
+    if (res.success && res.user) {
+      localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(res.user));
+      setStaffUser(res.user);
+      setKaderPoints(res.user.points || 0);
+      notify(`Selamat datang, ${res.user.nama}!`);
+      return { success: true };
+    }
+    return { success: false, message: res.message };
+  };
+
+  const handleAwardPoints = async (delta: number): Promise<void> => {
+    if (!staffUser || delta <= 0) return;
+    const optimisticTotal = (staffUser.points ?? kaderPoints ?? 0) + delta;
+    setKaderPoints(optimisticTotal);
+    const updatedLocal = { ...staffUser, points: optimisticTotal };
+    setStaffUser(updatedLocal);
+    localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(updatedLocal));
+    try {
+      const persisted = await awardUserPointsOnCloud(staffUser.id, delta);
+      if (typeof persisted === 'number') {
+        setKaderPoints(persisted);
+        const synced: UserAccount = { ...staffUser, points: persisted };
+        setStaffUser(synced);
+        localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(synced));
+        setUserAccounts((prev) =>
+          prev.map((u) => (u.id === staffUser.id ? { ...u, points: persisted } : u))
+        );
+      }
+    } catch {
+      // Keep optimistic points in session
+    }
+  };
+
   const handleStaffLogout = async () => {
-    if (staffUser && staffUser.role === 'kader') {
-      await markKaderGpsInactive(
-        staffUser.id || staffUser.username,
-        staffUser.nama
-      ).catch(() => {});
+    if (staffUser && isTrackedRole(staffUser.role)) {
+      await markLocationOffline(staffUser.id || staffUser.username).catch(() => {});
     }
     localStorage.removeItem(STAFF_SESSION_KEY);
     setStaffUser(null);
@@ -523,7 +563,7 @@ export default function App() {
     if (auth.currentUser) {
       await logoutFirebase().catch(() => {});
     }
-    notify('Anda telah keluar dari portal Tim Kampanye.');
+    notify('Anda telah keluar dari portal Swaraku.');
   };
 
   const handleRefreshStaffProfile = async () => {
@@ -607,7 +647,7 @@ export default function App() {
   const handleSaveTimSukses = (ts: TimSuksesWilayahRecord) => {
     setTimSuksesList((prev) => [ts, ...prev.filter((item) => item.id !== ts.id)]);
     saveTimSuksesToCloud(ts).catch(() => {});
-    notify(`Tim Sukses "${ts.nama}" tersimpan & terhubung ke Peta Suara.`);
+    notify(`Korwil "${ts.nama}" tersimpan & terhubung ke Peta Suara.`);
   };
 
   const handleSubmitC1 = (form: Partial<FormC1Upload>) => {
@@ -615,13 +655,14 @@ export default function App() {
     const p2 = Number(form.suaraPaslon2) || 0;
     const p3 = Number(form.suaraPaslon3) || 0;
     const tidakSah = Number(form.suaraTidakSah) || 0;
+    const kelurahanLabel = form.kelurahan || staffUser?.kelurahan || 'Kel. Cilandak Barat';
     const newC1: FormC1Upload = {
       id: `c1-${Date.now()}`,
-      tps: form.tps || staffUser?.tps || 'TPS 047',
-      kelurahan: form.kelurahan || 'Kel. Sukamaju',
-      kecamatan: form.kecamatan || 'Kec. Cilandak',
+      tps: form.tps || kelurahanLabel,
+      kelurahan: kelurahanLabel,
+      kecamatan: form.kecamatan || staffUser?.kecamatan || 'Kec. Cilandak',
       waktuUpload: new Date().toLocaleString('id-ID'),
-      saksiNama: form.saksiNama || staffUser?.nama || 'Saksi TPS',
+      saksiNama: form.saksiNama || staffUser?.nama || 'Petugas Kelurahan',
       suaraPaslon1: p1,
       suaraPaslon2: p2,
       suaraPaslon3: p3,
@@ -633,7 +674,7 @@ export default function App() {
     };
     setC1Records((prev) => [newC1, ...prev]);
     saveC1ToCloud(newC1).catch(() => {});
-    notify(`Form C1 (${newC1.tps}) berhasil diunggah & disinkronkan.`);
+    notify(`Hasil Quick Count (${newC1.kelurahan}) berhasil diunggah & disinkronkan.`);
   };
 
   const handleSubmitB1 = (form: Partial<FormB1Upload>) => {
@@ -643,9 +684,9 @@ export default function App() {
     const tidakSah = Number(form.suaraTidakSah) || 0;
     const newB1: FormB1Upload = {
       id: `b1-${Date.now()}`,
-      kecamatan: form.kecamatan || 'Kec. Cilandak',
-      kelurahan: form.kelurahan || 'Kel. Sukamaju',
-      dapil: form.dapil || staffUser?.wilayah || 'DAPIL DKI JAKARTA II',
+      kecamatan: form.kecamatan || staffUser?.kecamatan || 'Kec. Cilandak',
+      kelurahan: form.kelurahan || staffUser?.kelurahan || 'Kel. Cilandak Barat',
+      dapil: form.kelurahan || staffUser?.wilayah || 'Jakarta Selatan',
       waktuUpload: new Date().toLocaleString('id-ID'),
       koordinatorNama: form.koordinatorNama || staffUser?.nama || 'Koordinator',
       suaraPaslon1: p1,
@@ -660,7 +701,7 @@ export default function App() {
     };
     setB1Records((prev) => [newB1, ...prev]);
     saveB1ToCloud(newB1).catch(() => {});
-    notify(`Form B1 (${newB1.kecamatan}) berhasil diunggah & disinkronkan.`);
+    notify(`Rekap Kecamatan (${newB1.kecamatan}) berhasil diunggah & disinkronkan.`);
   };
 
   const handleSubmitAdminAspirasi = (
@@ -744,6 +785,9 @@ export default function App() {
     isuPrioritas: string;
   }) => {
     const cleanNik = voterData.nik.replace(/\D/g, '');
+    const kelurahan = voterData.tps || staffUser?.kelurahan || 'Cilandak Barat';
+    const kecamatan = staffUser?.kecamatan || 'Cilandak';
+    const kota = staffUser?.kota || 'Jakarta Selatan';
     const record: VoterOcrRecord = {
       id: `v-${cleanNik || Date.now()}`,
       nik: cleanNik,
@@ -756,21 +800,26 @@ export default function App() {
       jenisKelamin: 'Laki-laki',
       alamat: voterData.isuPrioritas || '-',
       rtRw: voterData.rtRw || '001/001',
-      kelurahan: 'Kel. Sukamaju',
-      kecamatan: 'Kec. Cilandak',
-      kabupatenKota: 'Jakarta Selatan',
+      kelurahan,
+      kecamatan,
+      kabupatenKota: kota,
       provinsi: 'DKI Jakarta',
-      tps: voterData.tps || 'TPS 047',
+      tps: kelurahan,
       noHp: voterData.noHp || '-',
       waktuDaftar: new Date().toLocaleString('id-ID'),
       statusDpt: 'DPT valid',
       statusRegistrasi: 'TERDAFTAR',
       terdaftarOleh: staffUser?.nama || 'Petugas Lapangan',
-      diinputOlehRole: staffUser?.role === 'tim_sukses' ? 'tim_sukses' : 'kader',
+      diinputOlehRole:
+        staffUser?.role === 'tim_sukses'
+          ? 'tim_sukses'
+          : staffUser?.role === 'relawan'
+          ? 'relawan'
+          : 'kader',
       diinputOlehNama: staffUser?.nama,
     };
     handleSaveVoterOcr(record);
-    setKaderPoints((prev) => prev + 50);
+    handleAwardPoints(10).catch(() => {});
   };
 
   const handleAddInvitedFriend = (friend: InvitedFriendRecord) => {
@@ -780,8 +829,8 @@ export default function App() {
 
   const handleCheckinCoblos = () => {
     setSudahMencoblos(true);
-    setKaderPoints((prev) => prev + 100);
-    notify('Check-in kehadiran TPS tersimpan (+100 poin).');
+    handleAwardPoints(25).catch(() => {});
+    notify('Check-in kehadiran Kelurahan tersimpan (+25 poin).');
   };
 
   const handleResetDataToZero = () => {
@@ -800,7 +849,7 @@ export default function App() {
     try {
       const res = await migrateLocalDataToCloud();
       notify(
-        `Sinkronisasi Cloud selesai (${res.votersMigrated} voter, ${res.timSuksesMigrated} tim sukses).`
+        `Sinkronisasi Cloud selesai (${res.votersMigrated} voter, ${res.timSuksesMigrated} korwil).`
       );
     } catch {
       notify('Sinkronisasi Cloud selesai.');
@@ -910,7 +959,7 @@ export default function App() {
               preferredRole === 'tim_sukses' ||
               preferredRole === 'kader'
                 ? 'staff'
-                : 'voters';
+                : 'relawan';
             switchDisplayMode('apps', targetPortal);
           }}
         />
@@ -919,7 +968,7 @@ export default function App() {
     );
   }
 
-  // Case 0: Active Staff Portal (Kader, Tim Sukses, Admin, Super Admin)
+  // Case 0: Active Portal (SuperAdmin, Admin, Korwil, Korcam, & Relawan)
   if (staffUser) {
     return (
       <>
@@ -940,7 +989,7 @@ export default function App() {
           surveyList={surveyList}
           blaztLogs={blaztLogs}
           invitedList={invitedList}
-          kaderPoints={kaderPoints}
+          kaderPoints={staffUser.points ?? kaderPoints}
           sudahMencoblos={sudahMencoblos}
           isSyncingCloud={isSyncingCloud}
           onLogout={handleStaffLogout}
@@ -952,6 +1001,7 @@ export default function App() {
           onToggleUserStatus={handleToggleStaffStatus}
           onRefreshUsers={handleRefreshStaffUsers}
           onConnectGoogleAdmin={handleGoogleLogin}
+          onAwardPoints={handleAwardPoints}
           onNotify={notify}
           onSaveVoter={handleSaveVoterOcr}
           onSaveTimSukses={handleSaveTimSukses}
@@ -986,6 +1036,7 @@ export default function App() {
             </button>
           </div>
         )}
+        <GpsTrackerModal user={staffUser} />
         <OfflineIndicator />
       </>
     );
@@ -1001,18 +1052,15 @@ export default function App() {
     );
   }
 
-  // Case 1: Not Authenticated -> Two-Portal Login (Voters Google SSO + Sign Up vs Tim & Admin)
+  // Case 1: Not Authenticated -> Two-Portal Whitelist Login (Tim Support vs Relawan)
   if (!activeVoterUid) {
     return (
       <>
         {mapsQuotaExceeded && <MapsQuotaBanner />}
         <LoginScreen
-          referralCode={referralInput}
-          onReferralChange={setReferralInput}
-          onGoogleLogin={handleGoogleLogin}
-          onManualVoterSignUp={handleManualVoterSignUp}
-          onManualVoterLogin={handleManualVoterLogin}
-          onStaffLogin={handleStaffLogin}
+          onTimSupportLogin={handleTimSupportLogin}
+          onTimSupportGoogleLogin={handleTimSupportGoogleLogin}
+          onRelawanLogin={handleRelawanLogin}
           isSigningIn={isSigningIn}
           authError={authError}
           initialPortalTab={preferredPortalTab}
@@ -1030,12 +1078,9 @@ export default function App() {
         <>
           {mapsQuotaExceeded && <MapsQuotaBanner />}
           <LoginScreen
-            referralCode={referralInput}
-            onReferralChange={setReferralInput}
-            onGoogleLogin={handleGoogleLogin}
-            onManualVoterSignUp={handleManualVoterSignUp}
-            onManualVoterLogin={handleManualVoterLogin}
-            onStaffLogin={handleStaffLogin}
+            onTimSupportLogin={handleTimSupportLogin}
+            onTimSupportGoogleLogin={handleTimSupportGoogleLogin}
+            onRelawanLogin={handleRelawanLogin}
             isSigningIn={isSigningIn}
             authError={authError}
             initialPortalTab={preferredPortalTab}

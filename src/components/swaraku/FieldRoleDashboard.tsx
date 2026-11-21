@@ -13,19 +13,22 @@ import {
   ChevronRight,
   Users,
   Award,
-  MapPin,
   MessageSquare,
   UserCheck,
-  CheckCircle2,
   BadgeCheck,
   CreditCard,
+  Navigation,
+  Shield,
+  Sparkles,
 } from 'lucide-react';
 import type { FormB1Upload, FormC1Upload, UserAccount } from '../../types/vore';
 import type { StaffTab } from './StaffPortalApp';
+import { formatWilayahLabel } from '../../data/wilayahIndonesia';
 
 interface FieldRoleDashboardProps {
   staffUser: UserAccount;
   voterCount: number;
+  relawanCount: number;
   c1Records: FormC1Upload[];
   b1Records: FormB1Upload[];
   surveyCount: number;
@@ -56,13 +59,13 @@ function getInitials(name: string): string {
 export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
   staffUser,
   voterCount,
+  relawanCount,
   c1Records,
   b1Records,
   surveyCount,
   invitedCount,
   aspirasiCount,
   kaderPoints,
-  sudahMencoblos,
   timSuksesSupervisor,
   onOpenDaftarVoterOcr,
   onOpenQuickCountOcr,
@@ -76,8 +79,19 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
   onOpenAiPilcaleg,
   onNavigateTab,
 }) => {
-  const isTimSukses = staffUser.role === 'tim_sukses';
+  const isKorwil = staffUser.role === 'tim_sukses';
+  const isKorcam = staffUser.role === 'kader';
+  const isRelawan = staffUser.role === 'relawan';
   const totalFormMasuk = c1Records.length + b1Records.length;
+
+  const wilayahDisplay =
+    formatWilayahLabel({
+      kota: staffUser.kota || '',
+      kecamatan: staffUser.kecamatan || '',
+      kelurahan: staffUser.kelurahan || '',
+    }) ||
+    staffUser.wilayah ||
+    'Wilayah Tugas Aktif';
 
   const tally = useMemo(() => {
     let p1 = 0;
@@ -114,6 +128,135 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
     };
   }, [c1Records, b1Records]);
 
+  // Dedicated streamlined workspace for Relawan
+  if (isRelawan) {
+    return (
+      <div className="space-y-6">
+        {/* KPI Strip */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <div className="p-4 bg-white rounded-2xl border border-slate-200">
+            <div className="flex items-center justify-between text-slate-500 mb-1.5">
+              <span className="text-xs font-semibold">Poin Relawan</span>
+              <Award className="w-4 h-4 text-amber-600" />
+            </div>
+            <p className="text-2xl font-black text-slate-900 tabular-nums">
+              {kaderPoints.toLocaleString('id-ID')}
+            </p>
+            <p className="text-[11px] text-amber-700 font-semibold mt-1">
+              +10 Poin setiap Voter terdaftar
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab('database_voters')}
+            className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left transition-colors cursor-pointer"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-1.5">
+              <span className="text-xs font-semibold">Voter / Konstituen</span>
+              <Database className="w-4 h-4 text-cyan-600" />
+            </div>
+            <p className="text-2xl font-black text-slate-900 tabular-nums">
+              {voterCount.toLocaleString('id-ID')}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-1">Tersinkron ke Peta &amp; Kelurahan</p>
+          </button>
+
+          <div className="p-4 bg-white rounded-2xl border border-slate-200">
+            <div className="flex items-center justify-between text-slate-500 mb-1.5">
+              <span className="text-xs font-semibold">Kelurahan Tugas</span>
+              <BadgeCheck className="w-4 h-4 text-emerald-600" />
+            </div>
+            <p className="text-sm font-black text-slate-900 truncate mt-1">
+              {staffUser.kelurahan || staffUser.wilayah || '-'}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-1 truncate">
+              {staffUser.kecamatan || ''} {staffUser.kota ? `· ${staffUser.kota}` : ''}
+            </p>
+          </div>
+
+          <div className="p-4 bg-white rounded-2xl border border-slate-200">
+            <div className="flex items-center justify-between text-slate-500 mb-1.5">
+              <span className="text-xs font-semibold">Koordinator Pembina</span>
+              <Users className="w-4 h-4 text-indigo-600" />
+            </div>
+            <p className="text-sm font-black text-slate-900 truncate mt-1">
+              {staffUser.korcamNama || timSuksesSupervisor || 'Korcam Wilayah'}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-1">Terhubung ke Monitoring Relawan</p>
+          </div>
+        </div>
+
+        {/* Primary Action Banner: Command Regist */}
+        <div className="rounded-3xl bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
+          <div className="space-y-1.5">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] font-black uppercase tracking-wider">
+              <Sparkles className="w-3 h-3" />
+              Tugas Utama Relawan · +10 Poin / Voter
+            </span>
+            <h3 className="text-lg sm:text-xl font-black">
+              Daftarkan Konstituen (Voter) di Wilayah Anda
+            </h3>
+            <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
+              Gunakan <b>Menu Registrasi (Command Regist)</b> dengan metode Scan ID (QR) atau Input Manual. Data Kota, Kecamatan, Kelurahan, &amp; Alamat Lengkap otomatis tersinkron ke Database dan Peta Suara.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigateTab('registrasi')}
+            className="min-h-[46px] px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-extrabold inline-flex items-center justify-center gap-2 shrink-0 cursor-pointer shadow-sm"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Buka Menu Registrasi</span>
+          </button>
+        </div>
+
+        {/* Quick Modules */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <button
+            type="button"
+            onClick={() => onNavigateTab('registrasi')}
+            className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+                <UserPlus className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold text-slate-900">
+                  Pendaftaran Konstituen (Voter)
+                </h4>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  Scan ID (QR) atau input manual dengan struktur Kota → Kecamatan → Kelurahan. +10 Poin otomatis.
+                </p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-amber-700 shrink-0 mt-1" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab('database_voters')}
+            className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
+                <Database className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold text-slate-900">Database Daftar Voter</h4>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  Lihat daftar Voter/Konstituen terdaftar beserta Kelurahan, Kecamatan, Kota, dan Laporan per Kelurahan.
+                </p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-blue-700 shrink-0 mt-1" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* 1. Ringkasan Kinerja Lapangan (4-column KPI strip, live data only) */}
@@ -124,14 +267,14 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
           className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between text-slate-500 mb-1.5">
-            <span className="text-xs font-semibold">Voters Terdata</span>
+            <span className="text-xs font-semibold">Voter Terdata</span>
             <Database className="w-4 h-4 text-cyan-600" />
           </div>
           <p className="text-2xl font-black text-slate-900 tabular-nums">
             {voterCount.toLocaleString('id-ID')}
           </p>
           <p className="text-[11px] text-slate-500 mt-1">
-            Daftar online &middot; Scan e-KTP
+            Tersinkron ke Kelurahan &amp; Peta
           </p>
         </button>
 
@@ -141,139 +284,93 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
           className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between text-slate-500 mb-1.5">
-            <span className="text-xs font-semibold">Form C1 &amp; B1</span>
+            <span className="text-xs font-semibold">Quick Count Masuk</span>
             <FileText className="w-4 h-4 text-emerald-600" />
           </div>
           <p className="text-2xl font-black text-slate-900 tabular-nums">
             {totalFormMasuk.toLocaleString('id-ID')}
           </p>
           <p className="text-[11px] text-slate-500 mt-1 tabular-nums">
-            {c1Records.length} C1 &middot; {b1Records.length} B1
+            {c1Records.length} Kelurahan &middot; {b1Records.length} Kecamatan
           </p>
         </button>
 
         <button
           type="button"
-          onClick={onOpenSurvey}
+          onClick={() =>
+            onNavigateTab(isKorcam ? 'kelola_relawan' : 'monitoring_kader')
+          }
           className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between text-slate-500 mb-1.5">
-            <span className="text-xs font-semibold">Survei &amp; Rujukan</span>
-            <ClipboardList className="w-4 h-4 text-indigo-600" />
+            <span className="text-xs font-semibold">
+              {isKorcam ? 'Relawan Aktif' : 'Korcam & Relawan'}
+            </span>
+            <Users className="w-4 h-4 text-indigo-600" />
           </div>
           <p className="text-2xl font-black text-slate-900 tabular-nums">
-            {(surveyCount + invitedCount).toLocaleString('id-ID')}
+            {(isKorcam ? relawanCount : (staffUser.kaderList?.length || 0) + relawanCount).toLocaleString('id-ID')}
           </p>
-          <p className="text-[11px] text-slate-500 mt-1 tabular-nums">
-            {surveyCount} Survei &middot; {invitedCount} Rujukan
+          <p className="text-[11px] text-slate-500 mt-1 truncate">
+            {isKorcam ? 'Klik untuk Kelola User Relawan' : 'Aktif di Monitoring Relawan'}
           </p>
         </button>
 
-        {isTimSukses ? (
-          <div className="p-4 bg-white rounded-2xl border border-slate-200">
-            <div className="flex items-center justify-between text-slate-500 mb-1.5">
-              <span className="text-xs font-semibold">Kader Binaan</span>
-              <Users className="w-4 h-4 text-teal-600" />
-            </div>
-            <p className="text-2xl font-black text-slate-900 tabular-nums">
-              {(staffUser.kaderList?.length || 0).toLocaleString('id-ID')}
-            </p>
-            <p className="text-[11px] text-slate-500 mt-1 truncate">
-              {staffUser.wilayah || 'Wilayah binaan aktif'}
-            </p>
+        <div className="p-4 bg-white rounded-2xl border border-slate-200">
+          <div className="flex items-center justify-between text-slate-500 mb-1.5">
+            <span className="text-xs font-semibold">
+              Poin {isKorwil ? 'Korwil' : 'Korcam'}
+            </span>
+            <Award className="w-4 h-4 text-amber-600" />
           </div>
-        ) : (
-          <div className="p-4 bg-white rounded-2xl border border-slate-200">
-            <div className="flex items-center justify-between text-slate-500 mb-1.5">
-              <span className="text-xs font-semibold">Poin Kader</span>
-              <Award className="w-4 h-4 text-amber-600" />
-            </div>
-            <p className="text-2xl font-black text-slate-900 tabular-nums">
-              {kaderPoints.toLocaleString('id-ID')}
-            </p>
-            <p className="text-[11px] text-slate-500 mt-1">
-              {staffUser.tps || 'Kader Lapangan'} &middot; {aspirasiCount} Aspirasi
-            </p>
-          </div>
-        )}
+          <p className="text-2xl font-black text-slate-900 tabular-nums">
+            {kaderPoints.toLocaleString('id-ID')}
+          </p>
+          <p className="text-[11px] text-slate-500 mt-1 truncate">
+            {wilayahDisplay}
+          </p>
+        </div>
       </div>
 
       {/* 2. Tugas Utama (4 Primary Field Modules) */}
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-600">
-            Modul Kerja Utama {isTimSukses ? 'Tim Sukses' : 'Kader Lapangan'}
+            Modul Kerja Utama {isKorwil ? 'Korwil' : 'Korcam'}
           </h3>
-          <span className="text-xs text-slate-500">Pilih tugas untuk mulai input</span>
+          <span className="text-xs text-slate-500">Pilih tugas untuk mulai</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
+          {/* Primary Command Regist CTA */}
           <button
             type="button"
-            onClick={onOpenDaftarVoterOcr}
-            className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group min-h-[96px]"
+            onClick={() => onNavigateTab('registrasi')}
+            className="p-4 bg-gradient-to-br from-blue-50 to-cyan-50 hover:from-blue-100 hover:to-cyan-100 rounded-2xl border-2 border-blue-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group min-h-[100px]"
           >
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-cyan-50 text-cyan-700 flex items-center justify-center shrink-0">
-                <Camera className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-xl bg-blue-700 text-white flex items-center justify-center shrink-0">
+                <UserPlus className="w-5 h-5" />
               </div>
               <div>
                 <h4 className="text-sm font-extrabold text-slate-900">
-                  Daftar Voter (Scan e-KTP)
+                  Menu Registrasi (Command Regist)
                 </h4>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  Foto e-KTP pemilih agar langsung masuk Database &amp; Peta Suara.
+                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                  {isKorcam
+                    ? 'Primary: Daftar Relawan (+25 Poin) & Voter (+10 Poin).'
+                    : 'Daftar Korcam (+50), Relawan (+25), & Voter (+10 Poin).'}
                 </p>
               </div>
             </div>
-            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-cyan-700 shrink-0 mt-1" />
+            <ChevronRight className="w-4 h-4 text-blue-600 shrink-0 mt-1" />
           </button>
 
-          <button
-            type="button"
-            onClick={onOpenQuickCountOcr}
-            className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group min-h-[96px]"
-          >
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
-                <FileText className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-sm font-extrabold text-slate-900">
-                  Scan Form C1 / B1 (OCR)
-                </h4>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  Kirim foto plano TPS &amp; rekap kecamatan ke tabulasi Quick Count.
-                </p>
-              </div>
-            </div>
-            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-700 shrink-0 mt-1" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onNavigateTab('database_voters')}
-            className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group min-h-[96px]"
-          >
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
-                <Database className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-sm font-extrabold text-slate-900">Database Voters</h4>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  Telusuri daftar pemilih terdata, status verifikasi, &amp; ekspor data.
-                </p>
-              </div>
-            </div>
-            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-blue-700 shrink-0 mt-1" />
-          </button>
-
-          {isTimSukses ? (
+          {isKorwil ? (
             <button
               type="button"
               onClick={() => onNavigateTab('peta_suara')}
-              className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group min-h-[96px]"
+              className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group min-h-[100px]"
             >
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
@@ -281,10 +378,10 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
                 </div>
                 <div>
                   <h4 className="text-sm font-extrabold text-slate-900">
-                    Peta Suara Wilayah
+                    Peta Suara (Google Maps)
                   </h4>
                   <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Pantau sebaran titik pemilih &amp; koordinator wilayah di Google Maps.
+                    Pantau sebaran titik Voter &amp; Korwil per Kelurahan di Google Maps.
                   </p>
                 </div>
               </div>
@@ -293,25 +390,63 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
           ) : (
             <button
               type="button"
-              onClick={onOpenRekapPaslon}
-              className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group min-h-[96px]"
+              onClick={() => onNavigateTab('kelola_relawan')}
+              className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-emerald-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group min-h-[100px]"
             >
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
-                  <BarChart3 className="w-5 h-5" />
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
+                  <Users className="w-5 h-5" />
                 </div>
                 <div>
                   <h4 className="text-sm font-extrabold text-slate-900">
-                    Rekap Paslon (Quick Count)
+                    Kelola User Relawan
                   </h4>
                   <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Pantau rincian perolehan suara sah dari formulir C1 &amp; B1 masuk.
+                    Tambah akun Relawan sebanyak yang dibutuhkan &amp; aktifkan login langsung.
                   </p>
                 </div>
               </div>
-              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-teal-700 shrink-0 mt-1" />
+              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-700 shrink-0 mt-1" />
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab('database_voters')}
+            className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group min-h-[100px]"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-cyan-50 text-cyan-700 flex items-center justify-center shrink-0">
+                <Database className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold text-slate-900">Database Wilayah</h4>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  Daftar Voter, Daftar Relawan, Laporan per Kelurahan, &amp; Quick Count.
+                </p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-cyan-700 shrink-0 mt-1" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab('monitoring_kader')}
+            className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group min-h-[100px]"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0">
+                <Navigation className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold text-slate-900">Monitoring Relawan</h4>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  Pantau lokasi GPS live Relawan &amp; tim lapangan secara real-time.
+                </p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-700 shrink-0 mt-1" />
+          </button>
         </div>
       </section>
 
@@ -325,25 +460,23 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-          {isTimSukses ? (
-            <button
-              type="button"
-              onClick={onOpenRekapPaslon}
-              className="min-h-[48px] px-3 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
-            >
-              <BarChart3 className="w-4 h-4 text-teal-600 shrink-0" />
-              <span className="truncate">Rekap Paslon</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => onNavigateTab('operasi_lapangan')}
-              className="min-h-[48px] px-3 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
-            >
-              <UserCheck className="w-4 h-4 text-amber-600 shrink-0" />
-              <span className="truncate">Operasi Lapangan</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => onNavigateTab('kelola_voters')}
+            className="min-h-[48px] px-3 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-900 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+          >
+            <Shield className="w-4 h-4 text-blue-700 shrink-0" />
+            <span className="truncate">Panel Kampanye</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenDaftarVoterOcr}
+            className="min-h-[48px] px-3 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+          >
+            <Camera className="w-4 h-4 text-cyan-600 shrink-0" />
+            <span className="truncate">Scan e-KTP</span>
+          </button>
 
           <button
             type="button"
@@ -351,7 +484,7 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
             className="min-h-[48px] px-3 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
           >
             <ClipboardList className="w-4 h-4 text-indigo-600 shrink-0" />
-            <span className="truncate">Survei Online</span>
+            <span className="truncate">Survei Online ({surveyCount})</span>
           </button>
 
           <button
@@ -360,7 +493,7 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
             className="min-h-[48px] px-3 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
           >
             <SearchCheck className="w-4 h-4 text-cyan-600 shrink-0" />
-            <span className="truncate">Cek TPS AI</span>
+            <span className="truncate">Cek DPT AI</span>
           </button>
 
           <button
@@ -370,15 +503,6 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
           >
             <CreditCard className="w-4 h-4 text-sky-600 shrink-0" />
             <span className="truncate">Auto Cek NIK</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenTambahNik}
-            className="min-h-[48px] px-3 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
-          >
-            <UserPlus className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span className="truncate">Undang Teman</span>
           </button>
 
           <button
@@ -400,20 +524,21 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">
-                  Tabulasi Suara Live (Form C1 &amp; B1)
+                  Hasil Quick Count Paslon (Kelurahan &amp; Kecamatan)
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5 tabular-nums">
                   {tally.totalSah.toLocaleString('id-ID')} suara sah &middot;{' '}
                   {tally.tidakSah.toLocaleString('id-ID')} tidak sah &middot; {totalFormMasuk}{' '}
-                  formulir masuk
+                  laporan masuk
                 </p>
               </div>
               <button
                 type="button"
                 onClick={onOpenRekapPaslon}
-                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer"
+                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer inline-flex items-center gap-1.5"
               >
-                Rincian Rekap
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span>Rincian Rekap</span>
               </button>
             </div>
 
@@ -458,11 +583,10 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
             ) : (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/70 p-5 text-center space-y-3">
                 <p className="text-sm font-bold text-slate-800">
-                  Belum ada data Form C1 / B1 yang masuk
+                  Belum ada data Quick Count Kelurahan / Kecamatan yang masuk
                 </p>
                 <p className="text-xs text-slate-500 max-w-md mx-auto">
-                  Scan foto formulir C1 Plano atau Form B1 kecamatan untuk memperbarui grafik
-                  tabulasi suara secara otomatis.
+                  Unggah hasil rekap Kelurahan atau Kecamatan untuk memperbarui grafik tabulasi suara secara otomatis.
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                   <button
@@ -471,14 +595,14 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
                     className="min-h-[40px] px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center gap-2 cursor-pointer"
                   >
                     <Camera className="w-4 h-4" />
-                    <span>Scan OCR C1 / B1</span>
+                    <span>Scan OCR Quick Count</span>
                   </button>
                   <button
                     type="button"
                     onClick={onOpenUploadC1}
                     className="min-h-[40px] px-4 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 text-xs font-bold cursor-pointer"
                   >
-                    Input Manual C1
+                    Input Manual Kelurahan
                   </button>
                 </div>
               </div>
@@ -488,11 +612,11 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
           <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
             <button
               type="button"
-              onClick={() => onNavigateTab('tps')}
+              onClick={onOpenTambahNik}
               className="text-xs font-bold text-teal-700 hover:text-teal-800 inline-flex items-center gap-1 cursor-pointer"
             >
-              <MapPin className="w-3.5 h-3.5" />
-              <span>Buka Modul TPS &amp; Saksi</span>
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Jaringan Rujukan ({invitedCount})</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
             <button
@@ -509,19 +633,18 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
 
         {/* Right: Role-Specific Coordination Panel */}
         <section className="lg:col-span-5 space-y-4">
-          {isTimSukses ? (
+          {isKorwil ? (
             <>
-              {/* AI PILCALEG — Khusus Tim Sukses (Tidak ditampilkan pada akun Kader) */}
+              {/* AI PILCALEG — Khusus Korwil */}
               <div className="bg-slate-900 text-white rounded-2xl p-5 space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-[11px] font-bold uppercase tracking-wider text-teal-300">
-                      Khusus Koordinator Tim Sukses
+                      Khusus Koordinator Wilayah (Korwil)
                     </p>
                     <h3 className="text-base font-extrabold mt-0.5">AI PILCALEG</h3>
                     <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                      Susun strategi pemenangan dapil, bahan kampanye WA Blazt, dan analisis isu
-                      wilayah bersama asisten AI.
+                      Susun strategi pemenangan Kelurahan &amp; Kecamatan, bahan kampanye WA Blazt, dan analisis isu wilayah bersama asisten AI.
                     </p>
                   </div>
                   <div className="w-10 h-10 rounded-xl bg-teal-500/20 text-teal-300 flex items-center justify-center shrink-0">
@@ -538,38 +661,38 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
                 </button>
               </div>
 
-              {/* Daftar Kader Binaan Tim Sukses */}
+              {/* Daftar Korcam Binaan Korwil */}
               <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <h3 className="text-sm font-extrabold text-slate-900">
-                      Kader Binaan Anda
+                      Korcam Binaan Anda
                     </h3>
                     <p className="text-xs text-slate-500">
-                      Tersinkronisasi otomatis dengan akun Tim Sukses
+                      Tersinkronisasi otomatis dengan akun Korwil
                     </p>
                   </div>
                   <span className="text-xs font-extrabold text-cyan-800 bg-cyan-50 border border-cyan-200 px-2.5 py-1 rounded-lg tabular-nums">
-                    {staffUser.kaderList?.length || 0} Kader
+                    {staffUser.kaderList?.length || 0} Korcam
                   </span>
                 </div>
 
                 {staffUser.kaderList && staffUser.kaderList.length > 0 ? (
                   <div className="divide-y divide-slate-100">
-                    {staffUser.kaderList.map((kaderName, idx) => (
+                    {staffUser.kaderList.map((korcamName, idx) => (
                       <div
-                        key={`${kaderName}-${idx}`}
+                        key={`${korcamName}-${idx}`}
                         className="py-2.5 flex items-center justify-between gap-3"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
                           <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-800 font-bold text-xs flex items-center justify-center shrink-0">
-                            {getInitials(kaderName)}
+                            {getInitials(korcamName)}
                           </div>
                           <div className="min-w-0">
                             <p className="text-xs font-bold text-slate-900 truncate">
-                              {kaderName}
+                              {korcamName}
                             </p>
-                            <p className="text-[11px] text-slate-500">Kader Lapangan</p>
+                            <p className="text-[11px] text-slate-500">Koordinator Kecamatan (Korcam)</p>
                           </div>
                         </div>
                         <span className="text-[11px] font-semibold text-emerald-700 shrink-0">
@@ -580,21 +703,21 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
                   </div>
                 ) : (
                   <p className="text-xs text-slate-500 py-2">
-                    Belum ada kader binaan yang ditautkan ke akun Tim Sukses ini.
+                    Belum ada Korcam binaan yang ditautkan. Tambahkan melalui Menu Registrasi (+50 Poin).
                   </p>
                 )}
               </div>
             </>
           ) : (
-            /* Kader Coordination & Assignment Panel */
+            /* Korcam Coordination & Assignment Panel */
             <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 h-full flex flex-col justify-between">
               <div className="space-y-4">
                 <div>
                   <h3 className="text-base font-extrabold text-slate-900">
-                    Koordinasi &amp; Penugasan Kader
+                    Koordinasi &amp; Penugasan Korcam
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Status wilayah kerja dan pembina Tim Sukses Anda
+                    Status wilayah kerja, Relawan binaan, dan Korwil pembina Anda
                   </p>
                 </div>
 
@@ -603,7 +726,7 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
                     <BadgeCheck className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
                     <div className="min-w-0">
                       <p className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-800">
-                        Tim Sukses Pembina
+                        Korwil Pembina
                       </p>
                       <p className="text-sm font-extrabold text-slate-900 mt-0.5 truncate">
                         {timSuksesSupervisor}
@@ -614,26 +737,27 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
 
                 <div className="divide-y divide-slate-100 text-xs">
                   <div className="py-2.5 flex items-center justify-between gap-2">
-                    <span className="text-slate-500">Wilayah / Dapil</span>
+                    <span className="text-slate-500">Kota / Kabupaten</span>
                     <span className="font-bold text-slate-900 text-right">
-                      {staffUser.wilayah || '-'}
+                      {staffUser.kota || staffUser.wilayah || '-'}
                     </span>
                   </div>
                   <div className="py-2.5 flex items-center justify-between gap-2">
-                    <span className="text-slate-500">TPS Penugasan</span>
+                    <span className="text-slate-500">Kecamatan</span>
+                    <span className="font-bold text-slate-900 text-right">
+                      {staffUser.kecamatan || '-'}
+                    </span>
+                  </div>
+                  <div className="py-2.5 flex items-center justify-between gap-2">
+                    <span className="text-slate-500">Kelurahan Tugas</span>
+                    <span className="font-bold text-emerald-700 text-right">
+                      {staffUser.kelurahan || '-'}
+                    </span>
+                  </div>
+                  <div className="py-2.5 flex items-center justify-between gap-2">
+                    <span className="text-slate-500">Relawan Terdaftar</span>
                     <span className="font-bold text-slate-900 font-mono">
-                      {staffUser.tps || 'Belum ditentukan'}
-                    </span>
-                  </div>
-                  <div className="py-2.5 flex items-center justify-between gap-2">
-                    <span className="text-slate-500">Status Check-in TPS</span>
-                    <span
-                      className={`font-bold inline-flex items-center gap-1 ${
-                        sudahMencoblos ? 'text-emerald-700' : 'text-slate-600'
-                      }`}
-                    >
-                      {sudahMencoblos && <CheckCircle2 className="w-3.5 h-3.5" />}
-                      {sudahMencoblos ? 'Sudah Check-in' : 'Belum Check-in'}
+                      {relawanCount} Relawan
                     </span>
                   </div>
                 </div>
@@ -642,17 +766,19 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
               <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => onNavigateTab('operasi_lapangan')}
-                  className="min-h-[42px] px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold cursor-pointer"
+                  onClick={() => onNavigateTab('kelola_relawan')}
+                  className="min-h-[42px] px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5"
                 >
-                  Operasi Lapangan
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Kelola Relawan</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => onNavigateTab('tps')}
-                  className="min-h-[42px] px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer"
+                  onClick={() => onNavigateTab('operasi_lapangan')}
+                  className="min-h-[42px] px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5"
                 >
-                  Check-in &amp; TPS
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>Operasi Lapangan</span>
                 </button>
               </div>
             </div>

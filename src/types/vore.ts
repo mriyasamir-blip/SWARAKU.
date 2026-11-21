@@ -177,7 +177,7 @@ export interface InvitedFriendRecord {
   status: 'Terkirim' | 'Terdaftar KPU' | 'Menunggu Konfirmasi';
 }
 
-export type UserRole = 'super_admin' | 'admin' | 'tim_sukses' | 'kader';
+export type UserRole = 'super_admin' | 'admin' | 'tim_sukses' | 'kader' | 'relawan';
 
 export type AdminModuleTab =
   | 'beranda'
@@ -197,6 +197,11 @@ export interface UserAccount {
   email: string;
   jabatan: string;
   wilayah: string;
+  nik?: string;
+  kota?: string;
+  kecamatan?: string;
+  kelurahan?: string;
+  points?: number;
   idPegawai?: string;
   divisi?: string;
   tps?: string;
@@ -206,10 +211,12 @@ export interface UserAccount {
   status?: 'Aktif' | 'Nonaktif';
   dibuatPada?: string;
   updatedAt?: string;
-  // Relasi Tim Sukses & Kader Binaan
+  // Relasi Korwil (Tim Sukses), Korcam (Kader), & Relawan Binaan
   timSuksesId?: string;
   timSuksesNama?: string;
   didaftarkanOlehTimSukses?: string;
+  korcamId?: string;
+  korcamNama?: string;
   kaderList?: string[];
   kaderIds?: string[];
 }
@@ -234,9 +241,9 @@ export interface VoterOcrRecord {
   statusDpt: 'DPT valid' | 'Perlu cek';
   statusRegistrasi: 'TERDAFTAR';
   terdaftarOleh: string;
-  diinputOlehRole?: 'tim_sukses' | 'kader' | 'admin' | 'voter';
+  diinputOlehRole?: 'tim_sukses' | 'kader' | 'relawan' | 'admin' | 'voter';
   diinputOlehNama?: string;
-  registrationSource?: 'ocr_ktp' | 'lapangan' | 'google_sso' | 'manual_signup';
+  registrationSource?: 'ocr_ktp' | 'lapangan' | 'google_sso' | 'manual_signup' | 'command_regist';
   voterUid?: string;
   dapilLabel?: string;
   lat?: number;

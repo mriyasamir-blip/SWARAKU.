@@ -46,6 +46,8 @@ interface SuperadminViewProps {
   onNotify: (msg: string) => void;
   hasGoogleSuperAdmin?: boolean;
   onConnectGoogleAdmin?: () => Promise<void>;
+  panelTitle?: string;
+  isSuperAdmin?: boolean;
 }
 
 export const SuperadminView: React.FC<SuperadminViewProps> = ({
@@ -53,13 +55,15 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
   rewards,
   calegInfoList,
   onNotify,
-  hasGoogleSuperAdmin = true,
+  hasGoogleSuperAdmin = false,
   onConnectGoogleAdmin,
+  panelTitle = 'Panel Manajemen Kampanye',
+  isSuperAdmin = false,
 }) => {
   const [section, setSection] = useState<SuperadminSection>('acara');
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
 
-  // Real-time Superadmin collections
+  // Real-time Campaign Panel collections
   const [votersList, setVotersList] = useState<VoterDoc[]>([]);
   const [ocrVotersList, setOcrVotersList] = useState<VoterOcrRecord[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLogDoc[]>([]);
@@ -69,14 +73,16 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
 
   useEffect(() => {
     const unsubOcrVoters = subscribeToCloudVoters(setOcrVotersList);
+    const unsubClaims = subscribeAllClaims(setAllClaims, () => {});
+    const unsubAsp = subscribeAllAspirations(setAllAspirations, () => {});
 
     if (!hasGoogleSuperAdmin) {
       setVotersList([]);
       setActivityLogs([]);
-      setAllClaims([]);
-      setAllAspirations([]);
       return () => {
         unsubOcrVoters();
+        unsubClaims();
+        unsubAsp();
       };
     }
 
@@ -85,12 +91,6 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
     );
     const unsubLogs = subscribeActivityLogs(setActivityLogs, (err) =>
       onNotify(`Gagal memuat activity logs: ${err.message}`)
-    );
-    const unsubClaims = subscribeAllClaims(setAllClaims, (err) =>
-      onNotify(`Gagal memuat riwayat klaim: ${err.message}`)
-    );
-    const unsubAsp = subscribeAllAspirations(setAllAspirations, (err) =>
-      onNotify(`Gagal memuat aspirasi masuk: ${err.message}`)
     );
 
     return () => {
@@ -127,17 +127,8 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
   const [clDesc, setClDesc] = useState('');
   const [savingCaleg, setSavingCaleg] = useState(false);
 
-  const requireGoogleSuperAdmin = (): boolean => {
-    if (hasGoogleSuperAdmin) return true;
-    onNotify(
-      'Silakan klik tombol "Verifikasi Google Superadmin" di bagian atas panel terlebih dahulu untuk menyimpan atau mengubah data di Cloud Firestore.'
-    );
-    return false;
-  };
-
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!requireGoogleSuperAdmin()) return;
     setSavingEvent(true);
     try {
       await createEventAdmin({
@@ -165,7 +156,6 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
 
   const handleAddReward = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!requireGoogleSuperAdmin()) return;
     setSavingReward(true);
     try {
       await createRewardAdmin({
@@ -186,7 +176,6 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
 
   const handleAddCaleg = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!requireGoogleSuperAdmin()) return;
     setSavingCaleg(true);
     try {
       await createCalegInfoAdmin({
@@ -250,21 +239,21 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h2 className="text-xl font-extrabold text-slate-900">
-              Panel Manajemen Superadmin
+              {panelTitle}
             </h2>
             <p className="text-sm text-slate-600">
-              Kelola jadwal acara kampanye, katalog reward, info partai &amp; Caleg, data pemilih, dan laporan aktivitas real-time.
+              Kelola jadwal acara kampanye &amp; peta, katalog reward &amp; klaim, info partai &amp; Caleg, data voter/konstituen, dan log aspirasi real-time.
             </p>
           </div>
-          {hasGoogleSuperAdmin && (
+          {isSuperAdmin && hasGoogleSuperAdmin && (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold shrink-0">
               <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-              <span>Sesi Google Superadmin Terverifikasi</span>
+              <span>Sesi Google SuperAdmin Terverifikasi</span>
             </span>
           )}
         </div>
 
-        {!hasGoogleSuperAdmin && onConnectGoogleAdmin && (
+        {isSuperAdmin && !hasGoogleSuperAdmin && onConnectGoogleAdmin && (
           <div className="rounded-2xl bg-indigo-50 border border-indigo-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-3">
               <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 mt-0.5">
@@ -272,10 +261,10 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
               </div>
               <div className="space-y-0.5">
                 <p className="text-xs font-extrabold text-indigo-950">
-                  Verifikasi Google Superadmin untuk Akses Penuh Data Sensitif &amp; Penulisan Firestore
+                  Verifikasi Google SuperAdmin (Opsional untuk Log Aktivitas Lengkap)
                 </p>
                 <p className="text-xs text-indigo-800 leading-relaxed">
-                  Anda login melalui akun Super Admin (Username &amp; Password). Hubungkan akun Google Superadmin terdaftar untuk membuka data Voters Google SSO, Riwayat Klaim, Activity Log, serta menyimpan perubahan Acara/Reward/Caleg.
+                  Acara, Reward, Info Caleg, Data Voter, dan Aspirasi sudah aktif. Hubungkan akun Google SuperAdmin jika ingin membuka Book Activity Login tambahan.
                 </p>
               </div>
             </div>
@@ -294,7 +283,7 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
             >
               <Shield className="w-3.5 h-3.5" />
               <span>
-                {isConnectingGoogle ? 'Menghubungkan...' : 'Verifikasi Google Superadmin'}
+                {isConnectingGoogle ? 'Menghubungkan...' : 'Verifikasi Google SuperAdmin'}
               </span>
             </button>
           </div>
@@ -382,13 +371,13 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Daerah / Dapil *</label>
+                <label className="text-xs font-bold text-slate-700">Kelurahan / Kecamatan *</label>
                 <input
                   type="text"
                   required
                   value={evRegion}
                   onChange={(e) => setEvRegion(e.target.value)}
-                  placeholder="Contoh: Kec. Cilandak"
+                  placeholder="Contoh: Kel. Cilandak Barat, Kec. Cilandak"
                   className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-slate-300 text-sm"
                 />
               </div>
@@ -505,7 +494,6 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        if (!requireGoogleSuperAdmin()) return;
                         deleteEventAdmin(ev.id)
                           .then(() => onNotify('Acara dihapus.'))
                           .catch((err) => onNotify(err.message));
@@ -615,7 +603,6 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          if (!requireGoogleSuperAdmin()) return;
                           deleteRewardAdmin(item.id)
                             .then(() => onNotify('Reward dihapus.'))
                             .catch((err) => onNotify(err.message));
@@ -648,7 +635,7 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-bold">
                     <tr>
-                      <th className="px-4 py-3">Pemilih</th>
+                      <th className="px-4 py-3">Voter / Relawan</th>
                       <th className="px-4 py-3">No. WA</th>
                       <th className="px-4 py-3">Reward</th>
                       <th className="px-4 py-3">Poin</th>
@@ -679,7 +666,6 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                             <button
                               type="button"
                               onClick={() => {
-                                if (!requireGoogleSuperAdmin()) return;
                                 markClaimDiserahkanAdmin(claim.id)
                                   .then(() => onNotify('Status klaim diperbarui ke DISERAHKAN.'))
                                   .catch((err) => onNotify(err.message));
@@ -739,13 +725,13 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Daerah / Dapil *</label>
+                <label className="text-xs font-bold text-slate-700">Kelurahan / Wilayah *</label>
                 <input
                   type="text"
                   required
                   value={clRegion}
                   onChange={(e) => setClRegion(e.target.value)}
-                  placeholder="Samakan dengan Dapil Voters agar otomatis tampil"
+                  placeholder="Contoh: Jakarta Selatan — Kec. Cilandak"
                   className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-slate-300 text-sm"
                 />
               </div>
@@ -797,7 +783,6 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        if (!requireGoogleSuperAdmin()) return;
                         deleteCalegInfoAdmin(info.id)
                           .then(() => onNotify('Info Caleg dihapus.'))
                           .catch((err) => onNotify(err.message));
@@ -823,10 +808,10 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
             <div className="p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">
-                  Data Pemilih Terdaftar &amp; Peta Suara ({filteredOcrVoters.length})
+                  Data Voter / Konstituen Terdaftar &amp; Peta Suara ({filteredOcrVoters.length})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Mencakup pemilih Daftar Online, Google SSO, dan pendataan e-KTP yang tampil otomatis di Peta Suara.
+                  Seluruh Voter/Konstituen terdaftar dengan struktur Kota, Kecamatan, Kelurahan, &amp; Alamat Lengkap yang tersinkron ke Peta Suara.
                 </p>
               </div>
               <div className="relative w-full sm:w-72">
@@ -835,7 +820,7 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                   type="text"
                   value={voterSearch}
                   onChange={(e) => setVoterSearch(e.target.value)}
-                  placeholder="Cari nama, NIK, wilayah, TPS, atau WA..."
+                  placeholder="Cari nama, NIK, Kelurahan, Kecamatan, Kota..."
                   className="w-full min-h-[40px] pl-9 pr-3 py-1.5 rounded-xl border border-slate-300 text-xs"
                 />
               </div>
@@ -843,18 +828,18 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
 
             {filteredOcrVoters.length === 0 ? (
               <div className="p-6 text-center text-sm text-slate-500">
-                Belum ada data pemilih e-KTP terdaftar.
+                Belum ada data Voter / Konstituen terdaftar.
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-bold">
                     <tr>
-                      <th className="px-4 py-3">Nama Pemilih</th>
+                      <th className="px-4 py-3">Nama Voter</th>
                       <th className="px-4 py-3">NIK</th>
-                      <th className="px-4 py-3">Wilayah &amp; TPS</th>
+                      <th className="px-4 py-3">Kota / Kecamatan / Kelurahan &amp; Alamat</th>
                       <th className="px-4 py-3">No. Telepon</th>
-                      <th className="px-4 py-3">Diinput Oleh</th>
+                      <th className="px-4 py-3">Penginput</th>
                       <th className="px-4 py-3 text-right">Status</th>
                     </tr>
                   </thead>
@@ -866,7 +851,7 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                             {v.fotoKtpUrl && (
                               <img
                                 src={v.fotoKtpUrl}
-                                alt={`KTP ${v.nama}`}
+                                alt={`ID ${v.nama}`}
                                 className="w-10 h-7 rounded object-cover border border-slate-200 shrink-0"
                               />
                             )}
@@ -881,17 +866,17 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                         </td>
                         <td className="px-4 py-3">
                           <p className="font-semibold text-blue-700">
-                            {v.tps} &middot; {v.kelurahan}, {v.kecamatan}
+                            Kel. {v.kelurahan || '-'}, Kec. {v.kecamatan || '-'}, {v.kabupatenKota || '-'}
                           </p>
                           <p className="text-[11px] text-slate-500 max-w-xs truncate">
-                            {v.alamat} ({v.kabupatenKota})
+                            {v.alamat || '-'}
                           </p>
                         </td>
                         <td className="px-4 py-3 font-mono">{v.noHp || '-'}</td>
                         <td className="px-4 py-3 text-slate-600">{v.terdaftarOleh || '-'}</td>
                         <td className="px-4 py-3 text-right">
                           <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[10px]">
-                            {v.statusDpt || 'DPT valid'}
+                            {v.statusDpt || 'Terdaftar'}
                           </span>
                         </td>
                       </tr>

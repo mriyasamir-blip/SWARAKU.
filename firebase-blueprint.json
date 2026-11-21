@@ -41,16 +41,21 @@
     },
     "UserAccount": {
       "title": "UserAccount",
-      "description": "Akun tim kampanye multi-perangkat (Super Admin, Admin, Tim Sukses, Kader)",
+      "description": "Akun tim support & relawan multi-perangkat (SuperAdmin, Admin, Korwil, Korcam, Relawan)",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
-        "role": { "type": "string", "enum": ["super_admin", "admin", "tim_sukses", "kader"] },
+        "role": { "type": "string", "enum": ["super_admin", "admin", "tim_sukses", "kader", "relawan"] },
         "nama": { "type": "string", "maxLength": 120 },
         "username": { "type": "string", "maxLength": 80 },
         "email": { "type": "string", "maxLength": 150 },
+        "nik": { "type": "string", "maxLength": 32 },
         "jabatan": { "type": "string", "maxLength": 160 },
         "wilayah": { "type": "string", "maxLength": 160 },
+        "kota": { "type": "string", "maxLength": 120 },
+        "kecamatan": { "type": "string", "maxLength": 120 },
+        "kelurahan": { "type": "string", "maxLength": 120 },
+        "points": { "type": "number" },
         "idPegawai": { "type": "string", "maxLength": 60 },
         "divisi": { "type": "string", "maxLength": 120 },
         "tps": { "type": "string", "maxLength": 60 },
@@ -63,6 +68,8 @@
         "timSuksesId": { "type": "string", "maxLength": 128 },
         "timSuksesNama": { "type": "string", "maxLength": 120 },
         "didaftarkanOlehTimSukses": { "type": "string", "maxLength": 120 },
+        "korcamId": { "type": "string", "maxLength": 128 },
+        "korcamNama": { "type": "string", "maxLength": 120 },
         "kaderList": { "type": "array" },
         "kaderIds": { "type": "array" }
       },
@@ -182,6 +189,27 @@
         "lastUpdated": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "namaKader", "gpsStatus", "lastUpdated"]
+    },
+    "LiveLocation": {
+      "title": "LiveLocation",
+      "description": "Posisi GPS real-time terakhir Korwil, Korcam, dan Relawan untuk menu Monitoring Relawan",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "nama": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["Korwil", "Korcam", "Relawan", "Tim Sukses", "Kader"] },
+        "timSuksesId": { "type": "string", "maxLength": 128 },
+        "namaTimSukses": { "type": "string", "maxLength": 120 },
+        "korcamId": { "type": "string", "maxLength": 128 },
+        "namaKorcam": { "type": "string", "maxLength": 120 },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "accuracy": { "type": "number" },
+        "address": { "type": "string", "maxLength": 300 },
+        "gpsStatus": { "type": "string", "enum": ["Aktif", "Tidak Aktif", "Ditolak"] },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "nama", "role", "gpsStatus", "lastUpdated"]
     }
   },
   "firestore": {
@@ -200,6 +228,10 @@
     "/kader_locations/{userId}": {
       "schema": { "$ref": "#/entities/KaderLocation" },
       "description": "Tracking GPS real-time terakhir per akun Kader (1 dokumen per Kader)"
+    },
+    "/live_locations/{userId}": {
+      "schema": { "$ref": "#/entities/LiveLocation" },
+      "description": "Tracking GPS real-time Tim Sukses & Kader untuk Monitoring berbasis role"
     },
     "/referral_codes/{code}": {
       "schema": { "$ref": "#/entities/ReferralCode" },

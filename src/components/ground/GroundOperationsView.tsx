@@ -44,7 +44,7 @@ export const GroundOperationsView: React.FC<GroundOperationsViewProps> = ({
   const [nama, setNama] = useState('');
   const [nik, setNik] = useState('');
   const [noHp, setNoHp] = useState('');
-  const [tps, setTps] = useState('TPS 047');
+  const [tps, setTps] = useState('Kel. Cilandak Barat');
   const [rtRw, setRtRw] = useState('RT 03 / RW 04');
   const [isuPrioritas, setIsuPrioritas] = useState('Infrastruktur Jalan');
   const [dptSyncInfo, setDptSyncInfo] = useState<string | null>(null);
@@ -57,8 +57,8 @@ export const GroundOperationsView: React.FC<GroundOperationsViewProps> = ({
       const dpt = lookupDptKpu(clean);
       if (dpt) {
         setNama(dpt.nama);
-        setTps(dpt.tps);
-        setDptSyncInfo(`Terverifikasi DPT KPU (${dpt.nama} - ${dpt.tps})`);
+        setTps(dpt.kelurahan || dpt.tps);
+        setDptSyncInfo(`Terverifikasi DPT (${dpt.nama} - ${dpt.kelurahan || dpt.tps})`);
       }
     } else {
       setDptSyncInfo(null);
@@ -69,28 +69,28 @@ export const GroundOperationsView: React.FC<GroundOperationsViewProps> = ({
       id: 'reg-1',
       nama: 'Bambang Sudirman',
       nikMasked: '3174 •••• •••• 4120',
-      tps: 'TPS 047',
+      tps: 'Kel. Cilandak Barat',
       noHp: '0812-9844-xxxx',
       waktu: '10 menit lalu',
-      status: 'Terverifikasi e-KTP',
+      status: 'Terverifikasi ID',
     },
     {
       id: 'reg-2',
       nama: 'Siti Nurhaliza',
       nikMasked: '3174 •••• •••• 9811',
-      tps: 'TPS 047',
+      tps: 'Kel. Cilandak Barat',
       noHp: '0813-8120-xxxx',
       waktu: '35 menit lalu',
-      status: 'Terverifikasi e-KTP',
+      status: 'Terverifikasi ID',
     },
     {
       id: 'reg-3',
       nama: 'Hendro Wijaya',
       nikMasked: '3174 •••• •••• 7731',
-      tps: 'TPS 048',
+      tps: 'Kel. Cipete Selatan',
       noHp: '0817-6421-xxxx',
       waktu: '1 jam lalu',
-      status: 'Terverifikasi e-KTP',
+      status: 'Terverifikasi ID',
     },
   ]);
 
@@ -135,16 +135,16 @@ export const GroundOperationsView: React.FC<GroundOperationsViewProps> = ({
             <span>DOOR-TO-DOOR &amp; CANVASSING</span>
           </div>
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">
-            Portal Kader &amp; Relawan Lapangan
+            Operasi Lapangan &amp; Canvassing Wilayah
           </h1>
           <p className="text-sm text-slate-600 mt-1 max-w-2xl leading-relaxed">
-            Kader mendapatkan kode referral unik dan instrumen canvassing lapangan. Setiap pemilih yang didaftarkan terverifikasi secara transparan dan menghasilkan Poin Suara kader.
+            Korwil, Korcam, dan Relawan mendapatkan kode referral unik serta instrumen canvassing lapangan. Setiap Voter/Konstituen yang didaftarkan terverifikasi transparan dan menghasilkan +10 Poin otomatis.
           </p>
         </div>
 
         <div className="flex items-center gap-4 bg-white p-4 rounded-2xl border border-amber-200 shadow-xs shrink-0">
           <div>
-            <span className="text-xs text-slate-500 block font-semibold">Poin Suara Kader</span>
+            <span className="text-xs text-slate-500 block font-semibold">Total Poin Lapangan</span>
             <div className="flex items-baseline gap-1.5 mt-0.5">
               <span className="text-2xl font-black text-amber-600 font-mono">
                 {kaderPoints.toLocaleString('id-ID')}
@@ -163,9 +163,9 @@ export const GroundOperationsView: React.FC<GroundOperationsViewProps> = ({
         {/* Left Column: Unique QR Referral Card */}
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <h2 className="text-sm font-bold text-slate-900">QR Referral Unik Kader</h2>
+            <h2 className="text-sm font-bold text-slate-900">QR Referral Koordinator</h2>
             <span className="text-[11px] font-semibold text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded-full">
-              Kader #047
+              Tim Lapangan
             </span>
           </div>
 
@@ -176,22 +176,22 @@ export const GroundOperationsView: React.FC<GroundOperationsViewProps> = ({
             <div>
               <span className="text-[11px] text-slate-500 block">Kode Referral Anda</span>
               <span className="font-mono text-base font-extrabold text-slate-900 tracking-wider">
-                REF-KADER-047
+                REF-SWARAKU-01
               </span>
             </div>
             <p className="text-xs text-slate-600 leading-relaxed">
-              Minta calon pemilih memindai QR ini saat door-to-door untuk membuka formulir onboarding langsung di ponsel mereka.
+              Gunakan QR ini saat canvassing door-to-door untuk memudahkan verifikasi Voter di Kelurahan Anda.
             </p>
           </div>
 
           <div className="space-y-2 text-xs">
             <div className="flex items-center justify-between p-2.5 bg-emerald-50 text-emerald-900 rounded-xl border border-emerald-100">
-              <span className="font-medium">Reward Perekrutan</span>
-              <span className="font-bold">+50 Poin Suara / Pemilih</span>
+              <span className="font-medium">Reward Pendaftaran Voter</span>
+              <span className="font-bold">+10 Poin / Konstituen</span>
             </div>
             <div className="flex items-center justify-between p-2.5 bg-cyan-50 text-cyan-900 rounded-xl border border-cyan-100">
-              <span className="font-medium">Dapil Operasional</span>
-              <span className="font-bold">DKI Jakarta II (Cilandak)</span>
+              <span className="font-medium">Kelurahan Operasional</span>
+              <span className="font-bold">Cilandak Barat, Jakarta Selatan</span>
             </div>
           </div>
         </div>
@@ -260,19 +260,19 @@ export const GroundOperationsView: React.FC<GroundOperationsViewProps> = ({
                       required
                     />
                     <span className="text-[10px] text-cyan-600 block mt-0.5">
-                      Ketik 16 digit NIK untuk otomatis memuat Nama &amp; TPS dari DPT KPU
+                      Ketik 16 digit NIK untuk otomatis memuat Nama &amp; Kelurahan
                     </span>
                   </div>
 
                   <div>
                     <label className="font-semibold text-slate-700 block mb-1">
-                      Nama Lengkap Pemilih
+                      Nama Lengkap Voter / Konstituen
                     </label>
                     <input
                       type="text"
                       value={nama}
                       onChange={(e) => setNama(e.target.value)}
-                      placeholder="Nama otomatis terisi dari DPT"
+                      placeholder="Nama otomatis terisi atau ketik manual"
                       className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:border-cyan-500 font-semibold"
                       required
                     />
@@ -293,41 +293,41 @@ export const GroundOperationsView: React.FC<GroundOperationsViewProps> = ({
 
                   <div>
                     <label className="font-semibold text-slate-700 block mb-1">
-                      Alokasi TPS
+                      Kelurahan
                     </label>
                     <input
                       type="text"
                       value={tps}
                       onChange={(e) => setTps(e.target.value)}
-                      placeholder="e.g. TPS 047"
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:border-cyan-500 font-mono font-bold text-cyan-800"
+                      placeholder="Contoh: Kel. Cilandak Barat"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:border-cyan-500 font-semibold text-cyan-800"
                     />
                   </div>
                 </div>
 
                 <div>
                   <label className="font-semibold text-slate-700 block mb-1 text-xs">
-                    Isu Prioritas yang Dikeluhkan Warga
+                    Alamat Lengkap / Catatan Lapangan
                   </label>
                   <input
                     type="text"
                     value={isuPrioritas}
                     onChange={(e) => setIsuPrioritas(e.target.value)}
-                    placeholder="e.g. Saluran air mampet saat hujan lebat"
+                    placeholder="Contoh: Jl. Fatmawati No. 12 RT 03/04"
                     className="w-full text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:border-cyan-500"
                   />
                 </div>
 
                 <div className="flex items-center justify-between pt-2">
                   <span className="text-[11px] text-slate-500">
-                    🔒 NIK akan otomatis dienkripsi SHA-256 untuk audit trail legal.
+                    Tersinkron otomatis ke Database &amp; Peta Suara Kelurahan.
                   </span>
                   <button
                     type="submit"
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer"
                   >
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>Daftarkan &amp; Klaim +50 Poin</span>
+                    <span>Daftarkan &amp; Klaim +10 Poin</span>
                   </button>
                 </div>
               </form>

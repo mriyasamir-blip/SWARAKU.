@@ -229,24 +229,41 @@ export async function createMultipleUsersOnCloud(
   };
 }
 
-const ROLE_LABEL_MAP: Record<UserRole, string> = {
-  super_admin: 'Super Admin',
+export const ROLE_LABEL_MAP: Record<UserRole, string> = {
+  super_admin: 'SuperAdmin',
   admin: 'Admin',
-  tim_sukses: 'Tim Sukses',
-  kader: 'Kader',
+  tim_sukses: 'Korwil',
+  kader: 'Korcam',
+  relawan: 'Relawan',
+};
+
+export const UNREGISTERED_ACCOUNT_ERROR =
+  'Akun Anda belum terdaftar. Silakan hubungi Admin atau Koordinator terkait.';
+
+const BOOTSTRAPPED_SUPERADMIN_EMAILS = ['m.riyasamir@gmail.com', 'admin@swaraku.online'];
+
+const LEGACY_USERNAME_ALIAS: Record<string, string> = {
+  timsukses: 'acc-timsukses',
+  'timsukses@swaraku.com': 'acc-timsukses',
+  kader: 'acc-kader',
+  'kader@swaraku.com': 'acc-kader',
 };
 
 /**
- * 3. Validasi Login secara langsung ke Cloud Database (Cross-Device).
- * TIDAK MENGECEK KE LOCALSTORAGE BROWSER.
+ * 3. Validasi Login secara langsung ke Cloud Database (Cross-Device) dengan Whitelist ketat.
  */
 export async function loginUserOnCloud(
   usernameOrEmail: string,
   plainPassword?: string,
-  expectedRole?: UserRole
+  allowedRoles?: UserRole | UserRole[]
 ): Promise<{ success: boolean; user?: UserAccount; message?: string }> {
   const cleanInput = (usernameOrEmail || '').trim().toLowerCase();
   const cleanPassword = (plainPassword || '').trim();
+  const roleList: UserRole[] | null = allowedRoles
+    ? Array.isArray(allowedRoles)
+      ? allowedRoles
+      : [allowedRoles]
+    : null;
 
   if (!cleanInput) {
     return { success: false, message: 'Silakan masukkan Username atau Email Anda.' };
@@ -255,19 +272,22 @@ export async function loginUserOnCloud(
     return { success: false, message: 'Silakan masukkan Kata Sandi atau PIN akun Anda.' };
   }
 
-  const validateMatchedUser = (raw: UserAccount): { success: boolean; user?: UserAccount; message?: string } => {
+  const validateMatchedUser = (
+    raw: UserAccount
+  ): { success: boolean; user?: UserAccount; message?: string } => {
     const targetUser = normalizeUserAccount(raw);
     if (targetUser.status === 'Nonaktif') {
       return {
         success: false,
-        message: 'Akun Anda dinonaktifkan oleh Super Admin. Silakan hubungi Super Admin.',
+        message: 'Akun Anda sedang dinonaktifkan. Silakan hubungi Admin atau Koordinator terkait.',
       };
     }
 
-    if (expectedRole && targetUser.role !== expectedRole) {
+    if (roleList && !roleList.includes(targetUser.role)) {
+      const targetTab = targetUser.role === 'relawan' ? 'Relawan' : 'Tim Support';
       return {
         success: false,
-        message: `Akun ini terdaftar sebagai ${ROLE_LABEL_MAP[targetUser.role]}, bukan ${ROLE_LABEL_MAP[expectedRole]}. Silakan pilih tab login ${ROLE_LABEL_MAP[targetUser.role]}.`,
+        message: `Akun ini terdaftar sebagai ${ROLE_LABEL_MAP[targetUser.role]}. Silakan masuk melalui tab ${targetTab}.`,
       };
     }
 
@@ -275,7 +295,7 @@ export async function loginUserOnCloud(
     if (registeredPassword !== cleanPassword) {
       return {
         success: false,
-        message: 'Kata sandi atau PIN yang dimasukkan tidak cocok di Server Cloud Database.',
+        message: 'Kata sandi atau PIN yang dimasukkan tidak cocok.',
       };
     }
 
@@ -287,13 +307,19 @@ export async function loginUserOnCloud(
     const colRef = collection(firestore, FIRESTORE_USERS_COLLECTION);
     const snap = await getDocs(colRef);
     let matchedUser: UserAccount | null = null;
+    const aliasId = LEGACY_USERNAME_ALIAS[cleanInput];
 
     snap.forEach((d) => {
       const u = normalizeUserAccount(d.data());
       const uName = (u.username || '').trim().toLowerCase();
       const uEmail = (u.email || '').trim().toLowerCase();
       const uId = (u.id || '').trim().toLowerCase();
-      if (uName === cleanInput || uEmail === cleanInput || uId === cleanInput) {
+      if (
+        uName === cleanInput ||
+        uEmail === cleanInput ||
+        uId === cleanInput ||
+        (aliasId && uId === aliasId)
+      ) {
         matchedUser = u;
       }
     });
@@ -321,10 +347,12 @@ export async function loginUserOnCloud(
   }
 
   // C. Fallback kredensial preset bawaan sistem & auto-sync ke Firestore
+  const aliasId = LEGACY_USERNAME_ALIAS[cleanInput];
   const presetFound = PRESET_ACCOUNTS.find(
     (u) =>
       (u.username || '').trim().toLowerCase() === cleanInput ||
-      (u.email || '').trim().toLowerCase() === cleanInput
+      (u.email || '').trim().toLowerCase() === cleanInput ||
+      (aliasId && u.id === aliasId)
   );
 
   if (presetFound) {
@@ -343,8 +371,119 @@ export async function loginUserOnCloud(
 
   return {
     success: false,
-    message: `Akun "${cleanInput}" belum terdaftar di Cloud Database. Pastikan Super Admin sudah mendaftarkan akun ini.`,
+    message: UNREGISTERED_ACCOUNT_ERROR,
   };
+}
+
+/**
+ * 3b. Validasi Login SSO / Google untuk Tim Support (Wajib Terdaftar di Whitelist Database User).
+ */
+export async function loginUserByGoogleEmailOnCloud(
+  email: string,
+  allowedRoles: UserRole[] = ['super_admin', 'admin', 'tim_sukses', 'kader']
+): Promise<{ success: boolean; user?: UserAccount; message?: string }> {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail) {
+    return { success: false, message: UNREGISTERED_ACCOUNT_ERROR };
+  }
+
+  const checkAccount = (
+    raw: UserAccount
+  ): { success: boolean; user?: UserAccount; message?: string } => {
+    const target = normalizeUserAccount(raw);
+    if (target.status === 'Nonaktif') {
+      return {
+        success: false,
+        message: 'Akun Anda sedang dinonaktifkan. Silakan hubungi Admin atau Koordinator terkait.',
+      };
+    }
+    if (!allowedRoles.includes(target.role)) {
+      const targetTab = target.role === 'relawan' ? 'Relawan' : 'Tim Support';
+      return {
+        success: false,
+        message: `Email ini terdaftar sebagai ${ROLE_LABEL_MAP[target.role]}. Silakan masuk melalui tab ${targetTab}.`,
+      };
+    }
+    return { success: true, user: target };
+  };
+
+  // 1. Cek langsung di koleksi user_accounts Firestore
+  try {
+    const colRef = collection(firestore, FIRESTORE_USERS_COLLECTION);
+    const snap = await getDocs(colRef);
+    let matchedUser: UserAccount | null = null;
+    snap.forEach((d) => {
+      const u = normalizeUserAccount(d.data());
+      if ((u.email || '').trim().toLowerCase() === cleanEmail) {
+        matchedUser = u;
+      }
+    });
+    if (matchedUser) {
+      return checkAccount(matchedUser);
+    }
+  } catch (err) {
+    console.warn('[UserApi] Validasi Google SSO Firestore notice:', err);
+  }
+
+  // 2. Cek preset akun bawaan & email SuperAdmin utama
+  if (BOOTSTRAPPED_SUPERADMIN_EMAILS.includes(cleanEmail)) {
+    const baseSuper = PRESET_ACCOUNTS.find((a) => a.role === 'super_admin')!;
+    const superAcc: UserAccount = {
+      ...baseSuper,
+      email: cleanEmail,
+    };
+    try {
+      const docRef = doc(firestore, FIRESTORE_USERS_COLLECTION, superAcc.id);
+      await setDoc(docRef, stripUndefined({ ...superAcc, updatedAt: new Date().toISOString() }), {
+        merge: true,
+      });
+    } catch {
+      // ignore
+    }
+    return checkAccount(superAcc);
+  }
+
+  const presetByEmail = PRESET_ACCOUNTS.find(
+    (u) => (u.email || '').trim().toLowerCase() === cleanEmail
+  );
+  if (presetByEmail) {
+    return checkAccount(presetByEmail);
+  }
+
+  // Tolak akses jika email Google tidak ada di database whitelist
+  return {
+    success: false,
+    message: UNREGISTERED_ACCOUNT_ERROR,
+  };
+}
+
+/**
+ * 3c. Tambahkan poin otomatis ke akun penginput (Voter +10, Relawan +25, Korcam/Korwil +50) di Firestore.
+ */
+export async function awardUserPointsOnCloud(
+  userId: string,
+  delta: number
+): Promise<number | null> {
+  if (!userId || !Number.isFinite(delta) || delta <= 0) return null;
+  try {
+    const docRef = doc(firestore, FIRESTORE_USERS_COLLECTION, userId);
+    const snap = await getDoc(docRef);
+    const currentPoints =
+      snap.exists() && typeof snap.data()?.points === 'number' ? snap.data().points : 0;
+    const nextPoints = Math.min(1_000_000, currentPoints + Math.round(delta));
+    await setDoc(
+      docRef,
+      {
+        points: nextPoints,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+    return nextPoints;
+  } catch (err) {
+    console.warn('[UserApi] Gagal menyimpan poin ke Firestore:', err);
+    return null;
+  }
 }
 
 /**

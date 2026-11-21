@@ -101,7 +101,7 @@ export const AspirasiScreen: React.FC<AspirasiScreenProps> = ({
           <div className="flex items-center justify-between pb-2 border-b border-slate-100">
             <span className="text-xs font-bold text-slate-900">Formulir Aspirasi Baru</span>
             <span className="text-[11px] font-semibold text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded-full border border-cyan-200">
-              Respon Tim Dapil
+              Respon Tim Wilayah
             </span>
           </div>
 
@@ -221,7 +221,7 @@ export const AspirasiScreen: React.FC<AspirasiScreenProps> = ({
           </div>
           <div className="p-2 bg-white rounded-xl border border-cyan-300 shadow-xs">
             <span className="block font-bold text-cyan-700">2. Progres</span>
-            <span className="text-[9px] text-slate-500">Kader &amp; Tim Kerja</span>
+            <span className="text-[9px] text-slate-500">Korwil, Korcam &amp; Relawan</span>
           </div>
           <div className="p-2 bg-white rounded-xl border border-emerald-300 shadow-xs">
             <span className="block font-bold text-emerald-700">3. Solusi</span>
