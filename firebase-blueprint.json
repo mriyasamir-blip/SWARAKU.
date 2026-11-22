@@ -102,39 +102,48 @@
     },
     "CampaignEvent": {
       "title": "CampaignEvent",
-      "description": "Jadwal acara kampanye partai/Caleg beserta koordinat peta Google Maps",
+      "description": "Jadwal acara kampanye partai/Caleg beserta wilayah berjenjang dan koordinat peta Google Maps",
       "type": "object",
       "properties": {
         "title": { "type": "string", "minLength": 2, "maxLength": 160 },
         "partyName": { "type": "string", "minLength": 1, "maxLength": 120 },
-        "region": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "region": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "kota": { "type": "string", "maxLength": 120 },
+        "kecamatan": { "type": "string", "maxLength": 120 },
+        "kelurahan": { "type": "string", "maxLength": 120 },
         "eventDate": { "type": "string", "minLength": 4, "maxLength": 60 },
+        "description": { "type": "string", "maxLength": 1200 },
+        "eventStatus": { "type": "string", "enum": ["Akan Datang", "Berlangsung", "Selesai"] },
         "pointReward": { "type": "number" },
         "address": { "type": "string", "minLength": 4, "maxLength": 300 },
         "lat": { "type": "number" },
         "lng": { "type": "number" },
         "rsvpYes": { "type": "array" },
         "rsvpNo": { "type": "array" },
+        "createdByName": { "type": "string", "maxLength": 120 },
+        "createdByRole": { "type": "string", "maxLength": 40 },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["title", "partyName", "region", "eventDate", "pointReward", "address", "lat", "lng", "rsvpYes", "rsvpNo", "createdAt"]
     },
     "RewardItem": {
       "title": "RewardItem",
-      "description": "Katalog barang/reward yang dapat ditukar dengan poin Voters",
+      "description": "Katalog barang/reward yang dapat ditukar dengan poin Relawan dan Pemilih",
       "type": "object",
       "properties": {
         "itemName": { "type": "string", "minLength": 2, "maxLength": 140 },
         "pointCost": { "type": "number" },
         "stock": { "type": "number" },
-        "description": { "type": "string", "maxLength": 400 },
+        "description": { "type": "string", "maxLength": 500 },
+        "imageUrl": { "type": "string", "maxLength": 350000 },
+        "iconKey": { "type": "string", "maxLength": 40 },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["itemName", "pointCost", "stock", "description", "createdAt"]
     },
     "RewardClaim": {
       "title": "RewardClaim",
-      "description": "Riwayat klaim penukaran poin oleh Voters",
+      "description": "Riwayat klaim penukaran poin oleh Relawan dan Pemilih",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
@@ -143,7 +152,12 @@
         "rewardId": { "type": "string", "maxLength": 128 },
         "itemName": { "type": "string", "maxLength": 140 },
         "pointUsed": { "type": "number" },
-        "status": { "type": "string", "enum": ["MENUNGGU", "DISERAHKAN"] },
+        "status": { "type": "string", "enum": ["MENUNGGU", "DISETUJUI", "DITOLAK", "SELESAI", "DISERAHKAN"] },
+        "accountType": { "type": "string", "enum": ["relawan", "voter"] },
+        "userRole": { "type": "string", "maxLength": 40 },
+        "wilayah": { "type": "string", "maxLength": 160 },
+        "processedBy": { "type": "string", "maxLength": 120 },
+        "note": { "type": "string", "maxLength": 300 },
         "claimedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "voterName", "phone", "rewardId", "itemName", "pointUsed", "status", "claimedAt"]

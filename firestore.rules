@@ -140,40 +140,62 @@ service cloud.firestore {
 
     function isValidEvent(data) {
       return data.keys().hasAll(['title', 'partyName', 'region', 'eventDate', 'pointReward', 'address', 'lat', 'lng', 'rsvpYes', 'rsvpNo', 'createdAt'])
-        && data.keys().hasOnly(['title', 'partyName', 'region', 'eventDate', 'pointReward', 'address', 'lat', 'lng', 'rsvpYes', 'rsvpNo', 'createdAt'])
+        && data.keys().hasOnly([
+          'title', 'partyName', 'region', 'kota', 'kecamatan', 'kelurahan',
+          'eventDate', 'description', 'eventStatus', 'pointReward',
+          'address', 'lat', 'lng', 'rsvpYes', 'rsvpNo',
+          'createdByName', 'createdByRole', 'createdAt'
+        ])
         && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
         && data.partyName is string && data.partyName.size() >= 1 && data.partyName.size() <= 120
-        && data.region is string && data.region.size() >= 2 && data.region.size() <= 120
+        && data.region is string && data.region.size() >= 2 && data.region.size() <= 160
+        && (!('kota' in data) || (data.kota is string && data.kota.size() <= 120))
+        && (!('kecamatan' in data) || (data.kecamatan is string && data.kecamatan.size() <= 120))
+        && (!('kelurahan' in data) || (data.kelurahan is string && data.kelurahan.size() <= 120))
         && data.eventDate is string && data.eventDate.size() >= 4 && data.eventDate.size() <= 60
+        && (!('description' in data) || (data.description is string && data.description.size() <= 1200))
+        && (!('eventStatus' in data) || (data.eventStatus in ['Akan Datang', 'Berlangsung', 'Selesai']))
         && data.pointReward is number && data.pointReward >= 0 && data.pointReward <= 10000
         && data.address is string && data.address.size() >= 4 && data.address.size() <= 300
         && data.lat is number && data.lat >= -90 && data.lat <= 90
         && data.lng is number && data.lng >= -180 && data.lng <= 180
         && data.rsvpYes is list && data.rsvpYes.size() <= 5000 && (data.rsvpYes.size() == 0 || data.rsvpYes[0] is string)
         && data.rsvpNo is list && data.rsvpNo.size() <= 5000 && (data.rsvpNo.size() == 0 || data.rsvpNo[0] is string)
+        && (!('createdByName' in data) || (data.createdByName is string && data.createdByName.size() <= 120))
+        && (!('createdByRole' in data) || (data.createdByRole is string && data.createdByRole.size() <= 40))
         && data.createdAt is timestamp;
     }
 
     function isValidReward(data) {
       return data.keys().hasAll(['itemName', 'pointCost', 'stock', 'description', 'createdAt'])
-        && data.keys().hasOnly(['itemName', 'pointCost', 'stock', 'description', 'createdAt'])
+        && data.keys().hasOnly(['itemName', 'pointCost', 'stock', 'description', 'imageUrl', 'iconKey', 'createdAt'])
         && data.itemName is string && data.itemName.size() >= 2 && data.itemName.size() <= 140
         && data.pointCost is number && data.pointCost >= 1 && data.pointCost <= 1000000
         && data.stock is number && data.stock >= 0 && data.stock <= 1000000
-        && data.description is string && data.description.size() <= 400
+        && data.description is string && data.description.size() <= 500
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 350000))
+        && (!('iconKey' in data) || (data.iconKey is string && data.iconKey.size() <= 40))
         && data.createdAt is timestamp;
     }
 
     function isValidRewardClaim(data) {
       return data.keys().hasAll(['uid', 'voterName', 'phone', 'rewardId', 'itemName', 'pointUsed', 'status', 'claimedAt'])
-        && data.keys().hasOnly(['uid', 'voterName', 'phone', 'rewardId', 'itemName', 'pointUsed', 'status', 'claimedAt'])
+        && data.keys().hasOnly([
+          'uid', 'voterName', 'phone', 'rewardId', 'itemName', 'pointUsed', 'status',
+          'accountType', 'userRole', 'wilayah', 'processedBy', 'note', 'claimedAt'
+        ])
         && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
         && data.voterName is string && data.voterName.size() >= 2 && data.voterName.size() <= 120
-        && data.phone is string && data.phone.size() >= 6 && data.phone.size() <= 30
+        && data.phone is string && data.phone.size() >= 1 && data.phone.size() <= 30
         && data.rewardId is string && isValidId(data.rewardId)
         && data.itemName is string && data.itemName.size() >= 2 && data.itemName.size() <= 140
         && data.pointUsed is number && data.pointUsed >= 1 && data.pointUsed <= 1000000
-        && data.status in ['MENUNGGU', 'DISERAHKAN']
+        && data.status in ['MENUNGGU', 'DISETUJUI', 'DITOLAK', 'SELESAI', 'DISERAHKAN']
+        && (!('accountType' in data) || (data.accountType in ['relawan', 'voter']))
+        && (!('userRole' in data) || (data.userRole is string && data.userRole.size() <= 40))
+        && (!('wilayah' in data) || (data.wilayah is string && data.wilayah.size() <= 160))
+        && (!('processedBy' in data) || (data.processedBy is string && data.processedBy.size() <= 120))
+        && (!('note' in data) || (data.note is string && data.note.size() <= 300))
         && data.claimedAt is timestamp;
     }
 
@@ -463,7 +485,7 @@ service cloud.firestore {
       allow delete: if isValidId(rewardId);
     }
 
-    // REWARD CLAIMS (Owner, SuperAdmin & Panel Manajemen Kampanye)
+    // REWARD CLAIMS (Relawan, Voter, & Panel Manajemen Kampanye Korwil/Korcam/Admin/SuperAdmin)
     match /reward_claims/{claimId} {
       allow get: if isValidId(claimId);
       allow list: if true;
@@ -471,16 +493,32 @@ service cloud.firestore {
         && isValidRewardClaim(incoming())
         && incoming().status == 'MENUNGGU'
         && incoming().claimedAt == request.time
-        && ((isVerifiedUser() && incoming().uid == request.auth.uid) || isManualVoterId(incoming().uid))
         && exists(/databases/$(database)/documents/rewards/$(incoming().rewardId))
         && incoming().pointUsed == get(/databases/$(database)/documents/rewards/$(incoming().rewardId)).data.pointCost
         && getAfter(/databases/$(database)/documents/rewards/$(incoming().rewardId)).data.stock == get(/databases/$(database)/documents/rewards/$(incoming().rewardId)).data.stock - 1
-        && getAfter(/databases/$(database)/documents/voters/$(incoming().uid)).data.points == get(/databases/$(database)/documents/voters/$(incoming().uid)).data.points - incoming().pointUsed;
+        && (
+          (
+            ((isVerifiedUser() && incoming().uid == request.auth.uid) || isManualVoterId(incoming().uid))
+            && exists(/databases/$(database)/documents/voters/$(incoming().uid))
+            && getAfter(/databases/$(database)/documents/voters/$(incoming().uid)).data.points == get(/databases/$(database)/documents/voters/$(incoming().uid)).data.points - incoming().pointUsed
+          )
+          || (
+            isValidId(incoming().uid)
+            && exists(/databases/$(database)/documents/user_accounts/$(incoming().uid))
+            && getAfter(/databases/$(database)/documents/user_accounts/$(incoming().uid)).data.points == get(/databases/$(database)/documents/user_accounts/$(incoming().uid)).data.points - incoming().pointUsed
+          )
+        );
       allow update: if isValidId(claimId)
         && isValidRewardClaim(incoming())
-        && incoming().diff(existing()).affectedKeys().hasOnly(['status'])
-        && existing().status == 'MENUNGGU'
-        && incoming().status == 'DISERAHKAN';
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'processedBy', 'note'])
+        && incoming().uid == existing().uid
+        && incoming().rewardId == existing().rewardId
+        && incoming().pointUsed == existing().pointUsed
+        && incoming().claimedAt == existing().claimedAt
+        && (
+          (existing().status == 'MENUNGGU' && incoming().status in ['DISETUJUI', 'DITOLAK', 'SELESAI', 'DISERAHKAN'])
+          || (existing().status == 'DISETUJUI' && incoming().status in ['SELESAI', 'DISERAHKAN', 'DITOLAK'])
+        );
       allow delete: if isSuperAdmin() && isValidId(claimId);
     }
 

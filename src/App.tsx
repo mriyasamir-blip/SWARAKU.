@@ -385,6 +385,9 @@ export default function App() {
             notify('Akun Anda telah dinonaktifkan oleh Super Admin.');
           } else {
             setStaffUser(updatedMe);
+            if (typeof updatedMe.points === 'number') {
+              setKaderPoints(updatedMe.points);
+            }
             localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(updatedMe));
           }
         }
@@ -550,6 +553,21 @@ export default function App() {
       }
     } catch {
       // Keep optimistic points in session
+    }
+  };
+
+  const handleSyncStaffPoints = (newPoints: number) => {
+    setKaderPoints(newPoints);
+    setStaffUser((prev) => {
+      if (!prev) return prev;
+      const synced: UserAccount = { ...prev, points: newPoints };
+      localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(synced));
+      return synced;
+    });
+    if (staffUser) {
+      setUserAccounts((prev) =>
+        prev.map((u) => (u.id === staffUser.id ? { ...u, points: newPoints } : u))
+      );
     }
   };
 
@@ -1002,6 +1020,7 @@ export default function App() {
           onRefreshUsers={handleRefreshStaffUsers}
           onConnectGoogleAdmin={handleGoogleLogin}
           onAwardPoints={handleAwardPoints}
+          onSyncStaffPoints={handleSyncStaffPoints}
           onNotify={notify}
           onSaveVoter={handleSaveVoterOcr}
           onSaveTimSukses={handleSaveTimSukses}

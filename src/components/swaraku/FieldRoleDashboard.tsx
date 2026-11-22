@@ -20,6 +20,7 @@ import {
   Navigation,
   Shield,
   Sparkles,
+  Gift,
 } from 'lucide-react';
 import type { FormB1Upload, FormC1Upload, UserAccount } from '../../types/vore';
 import type { StaffTab } from './StaffPortalApp';
@@ -134,7 +135,11 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
       <div className="space-y-6">
         {/* KPI Strip */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <div className="p-4 bg-white rounded-2xl border border-slate-200">
+          <button
+            type="button"
+            onClick={() => onNavigateTab('agenda_reward')}
+            className="p-4 bg-white hover:bg-amber-50/40 rounded-2xl border border-slate-200 text-left transition-colors cursor-pointer"
+          >
             <div className="flex items-center justify-between text-slate-500 mb-1.5">
               <span className="text-xs font-semibold">Poin Relawan</span>
               <Award className="w-4 h-4 text-amber-600" />
@@ -143,9 +148,9 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
               {kaderPoints.toLocaleString('id-ID')}
             </p>
             <p className="text-[11px] text-amber-700 font-semibold mt-1">
-              +10 Poin setiap Voter terdaftar
+              Tukar di Katalog Reward →
             </p>
-          </div>
+          </button>
 
           <button
             type="button"
@@ -212,7 +217,7 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
         </div>
 
         {/* Quick Modules */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
           <button
             type="button"
             onClick={() => onNavigateTab('registrasi')}
@@ -232,6 +237,25 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
               </div>
             </div>
             <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-amber-700 shrink-0 mt-1" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab('agenda_reward')}
+            className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-blue-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0">
+                <Gift className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-extrabold text-slate-900">Agenda &amp; Reward</h4>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  Lihat jadwal Agenda Partai terbaru, tukarkan poin dengan hadiah Katalog Reward, &amp; pantau Riwayat Klaim.
+                </p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-700 shrink-0 mt-1" />
           </button>
 
           <button

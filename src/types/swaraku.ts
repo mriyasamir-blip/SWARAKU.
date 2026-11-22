@@ -42,20 +42,39 @@ export interface ActivityLogDoc {
   timestamp?: Timestamp;
 }
 
+export type EventStatus = 'Akan Datang' | 'Berlangsung' | 'Selesai';
+
 export interface CampaignEventDoc {
   id: string;
   title: string;
   partyName: string;
   region: string;
+  kota?: string;
+  kecamatan?: string;
+  kelurahan?: string;
   eventDate: string;
+  description?: string;
+  eventStatus?: EventStatus;
   pointReward: number;
   address: string;
   lat: number;
   lng: number;
   rsvpYes: string[];
   rsvpNo: string[];
+  createdByName?: string;
+  createdByRole?: string;
   createdAt?: Timestamp;
 }
+
+export type RewardIconKey =
+  | 'gift'
+  | 'shirt'
+  | 'package'
+  | 'ticket'
+  | 'award'
+  | 'shopping'
+  | 'coffee'
+  | 'smartphone';
 
 export interface RewardDoc {
   id: string;
@@ -63,8 +82,17 @@ export interface RewardDoc {
   pointCost: number;
   stock: number;
   description: string;
+  imageUrl?: string;
+  iconKey?: RewardIconKey | string;
   createdAt?: Timestamp;
 }
+
+export type RewardClaimStatus =
+  | 'MENUNGGU'
+  | 'DISETUJUI'
+  | 'DITOLAK'
+  | 'SELESAI'
+  | 'DISERAHKAN';
 
 export interface RewardClaimDoc {
   id: string;
@@ -74,7 +102,12 @@ export interface RewardClaimDoc {
   rewardId: string;
   itemName: string;
   pointUsed: number;
-  status: 'MENUNGGU' | 'DISERAHKAN';
+  status: RewardClaimStatus;
+  accountType?: 'relawan' | 'voter';
+  userRole?: string;
+  wilayah?: string;
+  processedBy?: string;
+  note?: string;
   claimedAt?: Timestamp;
 }
 

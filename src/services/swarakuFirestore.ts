@@ -879,29 +879,98 @@ export async function createEventAdmin(input: {
   title: string;
   partyName: string;
   region: string;
+  kota?: string;
+  kecamatan?: string;
+  kelurahan?: string;
   eventDate: string;
+  description?: string;
+  eventStatus?: 'Akan Datang' | 'Berlangsung' | 'Selesai';
   pointReward: number;
   address: string;
   lat: number;
   lng: number;
+  createdByName?: string;
+  createdByRole?: string;
 }): Promise<void> {
   const path = 'events';
+  const payload: Record<string, unknown> = {
+    title: clampStr(input.title, 160),
+    partyName: clampStr(input.partyName, 120),
+    region: clampStr(input.region, 160),
+    eventDate: clampStr(input.eventDate, 60),
+    pointReward: Math.max(0, Math.min(10000, Math.round(Number(input.pointReward) || 0))),
+    address: clampStr(input.address, 300),
+    lat: Number(input.lat),
+    lng: Number(input.lng),
+    rsvpYes: [],
+    rsvpNo: [],
+    createdAt: serverTimestamp(),
+  };
+  if (input.kota?.trim()) payload.kota = clampStr(input.kota, 120);
+  if (input.kecamatan?.trim()) payload.kecamatan = clampStr(input.kecamatan, 120);
+  if (input.kelurahan?.trim()) payload.kelurahan = clampStr(input.kelurahan, 120);
+  if (input.description?.trim()) payload.description = clampStr(input.description, 1200);
+  if (input.eventStatus) payload.eventStatus = input.eventStatus;
+  if (input.createdByName?.trim()) payload.createdByName = clampStr(input.createdByName, 120);
+  if (input.createdByRole?.trim()) payload.createdByRole = clampStr(input.createdByRole, 40);
+
   try {
-    await addDoc(collection(db, path), {
-      title: clampStr(input.title, 160),
-      partyName: clampStr(input.partyName, 120),
-      region: clampStr(input.region, 120),
-      eventDate: clampStr(input.eventDate, 60),
-      pointReward: Math.max(0, Math.min(10000, Math.round(Number(input.pointReward) || 0))),
-      address: clampStr(input.address, 300),
-      lat: Number(input.lat),
-      lng: Number(input.lng),
-      rsvpYes: [],
-      rsvpNo: [],
-      createdAt: serverTimestamp(),
-    });
+    await addDoc(collection(db, path), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function updateEventAdmin(
+  eventId: string,
+  input: {
+    title: string;
+    partyName: string;
+    region: string;
+    kota?: string;
+    kecamatan?: string;
+    kelurahan?: string;
+    eventDate: string;
+    description?: string;
+    eventStatus?: 'Akan Datang' | 'Berlangsung' | 'Selesai';
+    pointReward: number;
+    address: string;
+    lat: number;
+    lng: number;
+  }
+): Promise<void> {
+  const path = `events/${eventId}`;
+  const patch: Record<string, unknown> = {
+    title: clampStr(input.title, 160),
+    partyName: clampStr(input.partyName, 120),
+    region: clampStr(input.region, 160),
+    eventDate: clampStr(input.eventDate, 60),
+    pointReward: Math.max(0, Math.min(10000, Math.round(Number(input.pointReward) || 0))),
+    address: clampStr(input.address, 300),
+    lat: Number(input.lat),
+    lng: Number(input.lng),
+    kota: clampStr(input.kota, 120),
+    kecamatan: clampStr(input.kecamatan, 120),
+    kelurahan: clampStr(input.kelurahan, 120),
+    description: clampStr(input.description, 1200),
+    eventStatus: input.eventStatus || 'Akan Datang',
+  };
+  try {
+    await updateDoc(doc(db, 'events', eventId), patch);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateEventStatusAdmin(
+  eventId: string,
+  eventStatus: 'Akan Datang' | 'Berlangsung' | 'Selesai'
+): Promise<void> {
+  const path = `events/${eventId}`;
+  try {
+    await updateDoc(doc(db, 'events', eventId), { eventStatus });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 
@@ -919,18 +988,51 @@ export async function createRewardAdmin(input: {
   pointCost: number;
   stock: number;
   description: string;
+  imageUrl?: string;
+  iconKey?: string;
 }): Promise<void> {
   const path = 'rewards';
+  const payload: Record<string, unknown> = {
+    itemName: clampStr(input.itemName, 140),
+    pointCost: Math.max(1, Math.min(1000000, Math.round(Number(input.pointCost) || 1))),
+    stock: Math.max(0, Math.min(1000000, Math.round(Number(input.stock) || 0))),
+    description: clampStr(input.description, 500),
+    createdAt: serverTimestamp(),
+  };
+  if (input.imageUrl?.trim()) payload.imageUrl = input.imageUrl.trim().slice(0, 350000);
+  if (input.iconKey?.trim()) payload.iconKey = clampStr(input.iconKey, 40);
+
   try {
-    await addDoc(collection(db, path), {
-      itemName: clampStr(input.itemName, 140),
-      pointCost: Math.max(1, Math.min(1000000, Math.round(Number(input.pointCost) || 1))),
-      stock: Math.max(0, Math.min(1000000, Math.round(Number(input.stock) || 0))),
-      description: clampStr(input.description, 400),
-      createdAt: serverTimestamp(),
-    });
+    await addDoc(collection(db, path), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function updateRewardAdmin(
+  rewardId: string,
+  input: {
+    itemName: string;
+    pointCost: number;
+    stock: number;
+    description: string;
+    imageUrl?: string;
+    iconKey?: string;
+  }
+): Promise<void> {
+  const path = `rewards/${rewardId}`;
+  const patch: Record<string, unknown> = {
+    itemName: clampStr(input.itemName, 140),
+    pointCost: Math.max(1, Math.min(1000000, Math.round(Number(input.pointCost) || 1))),
+    stock: Math.max(0, Math.min(1000000, Math.round(Number(input.stock) || 0))),
+    description: clampStr(input.description, 500),
+    imageUrl: (input.imageUrl || '').trim().slice(0, 350000),
+    iconKey: clampStr(input.iconKey || 'gift', 40),
+  };
+  try {
+    await updateDoc(doc(db, 'rewards', rewardId), patch);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 
@@ -940,6 +1042,164 @@ export async function deleteRewardAdmin(rewardId: string): Promise<void> {
     await deleteDoc(doc(db, 'rewards', rewardId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function redeemRelawanRewardAtomic(
+  relawan: {
+    id: string;
+    nama: string;
+    noHp?: string;
+    wilayah?: string;
+    kota?: string;
+    kecamatan?: string;
+    kelurahan?: string;
+    points?: number;
+  },
+  reward: RewardDoc
+): Promise<{ newPoints: number; claimId: string }> {
+  const path = 'reward_claims';
+  const wilayahLabel = [
+    relawan.kelurahan ? `Kel. ${relawan.kelurahan.replace(/^kel\.?\s*/i, '')}` : '',
+    relawan.kecamatan ? `Kec. ${relawan.kecamatan.replace(/^kec\.?\s*/i, '')}` : '',
+    relawan.kota || '',
+  ]
+    .filter(Boolean)
+    .join(', ') || relawan.wilayah || '-';
+
+  try {
+    return await runTransaction(db, async (tx) => {
+      const userRef = doc(db, 'user_accounts', relawan.id);
+      const rewardRef = doc(db, 'rewards', reward.id);
+
+      const [userSnap, rewardSnap] = await Promise.all([
+        tx.get(userRef),
+        tx.get(rewardRef),
+      ]);
+
+      if (!userSnap.exists()) {
+        throw new Error('Akun Relawan tidak ditemukan di database.');
+      }
+      if (!rewardSnap.exists()) {
+        throw new Error('Hadiah pada katalog tidak ditemukan.');
+      }
+
+      const freshUser = userSnap.data() as { points?: number; nama?: string; noHp?: string };
+      const freshReward = rewardSnap.data() as Omit<RewardDoc, 'id'>;
+      const currentPoints = typeof freshUser.points === 'number' ? freshUser.points : 0;
+
+      if (freshReward.stock <= 0) {
+        throw new Error('Maaf, stok reward ini sudah habis.');
+      }
+      if (currentPoints < freshReward.pointCost) {
+        const kurang = freshReward.pointCost - currentPoints;
+        throw new Error(`Poin Anda belum cukup (kurang ${kurang.toLocaleString('id-ID')} Poin).`);
+      }
+
+      const newPoints = currentPoints - freshReward.pointCost;
+      const claimRef = doc(collection(db, 'reward_claims'));
+
+      tx.update(userRef, { points: newPoints });
+      tx.update(rewardRef, { stock: freshReward.stock - 1 });
+      tx.set(claimRef, {
+        uid: relawan.id,
+        voterName: clampStr(freshUser.nama || relawan.nama, 120),
+        phone: clampStr(freshUser.noHp || relawan.noHp || '-', 30),
+        rewardId: reward.id,
+        itemName: clampStr(freshReward.itemName, 140),
+        pointUsed: freshReward.pointCost,
+        status: 'MENUNGGU',
+        accountType: 'relawan',
+        userRole: 'Relawan',
+        wilayah: clampStr(wilayahLabel, 160),
+        claimedAt: serverTimestamp(),
+      });
+
+      return { newPoints, claimId: claimRef.id };
+    });
+  } catch (error) {
+    if (error instanceof Error && (
+      error.message.includes('stok') ||
+      error.message.includes('Poin Anda') ||
+      error.message.includes('tidak ditemukan')
+    )) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function processRewardClaimAdmin(
+  claim: RewardClaimDoc,
+  nextStatus: 'DISETUJUI' | 'DITOLAK' | 'SELESAI',
+  processedBy: string,
+  note?: string
+): Promise<{ refundedPoints: number }> {
+  const path = `reward_claims/${claim.id}`;
+  try {
+    return await runTransaction(db, async (tx) => {
+      const claimRef = doc(db, 'reward_claims', claim.id);
+      const claimSnap = await tx.get(claimRef);
+      if (!claimSnap.exists()) {
+        throw new Error('Data pengajuan klaim tidak ditemukan.');
+      }
+      const freshClaim = claimSnap.data() as Omit<RewardClaimDoc, 'id'>;
+      if (freshClaim.status === 'SELESAI' || freshClaim.status === 'DISERAHKAN' || freshClaim.status === 'DITOLAK') {
+        throw new Error('Klaim ini sudah selesai diproses sebelumnya.');
+      }
+
+      const updatePayload: Record<string, unknown> = {
+        status: nextStatus,
+        processedBy: clampStr(processedBy, 120),
+      };
+      if (note?.trim()) {
+        updatePayload.note = clampStr(note, 300);
+      }
+
+      let refundedPoints = 0;
+
+      if (nextStatus === 'DITOLAK') {
+        // Read user account & reward BEFORE writes inside transaction
+        const userAccountRef = doc(db, 'user_accounts', freshClaim.uid);
+        const rewardRef = doc(db, 'rewards', freshClaim.rewardId);
+        const voterRef = doc(db, 'voters', freshClaim.uid);
+
+        const [userAccSnap, rewardSnap, voterSnap] = await Promise.all([
+          tx.get(userAccountRef),
+          tx.get(rewardRef),
+          freshClaim.accountType === 'relawan' ? Promise.resolve(null) : tx.get(voterRef),
+        ]);
+
+        tx.update(claimRef, updatePayload);
+
+        if (userAccSnap.exists()) {
+          const curPts = Number((userAccSnap.data() as { points?: number }).points || 0);
+          tx.update(userAccountRef, { points: curPts + freshClaim.pointUsed });
+          refundedPoints = freshClaim.pointUsed;
+        } else if (voterSnap && voterSnap.exists()) {
+          const curPts = Number((voterSnap.data() as { points?: number }).points || 0);
+          tx.update(voterRef, { points: curPts + freshClaim.pointUsed });
+          refundedPoints = freshClaim.pointUsed;
+        }
+
+        if (rewardSnap.exists()) {
+          const curStock = Number((rewardSnap.data() as { stock?: number }).stock || 0);
+          tx.update(rewardRef, { stock: curStock + 1 });
+        }
+      } else {
+        tx.update(claimRef, updatePayload);
+      }
+
+      return { refundedPoints };
+    });
+  } catch (error) {
+    if (error instanceof Error && (
+      error.message.includes('sudah selesai') ||
+      error.message.includes('tidak ditemukan')
+    )) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 
@@ -976,7 +1236,7 @@ export async function markClaimDiserahkanAdmin(claimId: string): Promise<void> {
   const path = `reward_claims/${claimId}`;
   try {
     await updateDoc(doc(db, 'reward_claims', claimId), {
-      status: 'DISERAHKAN',
+      status: 'SELESAI',
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);

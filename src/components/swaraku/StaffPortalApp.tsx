@@ -32,6 +32,7 @@ import {
   Navigation,
   UserPlus,
   QrCode,
+  Gift,
 } from 'lucide-react';
 import type {
   AspirasiItem,
@@ -73,11 +74,13 @@ import { ElectabilitySurveyModal } from '../common/ElectabilitySurveyModal';
 import { CekTpsAiModal } from '../common/CekTpsAiModal';
 import { AutoCekNikModal } from '../common/AutoCekNikModal';
 import { FieldRoleDashboard } from './FieldRoleDashboard';
+import { RelawanAgendaRewardView } from '../relawan/RelawanAgendaRewardView';
 import { formatWilayahLabel } from '../../data/wilayahIndonesia';
 
 export type StaffTab =
   | 'beranda'
   | 'registrasi'
+  | 'agenda_reward'
   | 'peta_suara'
   | 'database_voters'
   | 'kelola_relawan'
@@ -118,6 +121,7 @@ interface StaffPortalAppProps {
   onRefreshUsers: () => Promise<void>;
   onConnectGoogleAdmin: () => Promise<void>;
   onAwardPoints: (delta: number) => Promise<void> | void;
+  onSyncStaffPoints: (newPoints: number) => void;
   onNotify: (msg: string) => void;
   onSaveVoter: (voter: VoterOcrRecord) => void;
   onSaveTimSukses: (ts: TimSuksesWilayahRecord) => void;
@@ -250,6 +254,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
   onRefreshUsers,
   onConnectGoogleAdmin,
   onAwardPoints,
+  onSyncStaffPoints,
   onNotify,
   onSaveVoter,
   onSaveTimSukses,
@@ -394,6 +399,16 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
       },
     ];
 
+    if (isRelawan) {
+      items.push({
+        id: 'agenda_reward',
+        label: 'Agenda & Reward',
+        shortLabel: 'Agenda',
+        icon: <Gift className="w-5 h-5" />,
+        badge: events.length > 0 ? events.length : undefined,
+      });
+    }
+
     if (canAccessPetaSuara) {
       items.push({
         id: 'peta_suara',
@@ -495,6 +510,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
     isRelawan,
     staffUser.role,
     voterOcrRecords.length,
+    events.length,
     myRelawanCount,
     aspirasiList.length,
     userAccounts.length,
@@ -562,12 +578,12 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
 
   // Mobile bottom navigation displays 4 primary role shortcuts + Menu drawer trigger
   const mobileBottomItems: StaffTab[] = isAdminOrSuper
-    ? ['beranda', 'registrasi', 'peta_suara', 'database_voters']
+    ? ['beranda', 'registrasi', 'peta_suara', 'kelola_voters']
     : isKorwil
     ? ['beranda', 'registrasi', 'peta_suara', 'monitoring_kader']
     : isKorcam
     ? ['beranda', 'registrasi', 'kelola_relawan', 'monitoring_kader']
-    : ['beranda', 'registrasi', 'database_voters', 'profil'];
+    : ['beranda', 'registrasi', 'agenda_reward', 'database_voters'];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col lg:flex-row">
@@ -638,11 +654,11 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
           ) : (
             <button
               type="button"
-              onClick={() => handleSelectTab('database_voters')}
-              className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 text-cyan-900 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              onClick={() => handleSelectTab('agenda_reward')}
+              className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <Database className="w-3.5 h-3.5" />
-              <span>Data Voter</span>
+              <Gift className="w-3.5 h-3.5" />
+              <span>Reward</span>
             </button>
           )}
         </div>
@@ -1221,6 +1237,19 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             />
           )}
 
+          {/* 2b. MENU AGENDA & REWARD (KHUSUS RELAWAN) */}
+          {activeTab === 'agenda_reward' && isRelawan && (
+            <RelawanAgendaRewardView
+              currentUser={staffUser}
+              currentPoints={kaderPoints}
+              events={events}
+              rewards={rewards}
+              onPointsUpdated={onSyncStaffPoints}
+              onNavigateToRegistrasi={() => handleSelectTab('registrasi')}
+              onNotify={onNotify}
+            />
+          )}
+
           {/* 3. PETA SUARA (GOOGLE MAPS) — SuperAdmin, Admin, & Korwil ONLY (NO Korcam/Relawan) */}
           {activeTab === 'peta_suara' && canAccessPetaSuara && (
             <div className="bg-white rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4">
@@ -1341,6 +1370,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
               onConnectGoogleAdmin={onConnectGoogleAdmin}
               panelTitle="Panel Manajemen Kampanye"
               isSuperAdmin={staffUser.role === 'super_admin'}
+              currentUser={staffUser}
             />
           )}
 
