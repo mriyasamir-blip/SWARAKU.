@@ -671,8 +671,8 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
             </h1>
             <p className="text-xs text-slate-300 max-w-2xl mt-1 leading-relaxed">
               {isKorcamRelawanMode
-                ? 'Tambahkan akun Relawan sebanyak yang dibutuhkan di Kelurahan/Kecamatan Anda. Akun yang dibuat langsung aktif di halaman Login Relawan, tersinkron ke Monitoring Relawan, dan memberikan +25 Poin otomatis.'
-                : 'Kelola seluruh akun terdaftar (Whitelist) untuk Korwil, Korcam, Relawan, dan Admin. Daftarkan email Google untuk akses SSO Tim Support serta atur struktur wilayah Kota → Kecamatan → Kelurahan.'}
+                ? 'Tambahkan akun Relawan sebanyak yang dibutuhkan di Kelurahan/Kecamatan Anda. Akun yang dibuat langsung aktif di halaman Login Relawan (manual & SSO Google), tersinkron ke Monitoring Relawan, dan memberikan +25 Poin otomatis.'
+                : 'Kelola seluruh akun terdaftar (Whitelist) untuk Korwil, Korcam, Relawan, dan Admin. Daftarkan email Google untuk akses SSO Tim Support & Relawan serta atur struktur wilayah Kota → Kecamatan → Kelurahan.'}
             </p>
           </div>
 

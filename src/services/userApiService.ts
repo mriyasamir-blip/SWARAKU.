@@ -376,7 +376,7 @@ export async function loginUserOnCloud(
 }
 
 /**
- * 3b. Validasi Login SSO / Google untuk Tim Support (Wajib Terdaftar di Whitelist Database User).
+ * 3b. Validasi Login SSO / Google untuk Tim Support & Relawan (Wajib Terdaftar di Whitelist Database User).
  */
 export async function loginUserByGoogleEmailOnCloud(
   email: string,
@@ -407,19 +407,22 @@ export async function loginUserByGoogleEmailOnCloud(
     return { success: true, user: target };
   };
 
-  // 1. Cek langsung di koleksi user_accounts Firestore
+  // 1. Cek langsung di koleksi user_accounts Firestore (cocokkan kolom email maupun username)
   try {
     const colRef = collection(firestore, FIRESTORE_USERS_COLLECTION);
     const snap = await getDocs(colRef);
-    let matchedUser: UserAccount | null = null;
+    const matches: UserAccount[] = [];
     snap.forEach((d) => {
       const u = normalizeUserAccount(d.data());
-      if ((u.email || '').trim().toLowerCase() === cleanEmail) {
-        matchedUser = u;
+      const uEmail = (u.email || '').trim().toLowerCase();
+      const uUsername = (u.username || '').trim().toLowerCase();
+      if (uEmail === cleanEmail || uUsername === cleanEmail) {
+        matches.push(u);
       }
     });
-    if (matchedUser) {
-      return checkAccount(matchedUser);
+    if (matches.length > 0) {
+      const preferredMatch = matches.find((u) => allowedRoles.includes(u.role)) || matches[0];
+      return checkAccount(preferredMatch);
     }
   } catch (err) {
     console.warn('[UserApi] Validasi Google SSO Firestore notice:', err);
@@ -444,7 +447,9 @@ export async function loginUserByGoogleEmailOnCloud(
   }
 
   const presetByEmail = PRESET_ACCOUNTS.find(
-    (u) => (u.email || '').trim().toLowerCase() === cleanEmail
+    (u) =>
+      (u.email || '').trim().toLowerCase() === cleanEmail ||
+      (u.username || '').trim().toLowerCase() === cleanEmail
   );
   if (presetByEmail) {
     return checkAccount(presetByEmail);

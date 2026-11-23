@@ -289,7 +289,7 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  const activeVoterUid = !staffUser ? authUser?.uid || manualVoterId : null;
+  const activeVoterUid = !staffUser && !isSigningIn ? authUser?.uid || manualVoterId : null;
 
   // 1. Firebase Auth Listener
   useEffect(() => {
@@ -540,6 +540,36 @@ export default function App() {
       return { success: true };
     }
     return { success: false, message: res.message };
+  };
+
+  const handleRelawanGoogleLogin = async (): Promise<{ success: boolean; message?: string }> => {
+    setAuthError(null);
+    setIsSigningIn(true);
+    try {
+      const googleUser = await loginWithGoogleSSO();
+      const email = googleUser?.email || '';
+      const res = await loginUserByGoogleEmailOnCloud(email, ['relawan']);
+      if (res.success && res.user) {
+        localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(res.user));
+        setStaffUser(res.user);
+        setKaderPoints(res.user.points || 0);
+        notify(`Login Google berhasil! Selamat datang, ${res.user.nama}.`);
+        return { success: true };
+      }
+      // Strict whitelist: immediately sign out unregistered or wrong-role Google accounts
+      await logoutFirebase().catch(() => {});
+      const errMsg =
+        res.message ||
+        'Akun Anda belum terdaftar. Silakan hubungi Admin atau Koordinator terkait.';
+      setAuthError(errMsg);
+      return { success: false, message: errMsg };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Login Google dibatalkan atau gagal.';
+      setAuthError(msg);
+      return { success: false, message: msg };
+    } finally {
+      setIsSigningIn(false);
+    }
   };
 
   const handleAwardPoints = async (delta: number): Promise<void> => {
@@ -1089,6 +1119,7 @@ export default function App() {
           onTimSupportLogin={handleTimSupportLogin}
           onTimSupportGoogleLogin={handleTimSupportGoogleLogin}
           onRelawanLogin={handleRelawanLogin}
+          onRelawanGoogleLogin={handleRelawanGoogleLogin}
           isSigningIn={isSigningIn}
           authError={authError}
           initialPortalTab={preferredPortalTab}
@@ -1109,6 +1140,7 @@ export default function App() {
             onTimSupportLogin={handleTimSupportLogin}
             onTimSupportGoogleLogin={handleTimSupportGoogleLogin}
             onRelawanLogin={handleRelawanLogin}
+            onRelawanGoogleLogin={handleRelawanGoogleLogin}
             isSigningIn={isSigningIn}
             authError={authError}
             initialPortalTab={preferredPortalTab}
