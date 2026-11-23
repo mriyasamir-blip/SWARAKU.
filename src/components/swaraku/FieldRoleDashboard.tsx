@@ -463,9 +463,13 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
                 <Navigation className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-sm font-extrabold text-slate-900">Monitoring Relawan</h4>
+                <h4 className="text-sm font-extrabold text-slate-900">
+                  {isKorwil ? 'Monitoring Relawan & Korcam' : 'Monitoring Relawan'}
+                </h4>
                 <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  Pantau lokasi GPS live Relawan &amp; tim lapangan secara real-time.
+                  {isKorwil
+                    ? 'Pantau posisi Share Live Location Korcam & Relawan di wilayah Anda secara real-time.'
+                    : 'Pantau posisi Share Live Location Relawan binaan Anda secara real-time.'}
                 </p>
               </div>
             </div>

@@ -1094,7 +1094,7 @@ export default function App() {
             </button>
           </div>
         )}
-        <GpsTrackerModal user={staffUser} />
+        <GpsTrackerModal user={staffUser} userAccounts={userAccounts} />
         <OfflineIndicator />
       </>
     );

@@ -460,6 +460,8 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
         id: 'monitoring_kader',
         label: isFullMonitorRole(staffUser.role)
           ? 'Monitoring Relawan & Tim'
+          : isKorwil
+          ? 'Monitoring Korcam & Relawan'
           : 'Monitoring Relawan',
         shortLabel: 'Monitoring',
         icon: <Navigation className="w-5 h-5" />,
@@ -506,6 +508,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
     canAccessFieldOps,
     canAccessCampaignPanel,
     isAdminOrSuper,
+    isKorwil,
     isKorcam,
     isRelawan,
     staffUser.role,
@@ -1301,15 +1304,22 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             />
           )}
 
-          {/* 6. MONITORING RELAWAN (GPS REAL-TIME FIRESTORE) */}
+          {/* 6. MONITORING RELAWAN & KORCAM (GPS REAL-TIME FIRESTORE) */}
           {activeTab === 'monitoring_kader' && canAccessMonitoring(staffUser.role) && (
             <div className="bg-white rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4">
               <MonitoringMapView
                 currentUser={{
                   id: staffUser.id || staffUser.username,
+                  username: staffUser.username,
                   nama: staffUser.nama,
                   role: staffUser.role,
+                  kota: staffUser.kota,
+                  kecamatan: staffUser.kecamatan,
+                  kelurahan: staffUser.kelurahan,
+                  kaderIds: staffUser.kaderIds,
+                  kaderList: staffUser.kaderList,
                 }}
+                userAccounts={userAccounts}
               />
             </div>
           )}
