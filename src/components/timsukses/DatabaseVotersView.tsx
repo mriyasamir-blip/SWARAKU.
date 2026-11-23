@@ -26,7 +26,10 @@ import {
   RefreshCw,
   UserPlus,
   Award,
+  ShieldCheck,
+  ScanLine,
 } from 'lucide-react';
+import { VoterDetailModal, isVoterOcrVerified } from '../registration/VoterDetailModal';
 
 const MapCameraPanHandler: React.FC<{
   target: { lat: number; lng: number } | null;
@@ -75,12 +78,18 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
   const [selectedKota, setSelectedKota] = useState<string>('Semua');
   const [selectedKecamatan, setSelectedKecamatan] = useState<string>('Semua');
   const [selectedKelurahan, setSelectedKelurahan] = useState<string>('Semua');
+  const [onlyOcrVerified, setOnlyOcrVerified] = useState(false);
   const [relawanSearch, setRelawanSearch] = useState('');
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   // Modal Detail Voter & Peta Lokasi Cepat
   const [selectedVoterPreview, setSelectedVoterPreview] = useState<VoterOcrRecord | null>(null);
   const [mapModalVoter, setMapModalVoter] = useState<(VoterOcrRecord & { resolvedLat: number; resolvedLng: number }) | null>(null);
+
+  const ocrVerifiedCount = useMemo(
+    () => voterList.filter((v) => isVoterOcrVerified(v)).length,
+    [voterList]
+  );
 
   // Dynamic hierarchical filter options (Kota -> Kecamatan -> Kelurahan)
   const kotaOptions = useMemo(() => {
@@ -119,9 +128,10 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
       if (selectedKota !== 'Semua' && voter.kabupatenKota !== selectedKota) return false;
       if (selectedKecamatan !== 'Semua' && voter.kecamatan !== selectedKecamatan) return false;
       if (selectedKelurahan !== 'Semua' && voter.kelurahan !== selectedKelurahan) return false;
+      if (onlyOcrVerified && !isVoterOcrVerified(voter)) return false;
       return true;
     });
-  }, [voterList, searchQuery, selectedKota, selectedKecamatan, selectedKelurahan]);
+  }, [voterList, searchQuery, selectedKota, selectedKecamatan, selectedKelurahan, onlyOcrVerified]);
 
   // Relawan list from Cloud userAccounts
   const relawanList = useMemo(() => {
@@ -549,23 +559,45 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
           <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h3 className="text-sm font-black text-slate-900">
-                  Daftar Voter / Konstituen Terdaftar ({filteredVoters.length} Orang)
-                </h3>
-                <p className="text-[11px] text-slate-500">
-                  Menampilkan struktur wilayah lengkap: Kota, Kecamatan, Kelurahan, Alamat Lengkap, serta nama penginput.
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-black text-slate-900">
+                    Daftar Voter / Konstituen Terdaftar ({filteredVoters.length} Orang)
+                  </h3>
+                  {ocrVerifiedCount > 0 && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-extrabold">
+                      <ShieldCheck className="w-3 h-3" />
+                      <span>{ocrVerifiedCount} Terverifikasi OCR</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Menampilkan struktur wilayah lengkap: Kota, Kecamatan, Kelurahan, Alamat Lengkap, status verifikasi OCR, serta nama penginput.
                 </p>
               </div>
-              {onOpenCommandRegist && (
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={onOpenCommandRegist}
-                  className="px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+                  onClick={() => setOnlyOcrVerified((prev) => !prev)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 border cursor-pointer transition-colors ${
+                    onlyOcrVerified
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
                 >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>+ Daftarkan Voter</span>
+                  <ScanLine className="w-3.5 h-3.5" />
+                  <span>{onlyOcrVerified ? 'Menampilkan OCR Saja' : 'Filter OCR'}</span>
                 </button>
-              )}
+                {onOpenCommandRegist && (
+                  <button
+                    type="button"
+                    onClick={onOpenCommandRegist}
+                    className="px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>+ Daftarkan Voter</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -601,20 +633,47 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
                   ) : (
                     filteredVoters.map((voter) => {
                       const coords = resolveVoterCoords(voter);
+                      const ocrBadge = isVoterOcrVerified(voter);
                       return (
                         <tr key={voter.id} className="hover:bg-slate-50/70 transition-colors">
                           <td className="py-3 px-4">
-                            <span className="font-extrabold text-slate-900 block">
-                              {voter.nama}
-                            </span>
-                            <span className="text-[11px] font-mono text-slate-500 block">
-                              {voter.nikMasked || voter.nik || '-'}
-                            </span>
-                            {voter.noHp && voter.noHp !== '-' && (
-                              <span className="text-[10px] font-mono text-slate-400 inline-flex items-center gap-1">
-                                <Phone className="w-2.5 h-2.5" /> {voter.noHp}
-                              </span>
-                            )}
+                            <div className="flex items-start gap-2.5">
+                              {voter.fotoKtpUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedVoterPreview(voter)}
+                                  title="Lihat Foto KTP & Detail"
+                                  className="w-12 h-8 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 shrink-0 mt-0.5 cursor-pointer hover:ring-2 hover:ring-emerald-500 transition-all"
+                                >
+                                  <img
+                                    src={voter.fotoKtpUrl}
+                                    alt={`ID ${voter.nama}`}
+                                    className="w-full h-full object-cover"
+                                  />
+                                </button>
+                              ) : null}
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="font-extrabold text-slate-900">
+                                    {voter.nama}
+                                  </span>
+                                  {ocrBadge && (
+                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-[9px] font-extrabold">
+                                      <ShieldCheck className="w-2.5 h-2.5" />
+                                      <span>OCR</span>
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[11px] font-mono text-slate-500 block">
+                                  {voter.nikMasked || voter.nik || '-'}
+                                </span>
+                                {voter.noHp && voter.noHp !== '-' && (
+                                  <span className="text-[10px] font-mono text-slate-400 inline-flex items-center gap-1">
+                                    <Phone className="w-2.5 h-2.5" /> {voter.noHp}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </td>
                           <td className="py-3 px-4 font-bold text-cyan-800">
                             {voter.kelurahan || '-'}
@@ -943,73 +1002,11 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
         </div>
       )}
 
-      {/* MODAL DETAIL PROFIL VOTER */}
-      {selectedVoterPreview && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-700">
-                  Detail Profil Voter / Konstituen
-                </span>
-                <h3 className="text-lg font-black text-slate-900">{selectedVoterPreview.nama}</h3>
-                <p className="text-xs font-mono text-slate-500">
-                  NIK: {selectedVoterPreview.nikMasked || selectedVoterPreview.nik || '-'}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedVoterPreview(null)}
-                className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {selectedVoterPreview.fotoKtpUrl && (
-              <img
-                src={selectedVoterPreview.fotoKtpUrl}
-                alt={`Foto ${selectedVoterPreview.nama}`}
-                className="w-full max-h-52 object-cover rounded-2xl border border-slate-200"
-              />
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                <span className="text-slate-500 block">Kota / Kabupaten</span>
-                <span className="font-bold text-slate-900">{selectedVoterPreview.kabupatenKota || '-'}</span>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                <span className="text-slate-500 block">Kecamatan</span>
-                <span className="font-bold text-slate-900">{selectedVoterPreview.kecamatan || '-'}</span>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                <span className="text-slate-500 block">Kelurahan</span>
-                <span className="font-bold text-cyan-800">{selectedVoterPreview.kelurahan || '-'}</span>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                <span className="text-slate-500 block">No. HP / WhatsApp</span>
-                <span className="font-mono font-bold text-slate-900">{selectedVoterPreview.noHp || '-'}</span>
-              </div>
-              <div className="sm:col-span-2 p-3 rounded-xl bg-slate-50 border border-slate-200">
-                <span className="text-slate-500 block">Alamat Lengkap</span>
-                <span className="font-semibold text-slate-900">{selectedVoterPreview.alamat || '-'}</span>
-              </div>
-              <div className="sm:col-span-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
-                <div>
-                  <span className="text-emerald-700 block">Diinput Oleh</span>
-                  <span className="font-bold text-slate-900">
-                    {selectedVoterPreview.terdaftarOleh || selectedVoterPreview.diinputOlehNama || '-'}
-                  </span>
-                </div>
-                <span className="text-[11px] font-mono text-slate-600">
-                  {selectedVoterPreview.waktuDaftar || '-'}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* MODAL DETAIL PROFIL VOTER (TERMASUK STATUS OCR & FOTO KTP) */}
+      <VoterDetailModal
+        voter={selectedVoterPreview}
+        onClose={() => setSelectedVoterPreview(null)}
+      />
 
       {/* MODAL QUICK MAP VIEW FOR SELECTED VOTER */}
       {mapModalVoter && (

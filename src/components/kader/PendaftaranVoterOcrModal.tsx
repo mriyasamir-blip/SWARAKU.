@@ -403,35 +403,6 @@ export const PendaftaranVoterOcrModal: React.FC<PendaftaranVoterOcrModalProps> =
         }
       }
 
-      // Offline / fallback cerdas sesuai foto yang diinput:
-      if (photoUrl.includes('siti')) {
-        setNik('3174016203920048');
-        setNama('SITI NURHALIZA');
-        setTempatTglLahir('JAKARTA, 22-03-1992');
-        setJenisKelamin('Perempuan');
-        setAlamat('JL. MELATI INDAH NO. 5');
-        setRtRw('002/004');
-        setKelurahan('Kel. Sukamaju');
-        setKecamatan('Kec. Cilandak');
-        setOcrSource('e-KTP Fisik: Siti Nurhaliza');
-        setStep('hasil_ocr');
-        return;
-      }
-
-      if (photoUrl.includes('voter') || photoUrl.includes('sample')) {
-        setNik('3174012508890047');
-        setNama('HENDRA WIJAYA');
-        setTempatTglLahir('JAKARTA, 14-08-1992');
-        setJenisKelamin('Laki-laki');
-        setAlamat('JL. CEMPAKA PUTIH NO. 15');
-        setRtRw('004/005');
-        setKelurahan('Kel. Sukamaju');
-        setKecamatan('Kec. Cilandak');
-        setOcrSource('e-KTP Fisik: Hendra Wijaya');
-        setStep('hasil_ocr');
-        return;
-      }
-
       // Jika server mengembalikan non-ok, masuk ke verifikasi manual tanpa data fiktif
       handleOfflineFallback(optimizedPhoto);
     } catch (err) {

@@ -1547,8 +1547,19 @@ export const SuperadminView: React.FC<SuperadminViewProps> = ({
                               />
                             )}
                             <div>
-                              <p className="font-bold text-slate-900">{v.nama}</p>
-                              <p className="text-[11px] text-slate-500">{v.tempatTglLahir}</p>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <p className="font-bold text-slate-900">{v.nama}</p>
+                                {(v.ocrVerified || v.registrationSource === 'ocr_ktp' || Boolean(v.fotoKtpUrl)) && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-bold">
+                                    OCR
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-500">
+                                {v.tempatTglLahir ||
+                                  [v.tempatLahir, v.tanggalLahir].filter(Boolean).join(', ') ||
+                                  '-'}
+                              </p>
                             </div>
                           </div>
                         </td>

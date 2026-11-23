@@ -226,6 +226,8 @@ export interface VoterOcrRecord {
   nik: string;
   nikMasked: string;
   nama: string;
+  tempatLahir?: string;
+  tanggalLahir?: string;
   tempatTglLahir: string;
   jenisKelamin: 'Laki-laki' | 'Perempuan' | '-';
   alamat: string;
@@ -238,6 +240,7 @@ export interface VoterOcrRecord {
   noHp: string;
   waktuDaftar: string;
   fotoKtpUrl?: string;
+  ocrVerified?: boolean;
   statusDpt: 'DPT valid' | 'Perlu cek';
   statusRegistrasi: 'TERDAFTAR';
   terdaftarOleh: string;

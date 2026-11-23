@@ -383,3 +383,86 @@ export function formatWilayahLabel(
   ].filter(Boolean);
   return parts.join(', ');
 }
+
+function toTitleCase(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function cleanWilayahName(raw: string | undefined, prefixes: RegExp): string {
+  return String(raw || '').replace(prefixes, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Mencocokkan hasil OCR KTP (kota, kecamatan, kelurahan) dengan hierarki WILAYAH_INDONESIA.
+ * Jika KTP tidak mencantumkan kota tetapi kecamatan/kelurahan cocok dengan kamus, kota otomatis diisi.
+ */
+export function resolveWilayahFromOcr(input: {
+  kota?: string;
+  kecamatan?: string;
+  kelurahan?: string;
+  fallbackKota?: string;
+}): { kota: string; kecamatan: string; kelurahan: string } {
+  const rawKota = cleanWilayahName(input.kota, /^(kota\s+adm\.?|kota\s+administrasi|kota|kab\.?|kabupaten)\s+/i);
+  const rawKec = cleanWilayahName(input.kecamatan, /^(kec\.?|kecamatan)\s+/i);
+  const rawKel = cleanWilayahName(input.kelurahan, /^(kel\.?|kelurahan|desa|ds\.?)\s+/i);
+
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const nKota = norm(rawKota);
+  const nKec = norm(rawKec);
+  const nKel = norm(rawKel);
+
+  // 1. Cari kecocokan langsung di kamus WILAYAH_INDONESIA berdasarkan kecamatan/kelurahan/kota
+  let matchedKota = WILAYAH_INDONESIA.find((k) => {
+    const nk = norm(k.nama);
+    return nKota && (nk === nKota || nk.includes(nKota) || nKota.includes(nk));
+  });
+
+  if (!matchedKota && nKec) {
+    matchedKota = WILAYAH_INDONESIA.find((k) =>
+      k.kecamatan.some((kc) => norm(kc.nama) === nKec)
+    );
+  }
+  if (!matchedKota && nKel) {
+    matchedKota = WILAYAH_INDONESIA.find((k) =>
+      k.kecamatan.some((kc) => kc.kelurahan.some((kl) => norm(kl) === nKel))
+    );
+  }
+
+  let finalKota = matchedKota ? matchedKota.nama : rawKota ? toTitleCase(rawKota) : input.fallbackKota || '';
+  let finalKec = rawKec ? toTitleCase(rawKec) : '';
+  let finalKel = rawKel ? toTitleCase(rawKel) : '';
+
+  if (matchedKota) {
+    const matchedKec = matchedKota.kecamatan.find(
+      (kc) => nKec && (norm(kc.nama) === nKec || norm(kc.nama).includes(nKec) || nKec.includes(norm(kc.nama)))
+    );
+    if (matchedKec) {
+      finalKec = matchedKec.nama;
+      const matchedKel = matchedKec.kelurahan.find(
+        (kl) => nKel && (norm(kl) === nKel || norm(kl).includes(nKel) || nKel.includes(norm(kl)))
+      );
+      if (matchedKel) {
+        finalKel = matchedKel;
+      }
+    } else if (nKel) {
+      const kecByKel = matchedKota.kecamatan.find((kc) =>
+        kc.kelurahan.some((kl) => norm(kl) === nKel)
+      );
+      if (kecByKel) {
+        finalKec = kecByKel.nama;
+        const matchedKel = kecByKel.kelurahan.find((kl) => norm(kl) === nKel);
+        if (matchedKel) finalKel = matchedKel;
+      }
+    }
+  }
+
+  return {
+    kota: finalKota,
+    kecamatan: finalKec,
+    kelurahan: finalKel,
+  };
+}
+

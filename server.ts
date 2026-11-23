@@ -28,7 +28,7 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Endpoint: AI OCR KTP (100% Membaca Fisik e-KTP Asli)
+// Endpoint: AI OCR KTP (Gemini Vision Multimodal -> Structured JSON)
 app.post('/api/ocr/ktp', async (req, res) => {
   try {
     const { image } = req.body;
@@ -36,7 +36,16 @@ app.post('/api/ocr/ktp', async (req, res) => {
     if (!image || typeof image !== 'string') {
       return res.status(400).json({
         success: false,
-        error: 'Data gambar KTP tidak ditemukan.',
+        error: 'Data gambar KTP tidak ditemukan. Silakan unggah atau ambil foto KTP terlebih dahulu.',
+      });
+    }
+
+    const activeApiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!activeApiKey) {
+      return res.status(503).json({
+        success: false,
+        error:
+          'Layanan Gemini API belum dikonfigurasi. Periksa pengaturan kunci API pada panel Settings > Secrets.',
       });
     }
 
@@ -48,8 +57,12 @@ app.post('/api/ocr/ktp', async (req, res) => {
     if (dataUriMatch) {
       mimeType = dataUriMatch[1];
       base64Data = dataUriMatch[2].trim();
-    } else if (image.startsWith('/') || image.startsWith('./') || image.includes('/images/') || image.includes('assets')) {
-      // Resolve image from local filesystem if path passed
+    } else if (
+      image.startsWith('/') ||
+      image.startsWith('./') ||
+      image.includes('/images/') ||
+      image.includes('assets')
+    ) {
       const possiblePaths = [
         path.join(__dirname, image),
         path.join(__dirname, 'src/assets/images', path.basename(image)),
@@ -67,163 +80,245 @@ app.post('/api/ocr/ktp', async (req, res) => {
       }
     }
 
-    // Fast candidate models in order of response speed & accuracy
-    const CANDIDATE_MODELS = ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
+    if (!base64Data || base64Data.length < 100) {
+      return res.status(400).json({
+        success: false,
+        error: 'File gambar tidak valid atau kosong. Mohon pilih foto KTP yang jelas.',
+      });
+    }
 
-    const prompt = `Anda adalah sistem AI Vision OCR spesialis e-KTP Republik Indonesia dengan akurasi 100%.
-PENTING: Baca FOTO FISIK e-KTP yang diberikan dan ekstrak HANYA data teks asli yang tertulis pada kartu. JANGAN MENGARANG DATA.
-Koreksi jika ada salah baca karakter pada 16 digit NIK (misal O->0, l/I->1, S->5, B->8).
+    const CANDIDATE_MODELS = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
 
-Ekstrak seluruh informasi yang tertera pada kartu e-KTP ke dalam format JSON:
-- nik: 16 digit nomor NIK (hanya angka)
-- nama: Nama lengkap pemegang KTP (huruf kapital)
-- tempatTglLahir: Tempat dan tanggal lahir (contoh: JAKARTA, 14-08-1992)
-- jenisKelamin: "Laki-laki" atau "Perempuan"
-- alamat: Alamat jalan, gang, atau nomor rumah
-- rtRw: RT/RW (contoh: 004/005)
-- kelurahan: Kelurahan atau Desa
-- kecamatan: Kecamatan
-- kabupatenKota: Kabupaten atau Kota
-- provinsi: Provinsi (contoh: DKI JAKARTA atau JAWA BARAT)
-- agama: Agama (ISLAM, KRISTEN, KATOLIK, HINDU, BUDDHA, KONGHUCU)
-- statusPerkawinan: Status perkawinan (BELUM KAWIN, KAWIN, CERAI HIDUP, CERAI MATI)
-- pekerjaan: Pekerjaan yang tertera
-- kewarganegaraan: "WNI"
+    const prompt = `Anda adalah sistem AI Vision OCR spesialis e-KTP / kartu identitas Republik Indonesia.
+TUGAS:
+1. Periksa apakah gambar ini merupakan foto KTP / kartu identitas yang cukup jelas terbaca. Jika gambar terlalu buram, gelap, terpotong parah, atau bukan KTP/kartu identitas, set isReadable = false dan jelaskan alasannya dalam bahasa Indonesia pada unreadableReason.
+2. Jika dapat dibaca (isReadable = true), ekstrak HANYA teks asli yang tertulis pada kartu. JANGAN mengarang data yang tidak tertera.
+3. Koreksi kesalahan baca umum pada angka 16 digit NIK (misal O->0, I/l->1, S->5, B->8) sehingga nik hanya berisi digit angka.
+4. Pisahkan tempatLahir (misal: JAKARTA) dan tanggalLahir (format DD-MM-YYYY, misal: 14-08-1992).
+5. Normalisasi jenisKelamin menjadi "Laki-laki" atau "Perempuan".
+6. Ekstrak alamat, rtRw (contoh: 004/005), kelurahan (Kel/Desa tanpa awalan "Kel."), kecamatan (tanpa awalan "Kec."), kabupatenKota (jika tertera di bagian atas KTP), dan provinsi (jika tertera di bagian atas KTP).`;
 
-Kembalikan HANYA JSON tanpa teks lain.`;
+    const ktpResponseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        isReadable: {
+          type: Type.BOOLEAN,
+          description: 'True jika gambar adalah KTP/ID dan teks utama (NIK atau Nama) dapat dibaca.',
+        },
+        unreadableReason: {
+          type: Type.STRING,
+          description: 'Alasan singkat dalam bahasa Indonesia jika foto buram, gelap, atau bukan KTP.',
+        },
+        nik: {
+          type: Type.STRING,
+          description: '16 digit Nomor Induk Kependudukan (hanya angka).',
+        },
+        nama: {
+          type: Type.STRING,
+          description: 'Nama lengkap pemegang KTP sesuai kartu.',
+        },
+        tempatLahir: {
+          type: Type.STRING,
+          description: 'Kota/tempat lahir (misal: JAKARTA).',
+        },
+        tanggalLahir: {
+          type: Type.STRING,
+          description: 'Tanggal lahir format DD-MM-YYYY (misal: 14-08-1992).',
+        },
+        jenisKelamin: {
+          type: Type.STRING,
+          description: '"Laki-laki" atau "Perempuan".',
+        },
+        alamat: {
+          type: Type.STRING,
+          description: 'Alamat jalan/gang/nomor rumah pada KTP.',
+        },
+        rtRw: {
+          type: Type.STRING,
+          description: 'Nomor RT/RW pada KTP (contoh: 004/005).',
+        },
+        kelurahan: {
+          type: Type.STRING,
+          description: 'Nama Kelurahan atau Desa pada KTP.',
+        },
+        kecamatan: {
+          type: Type.STRING,
+          description: 'Nama Kecamatan pada KTP.',
+        },
+        kabupatenKota: {
+          type: Type.STRING,
+          description: 'Nama Kabupaten atau Kota di header KTP jika terbaca.',
+        },
+        provinsi: {
+          type: Type.STRING,
+          description: 'Nama Provinsi di header KTP jika terbaca.',
+        },
+      },
+      required: [
+        'isReadable',
+        'nik',
+        'nama',
+        'tempatLahir',
+        'tanggalLahir',
+        'jenisKelamin',
+        'alamat',
+        'rtRw',
+        'kelurahan',
+        'kecamatan',
+      ],
+    };
 
-    let successfulResult: any = null;
+    let successfulResult: Record<string, any> | null = null;
     let modelUsed = '';
+    let lastError: any = null;
 
-    // If API key is available, call Gemini Vision
-    const activeApiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
-    if (activeApiKey) {
-      for (const model of CANDIDATE_MODELS) {
-        try {
-          console.log(`[OCR KTP] Memanggil model Gemini Vision: ${model}...`);
-          
-          // Timeout promise 15 detik agar tidak menggantung jika koneksi jaringan lambat
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`Timeout 15s model ${model}`)), 15000)
-          );
+    for (const model of CANDIDATE_MODELS) {
+      try {
+        console.log(`[OCR KTP] Memanggil model Gemini Vision: ${model}...`);
 
-          const generatePromise = ai.models.generateContent({
-            model,
-            contents: [
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Timeout 25s model ${model}`)), 25000)
+        );
+
+        const generatePromise = ai.models.generateContent({
+          model,
+          contents: {
+            parts: [
               {
                 inlineData: {
                   mimeType: mimeType || 'image/jpeg',
                   data: base64Data,
                 },
               },
-              prompt,
+              { text: prompt },
             ],
-            config: {
-              responseMimeType: 'application/json',
-              temperature: 0.1, // Akurasi faktual maksimal
-            },
-          });
+          },
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: ktpResponseSchema,
+          },
+        });
 
-          const response: any = await Promise.race([generatePromise, timeoutPromise]);
-          let rawText = (response.text || '{}').trim();
-          rawText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        const response: any = await Promise.race([generatePromise, timeoutPromise]);
+        let rawText = (response?.text || '{}').trim();
+        rawText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
 
-          const parsedJson = JSON.parse(rawText);
+        const parsedJson = JSON.parse(rawText);
 
-          // Bersihkan nilai null / undefined string
-          Object.keys(parsedJson).forEach((k) => {
-            if (parsedJson[k] === 'null' || parsedJson[k] === 'NULL' || parsedJson[k] === null) {
-              parsedJson[k] = '';
-            }
-          });
-
-          // Sanitize NIK
-          if (parsedJson.nik) {
-            parsedJson.nik = String(parsedJson.nik).replace(/\D/g, '');
+        // Bersihkan nilai null / undefined string
+        Object.keys(parsedJson).forEach((k) => {
+          if (
+            parsedJson[k] === 'null' ||
+            parsedJson[k] === 'NULL' ||
+            parsedJson[k] === null ||
+            parsedJson[k] === undefined
+          ) {
+            parsedJson[k] = k === 'isReadable' ? false : '';
           }
+        });
 
-          // Sanitize Nama
-          if (parsedJson.nama) {
-            parsedJson.nama = String(parsedJson.nama).toUpperCase().trim();
-          }
+        // Sanitize fields
+        const cleanNik = String(parsedJson.nik || '').replace(/\D/g, '').slice(0, 16);
+        const cleanNama = String(parsedJson.nama || '').toUpperCase().trim();
+        let tempatLahir = String(parsedJson.tempatLahir || '').toUpperCase().trim();
+        let tanggalLahir = String(parsedJson.tanggalLahir || '').trim();
 
-          // Normalisasi jenis kelamin
-          if (parsedJson.jenisKelamin) {
-            const jk = String(parsedJson.jenisKelamin).toLowerCase();
-            parsedJson.jenisKelamin = jk.includes('perempuan') ? 'Perempuan' : 'Laki-laki';
-          }
-
-          successfulResult = parsedJson;
-          modelUsed = model;
-          console.log(`[OCR KTP] Berhasil membaca foto fisik via ${model}: NIK=${parsedJson.nik}, Nama=${parsedJson.nama}`);
-          break;
-        } catch (err: any) {
-          console.warn(`[OCR KTP] Model ${model} dilewati:`, err?.message || err);
+        // Split if model returned combined string in tempatLahir
+        if (tempatLahir && !tanggalLahir && tempatLahir.includes(',')) {
+          const [t, d] = tempatLahir.split(',').map((s: string) => s.trim());
+          tempatLahir = t || '';
+          tanggalLahir = d || '';
         }
+
+        const tempatTglLahir =
+          tempatLahir && tanggalLahir
+            ? `${tempatLahir}, ${tanggalLahir}`
+            : tempatLahir || tanggalLahir || '';
+
+        const jkRaw = String(parsedJson.jenisKelamin || '').toLowerCase();
+        const jenisKelamin = jkRaw.includes('perempuan') || jkRaw === 'p'
+          ? 'Perempuan'
+          : jkRaw.includes('laki') || jkRaw === 'l'
+          ? 'Laki-laki'
+          : '';
+
+        const cleanKel = String(parsedJson.kelurahan || '')
+          .replace(/^(kel\.?|kelurahan|desa)\s+/i, '')
+          .trim();
+        const cleanKec = String(parsedJson.kecamatan || '')
+          .replace(/^(kec\.?|kecamatan)\s+/i, '')
+          .trim();
+
+        successfulResult = {
+          isReadable: parsedJson.isReadable !== false && Boolean(cleanNik || cleanNama),
+          unreadableReason: String(parsedJson.unreadableReason || '').trim(),
+          nik: cleanNik,
+          nama: cleanNama,
+          tempatLahir,
+          tanggalLahir,
+          tempatTglLahir,
+          jenisKelamin,
+          alamat: String(parsedJson.alamat || '').trim(),
+          rtRw: String(parsedJson.rtRw || '').trim(),
+          kelurahan: cleanKel,
+          kecamatan: cleanKec,
+          kabupatenKota: String(parsedJson.kabupatenKota || '').trim(),
+          provinsi: String(parsedJson.provinsi || '').trim(),
+        };
+        modelUsed = model;
+        console.log(
+          `[OCR KTP] Selesai via ${model}: readable=${successfulResult.isReadable}, NIK=${cleanNik}, Nama=${cleanNama}`
+        );
+        break;
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[OCR KTP] Model ${model} gagal:`, err?.message || err);
       }
     }
 
-    // Jika Gemini berhasil membaca foto KTP
-    if (successfulResult && (successfulResult.nama || successfulResult.nik)) {
-      return res.json({
-        success: true,
-        data: successfulResult,
-        modelUsed,
-        source: 'gemini_vision_ocr',
+    if (!successfulResult) {
+      const errMsg = String(lastError?.message || '');
+      if (errMsg.includes('API_KEY_INVALID') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('403')) {
+        return res.status(403).json({
+          success: false,
+          error:
+            'Kunci Gemini API tidak valid atau tidak memiliki izin. Silakan periksa di panel Settings > Secrets.',
+        });
+      }
+      if (errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('429')) {
+        return res.status(429).json({
+          success: false,
+          error:
+            'Kuota pemindaian AI sementara penuh. Tunggu beberapa saat lalu coba pindai ulang.',
+        });
+      }
+      return res.status(502).json({
+        success: false,
+        error:
+          'Gagal menghubungi layanan OCR Gemini. Pastikan koneksi internet stabil lalu coba pindai ulang.',
       });
     }
 
-    // Fallback cerdas: Deteksi jika foto adalah sample terdaftar atau foto lokal
-    console.log('[OCR KTP] Menganalisis karakteristik visual foto KTP...');
-    if (image.includes('siti') || (successfulResult && successfulResult.nama?.includes('SITI'))) {
-      return res.json({
-        success: true,
-        data: {
-          nik: '3174016203920048',
-          nama: 'SITI NURHALIZA',
-          tempatTglLahir: 'JAKARTA, 22-03-1992',
-          jenisKelamin: 'Perempuan',
-          alamat: 'JL. MELATI INDAH NO. 5',
-          rtRw: '002/004',
-          kelurahan: 'Kel. Sukamaju',
-          kecamatan: 'Kec. Cilandak',
-          kabupatenKota: 'Jakarta Selatan',
-          provinsi: 'DKI Jakarta',
-          agama: 'ISLAM',
-          statusPerkawinan: 'BELUM KAWIN',
-          pekerjaan: 'KARYAWAN SWASTA',
-          kewarganegaraan: 'WNI',
-        },
-        source: 'ktp_sample_siti_vision',
+    if (!successfulResult.isReadable || (!successfulResult.nik && !successfulResult.nama)) {
+      return res.status(422).json({
+        success: false,
+        error:
+          successfulResult.unreadableReason ||
+          'Foto KTP terlalu buram, gelap, atau tidak terbaca dengan jelas. Mohon foto ulang dengan pencahayaan terang dan posisi KTP datar.',
       });
     }
 
-    // Default sample Hendra jika foto voter sample
     return res.json({
       success: true,
-      data: {
-        nik: '3174012508890047',
-        nama: 'HENDRA WIJAYA',
-        tempatTglLahir: 'JAKARTA, 14-08-1992',
-        jenisKelamin: 'Laki-laki',
-        alamat: 'JL. CEMPAKA PUTIH NO. 15',
-        rtRw: '004/005',
-        kelurahan: 'Kel. Sukamaju',
-        kecamatan: 'Kec. Cilandak',
-        kabupatenKota: 'Jakarta Selatan',
-        provinsi: 'DKI Jakarta',
-        agama: 'ISLAM',
-        statusPerkawinan: 'BELUM KAWIN',
-        pekerjaan: 'KARYAWAN SWASTA',
-        kewarganegaraan: 'WNI',
-      },
-      source: 'ktp_sample_hendra_vision',
+      data: successfulResult,
+      modelUsed,
+      source: 'gemini_vision_ocr',
     });
   } catch (error: any) {
     console.error('Error in /api/ocr/ktp:', error);
     return res.status(500).json({
       success: false,
-      error: error?.message || 'Gagal memproses pemindaian OCR KTP.',
+      error: error?.message || 'Terjadi kesalahan saat memproses pemindaian OCR KTP.',
     });
   }
 });

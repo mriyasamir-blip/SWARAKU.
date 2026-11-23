@@ -327,13 +327,36 @@ function mapDocToVoterOcrRecord(
         })
       : null;
 
+  const ttlRaw = String(d.tempatTglLahir || '').trim();
+  let parsedTempat = String(d.tempatLahir || '').trim();
+  let parsedTanggal = String(d.tanggalLahir || '').trim();
+  if ((!parsedTempat || !parsedTanggal) && ttlRaw && ttlRaw !== '-' && ttlRaw.includes(',')) {
+    const [t, dt] = ttlRaw.split(',').map((s: string) => s.trim());
+    if (!parsedTempat && t) parsedTempat = t;
+    if (!parsedTanggal && dt) parsedTanggal = dt;
+  }
+
+  const inferredOcrVerified =
+    d.ocrVerified === true ||
+    d.registrationSource === 'ocr_ktp' ||
+    (!isOnlineRegistered &&
+      /^\d{16}$/.test(cleanNik) &&
+      (Boolean(d.fotoKtpUrl) || (Boolean(ttlRaw) && ttlRaw !== '-') || (Boolean(d.rtRw) && d.rtRw !== '-')));
+
   const record: VoterOcrRecord = {
     id: d.id || docId,
     voterUid: d.voterUid || undefined,
     nik: rawNik,
     nikMasked: masked,
     nama: String(d.nama || d.fullName || 'VOTER TANPA NAMA').toUpperCase().trim(),
-    tempatTglLahir: d.tempatTglLahir || '-',
+    tempatLahir: parsedTempat || undefined,
+    tanggalLahir: parsedTanggal || undefined,
+    tempatTglLahir:
+      ttlRaw && ttlRaw !== '-'
+        ? ttlRaw
+        : parsedTempat && parsedTanggal
+        ? `${parsedTempat}, ${parsedTanggal}`
+        : parsedTempat || parsedTanggal || '-',
     jenisKelamin:
       d.jenisKelamin === 'Perempuan'
         ? 'Perempuan'
@@ -351,12 +374,13 @@ function mapDocToVoterOcrRecord(
     noHp: d.noHp || d.phone || '-',
     waktuDaftar: d.waktuDaftar || new Date().toLocaleString('id-ID'),
     fotoKtpUrl: d.fotoKtpUrl || undefined,
+    ocrVerified: inferredOcrVerified,
     statusDpt: d.statusDpt === 'Perlu cek' ? 'Perlu cek' : 'DPT valid',
     statusRegistrasi: 'TERDAFTAR',
     terdaftarOleh: d.terdaftarOleh || 'Database Cloud',
     diinputOlehRole: d.diinputOlehRole,
     diinputOlehNama: d.diinputOlehNama,
-    registrationSource: d.registrationSource || undefined,
+    registrationSource: d.registrationSource || (inferredOcrVerified ? 'ocr_ktp' : undefined),
     lat: typeof d.lat === 'number' ? d.lat : parsedFallback?.lat,
     lng: typeof d.lng === 'number' ? d.lng : parsedFallback?.lng,
   };

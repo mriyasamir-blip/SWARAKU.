@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Award,
   Building2,
+  Calendar,
   Camera,
   CheckCircle2,
   CreditCard,
@@ -13,6 +15,8 @@ import {
   MapPin,
   Phone,
   QrCode,
+  RefreshCw,
+  ScanLine,
   ShieldCheck,
   Sparkles,
   Upload,
@@ -25,8 +29,14 @@ import {
 import type { UserAccount, UserRole, VoterOcrRecord } from '../../types/vore';
 import type { TimSuksesWilayahRecord } from '../../data/petaSuaraData';
 import { WilayahSelector, type WilayahValue } from '../common/WilayahSelector';
-import { formatWilayahLabel, getProvinsiByKota } from '../../data/wilayahIndonesia';
+import {
+  formatWilayahLabel,
+  getProvinsiByKota,
+  resolveWilayahFromOcr,
+} from '../../data/wilayahIndonesia';
 import { lookupSmartCoordinates, resolveAccurateCoordinates } from '../../utils/geocoding';
+import { ScanKtpOcrModal, type KtpOcrExtractionResult } from './ScanKtpOcrModal';
+import { VoterDetailModal } from './VoterDetailModal';
 
 type RegistCategory = 'voter' | 'relawan' | 'koordinator';
 type InputMethod = 'manual' | 'qr';
@@ -34,6 +44,7 @@ type InputMethod = 'manual' | 'qr';
 interface CommandRegistViewProps {
   currentUser: UserAccount;
   userAccounts: UserAccount[];
+  voterOcrRecords?: VoterOcrRecord[];
   onSaveVoter: (voter: VoterOcrRecord) => void;
   onAddUser: (user: UserAccount) => Promise<boolean | void>;
   onSaveTimSukses?: (ts: TimSuksesWilayahRecord) => void;
@@ -107,6 +118,7 @@ function parseQrIdentityPayload(raw: string): {
 export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
   currentUser,
   userAccounts,
+  voterOcrRecords = [],
   onSaveVoter,
   onAddUser,
   onSaveTimSukses,
@@ -141,11 +153,15 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanTimerRef = useRef<number | null>(null);
+  const nikInputRef = useRef<HTMLInputElement | null>(null);
 
   // Common Identity Fields
   const [nama, setNama] = useState('');
   const [nik, setNik] = useState('');
   const [noHp, setNoHp] = useState('');
+  const [tempatLahir, setTempatLahir] = useState('');
+  const [tanggalLahir, setTanggalLahir] = useState('');
+  const [rtRw, setRtRw] = useState('');
   const [jenisKelamin, setJenisKelamin] = useState<'Laki-laki' | 'Perempuan'>('Laki-laki');
   const [wilayah, setWilayah] = useState<WilayahValue>({
     kota: currentUser.kota || 'Jakarta Selatan',
@@ -154,6 +170,17 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
   });
   const [alamat, setAlamat] = useState('');
   const [fotoUrl, setFotoUrl] = useState('');
+
+  // Scan KTP / ID (OCR) State
+  const [showOcrModal, setShowOcrModal] = useState(false);
+  const [isOcrVerified, setIsOcrVerified] = useState(false);
+  const [ocrNoticeBanner, setOcrNoticeBanner] = useState<string | null>(null);
+
+  // Duplicate NIK Detection & Warning Modal State
+  const [showDuplicatePopup, setShowDuplicatePopup] = useState(false);
+  const [duplicateTriggerSource, setDuplicateTriggerSource] = useState<'ocr' | 'manual'>('manual');
+  const [detailVoterToView, setDetailVoterToView] = useState<VoterOcrRecord | null>(null);
+  const lastAlertedDuplicateNikRef = useRef<string | null>(null);
 
   // Account Fields (for Relawan / Korcam / Korwil)
   const [username, setUsername] = useState('');
@@ -169,6 +196,31 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
+
+  // Real-time Duplicate NIK Lookup (Voter Registration)
+  const cleanNikDigits = nik.replace(/\D/g, '');
+  const duplicateVoter = useMemo<VoterOcrRecord | null>(() => {
+    if (category !== 'voter' || cleanNikDigits.length !== 16) return null;
+    return (
+      voterOcrRecords.find((v) => {
+        const existingDigits = String(v.nik || '').replace(/\D/g, '');
+        return existingDigits.length === 16 && existingDigits === cleanNikDigits;
+      }) || null
+    );
+  }, [category, cleanNikDigits, voterOcrRecords]);
+
+  // Trigger Warning Modal immediately when a duplicate 16-digit NIK is typed or scanned
+  useEffect(() => {
+    if (duplicateVoter) {
+      if (lastAlertedDuplicateNikRef.current !== cleanNikDigits) {
+        lastAlertedDuplicateNikRef.current = cleanNikDigits;
+        setShowDuplicatePopup(true);
+      }
+    } else {
+      lastAlertedDuplicateNikRef.current = null;
+      setShowDuplicatePopup(false);
+    }
+  }, [duplicateVoter, cleanNikDigits]);
 
   // Ensure active category stays valid if role changes
   useEffect(() => {
@@ -310,14 +362,91 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
     setNama('');
     setNik('');
     setNoHp('');
+    setTempatLahir('');
+    setTanggalLahir('');
+    setRtRw('');
+    setJenisKelamin('Laki-laki');
     setAlamat('');
     setFotoUrl('');
+    setIsOcrVerified(false);
+    setOcrNoticeBanner(null);
     setUsername('');
     setEmail('');
     setPassword('123456');
     setQrRawInput('');
     setQrStatus(null);
     setFormError(null);
+    setShowDuplicatePopup(false);
+    lastAlertedDuplicateNikRef.current = null;
+  };
+
+  const handleOcrExtractionSuccess = (result: KtpOcrExtractionResult) => {
+    setFormError(null);
+    setSuccessBanner(null);
+    setDuplicateTriggerSource('ocr');
+
+    // Auto-fill all fields extracted by Gemini Vision (all remain manually editable)
+    if (result.nik) setNik(result.nik);
+    if (result.nama) setNama(result.nama);
+    if (result.tempatLahir) setTempatLahir(result.tempatLahir);
+    if (result.tanggalLahir) setTanggalLahir(result.tanggalLahir);
+    if (result.jenisKelamin === 'Laki-laki' || result.jenisKelamin === 'Perempuan') {
+      setJenisKelamin(result.jenisKelamin);
+    }
+    if (result.alamat) setAlamat(result.alamat);
+    if (result.rtRw) setRtRw(result.rtRw);
+    if (result.fotoKtpThumbnail) setFotoUrl(result.fotoKtpThumbnail);
+
+    if (result.kabupatenKota || result.kecamatan || result.kelurahan) {
+      const matchedWilayah = resolveWilayahFromOcr({
+        kota: result.kabupatenKota,
+        kecamatan: result.kecamatan,
+        kelurahan: result.kelurahan,
+        fallbackKota: wilayah.kota || currentUser.kota || 'Jakarta Selatan',
+      });
+      setWilayah((prev) => ({
+        kota: matchedWilayah.kota || prev.kota,
+        kecamatan: matchedWilayah.kecamatan || prev.kecamatan,
+        kelurahan: matchedWilayah.kelurahan || prev.kelurahan,
+      }));
+    }
+
+    setIsOcrVerified(true);
+
+    // Check immediate duplicate NIK from OCR result
+    const extractedNik = result.nik.replace(/\D/g, '');
+    const existingDuplicate =
+      extractedNik.length === 16
+        ? voterOcrRecords.find(
+            (v) => String(v.nik || '').replace(/\D/g, '') === extractedNik
+          )
+        : null;
+
+    if (existingDuplicate) {
+      lastAlertedDuplicateNikRef.current = extractedNik;
+      setShowDuplicatePopup(true);
+      setOcrNoticeBanner(null);
+      onNotify('Peringatan: NIK hasil Scan OCR sudah terdaftar sebagai Konstituen (Voter).');
+    } else if (extractedNik.length !== 16) {
+      setOcrNoticeBanner(
+        `Data KTP berhasil diekstrak, namun NIK terbaca ${extractedNik.length} digit. Mohon periksa & lengkapi menjadi 16 digit sebelum menyimpan.`
+      );
+      onNotify('Scan OCR selesai — periksa kembali 16 digit NIK sebelum menyimpan.');
+    } else {
+      setOcrNoticeBanner(
+        'Data e-KTP berhasil dipindai via Gemini OCR dan terisi otomatis. Periksa kembali atau edit manual sebelum menyimpan.'
+      );
+      onNotify(`Scan KTP berhasil: ${result.nama || extractedNik}. Silakan verifikasi & simpan.`);
+    }
+  };
+
+  const handleScanUlangOrGantiNik = (reopenOcr = false) => {
+    resetForm();
+    if (reopenOcr) {
+      setShowOcrModal(true);
+    } else {
+      setTimeout(() => nikInputRef.current?.focus(), 60);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -334,16 +463,31 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
       return;
     }
 
+    if (category === 'voter') {
+      if (cleanNikDigits.length !== 16) {
+        setFormError(
+          `NIK Konstituen wajib tepat 16 digit angka (saat ini ${cleanNikDigits.length}/16 digit). Gunakan Scan KTP (OCR) atau ketik 16 digit NIK.`
+        );
+        nikInputRef.current?.focus();
+        return;
+      }
+
+      if (duplicateVoter) {
+        setShowDuplicatePopup(true);
+        setFormError('Peringatan: NIK sudah terdaftar sebagai Pendaftaran Konstituen (Voter).');
+        return;
+      }
+
+      if (alamat.trim().length < 4) {
+        setFormError('Alamat lengkap Voter wajib diisi agar akurat di Peta Suara.');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
       if (category === 'voter') {
-        if (alamat.trim().length < 4) {
-          setFormError('Alamat lengkap Voter wajib diisi agar akurat di Peta Suara.');
-          setIsSubmitting(false);
-          return;
-        }
-
-        const cleanNik = nik.replace(/\D/g, '') || `${Date.now()}`.slice(-16).padStart(16, '0');
+        const cleanNik = cleanNikDigits;
         const coords = await resolveAccurateCoordinates({
           kelurahan: wilayah.kelurahan,
           kecamatan: wilayah.kecamatan,
@@ -360,6 +504,13 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
             ? 'relawan'
             : 'admin';
 
+        const tempatClean = tempatLahir.trim().toUpperCase();
+        const tanggalClean = tanggalLahir.trim();
+        const combinedTtl =
+          tempatClean && tanggalClean
+            ? `${tempatClean}, ${tanggalClean}`
+            : tempatClean || tanggalClean || '-';
+
         const newVoter: VoterOcrRecord = {
           id: `v-${cleanNik}-${Date.now().toString().slice(-4)}`,
           nik: cleanNik,
@@ -368,10 +519,12 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
               ? `${cleanNik.slice(0, 4)}••••••••${cleanNik.slice(-4)}`
               : cleanNik,
           nama: nama.trim().toUpperCase(),
-          tempatTglLahir: '-',
+          tempatLahir: tempatClean || undefined,
+          tanggalLahir: tanggalClean || undefined,
+          tempatTglLahir: combinedTtl,
           jenisKelamin,
           alamat: alamat.trim(),
-          rtRw: '-',
+          rtRw: rtRw.trim() || '-',
           kelurahan: wilayah.kelurahan,
           kecamatan: wilayah.kecamatan,
           kabupatenKota: wilayah.kota,
@@ -380,12 +533,13 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
           noHp: noHp.trim() || '-',
           waktuDaftar: new Date().toLocaleString('id-ID'),
           fotoKtpUrl: fotoUrl || undefined,
+          ocrVerified: isOcrVerified,
           statusDpt: 'DPT valid',
           statusRegistrasi: 'TERDAFTAR',
           terdaftarOleh: currentUser.nama,
           diinputOlehRole: roleTag,
           diinputOlehNama: currentUser.nama,
-          registrationSource: 'command_regist',
+          registrationSource: isOcrVerified ? 'ocr_ktp' : 'command_regist',
           lat: coords.lat,
           lng: coords.lng,
         };
@@ -393,7 +547,7 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
         onSaveVoter(newVoter);
         await onAwardPoints(POINTS_REWARD.voter);
 
-        const msg = `Voter berhasil terdaftar di Kelurahan ${wilayah.kelurahan} & tersinkron ke Peta. +${POINTS_REWARD.voter} Poin ditambahkan!`;
+        const msg = `Voter${isOcrVerified ? ' (Terverifikasi OCR)' : ''} berhasil terdaftar di Kelurahan ${wilayah.kelurahan} & tersinkron ke Peta. +${POINTS_REWARD.voter} Poin ditambahkan!`;
         setSuccessBanner(msg);
         onNotify(msg);
         resetForm();
@@ -723,6 +877,121 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
           </div>
         </div>
 
+        {/* Prominent Scan KTP / ID (OCR) CTA Banner at Top of Voter Form */}
+        {category === 'voter' && (
+          <div className="rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border border-emerald-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <ScanLine className="w-5 h-5" />
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <h3 className="text-sm font-black text-slate-900">
+                    Scan KTP / ID (OCR Otomatis)
+                  </h3>
+                  {isOcrVerified && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-extrabold">
+                      <ShieldCheck className="w-3 h-3" />
+                      <span>Terisi via OCR</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Foto e-KTP langsung dari kamera atau unggah gambar untuk isi otomatis <strong>NIK, Nama, TTL, Jenis Kelamin, Alamat, RT/RW, Kelurahan &amp; Kecamatan</strong>.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowOcrModal(true)}
+              className="min-h-[44px] px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs sm:text-sm font-extrabold inline-flex items-center justify-center gap-2 shadow-sm shrink-0 cursor-pointer transition-all"
+            >
+              <Camera className="w-4 h-4 shrink-0" />
+              <span>Scan KTP / ID (OCR)</span>
+            </button>
+          </div>
+        )}
+
+        {/* PERSISTENT RED ALERT BANNER FOR DUPLICATE NIK (stays visible after modal is closed) */}
+        {category === 'voter' && duplicateVoter && (
+          <div
+            role="alert"
+            className="rounded-2xl bg-rose-50 border-2 border-rose-400 p-4 space-y-3 shadow-xs"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1.5 flex-1 min-w-0">
+                <p className="text-sm font-black text-rose-900 leading-snug">
+                  Peringatan: NIK sudah terdaftar sebagai Pendaftaran Konstituen (Voter).
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-xs">
+                  <div className="rounded-xl bg-white/90 border border-rose-200 px-3 py-2">
+                    <span className="text-[10px] font-bold uppercase text-rose-600 block">
+                      Nama Lengkap
+                    </span>
+                    <span className="font-extrabold text-slate-900 block truncate">
+                      {duplicateVoter.nama}
+                    </span>
+                  </div>
+                  <div className="rounded-xl bg-white/90 border border-rose-200 px-3 py-2">
+                    <span className="text-[10px] font-bold uppercase text-rose-600 block">
+                      Kelurahan / Kecamatan
+                    </span>
+                    <span className="font-bold text-slate-900 block truncate">
+                      Kel. {duplicateVoter.kelurahan || '-'}, Kec. {duplicateVoter.kecamatan || '-'}
+                    </span>
+                  </div>
+                  <div className="rounded-xl bg-white/90 border border-rose-200 px-3 py-2">
+                    <span className="text-[10px] font-bold uppercase text-rose-600 block">
+                      Tanggal Pendaftaran
+                    </span>
+                    <span className="font-mono font-bold text-slate-900 block truncate">
+                      {duplicateVoter.waktuDaftar || '-'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-12">
+              <button
+                type="button"
+                onClick={() => setDetailVoterToView(duplicateVoter)}
+                className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>Lihat Data Konstituen</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleScanUlangOrGantiNik(duplicateTriggerSource === 'ocr')}
+                className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-white hover:bg-rose-100 border border-rose-300 text-rose-800 text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Scan Ulang / Ganti NIK</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* OCR Auto-Fill Confirmation Notice */}
+        {category === 'voter' && ocrNoticeBanner && !duplicateVoter && (
+          <div className="rounded-2xl bg-blue-50 border border-blue-200 p-3.5 flex items-start justify-between gap-3 text-blue-900 text-xs font-semibold">
+            <div className="flex items-start gap-2">
+              <Sparkles className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
+              <span className="leading-relaxed">{ocrNoticeBanner}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOcrNoticeBanner(null)}
+              className="text-blue-600 hover:text-blue-900 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Success / Error Alerts */}
         {successBanner && (
           <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 flex items-start justify-between gap-3 text-emerald-900 text-xs font-bold">
@@ -865,19 +1134,64 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-                <CreditCard className="w-3.5 h-3.5 text-slate-500" />
-                <span>NIK {category === 'voter' ? '(16 Digit)' : '(Opsional)'}</span>
-              </label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                  <CreditCard
+                    className={`w-3.5 h-3.5 ${
+                      duplicateVoter ? 'text-rose-600' : 'text-slate-500'
+                    }`}
+                  />
+                  <span>
+                    NIK {category === 'voter' ? '(16 Digit)' : '(Opsional)'}{' '}
+                    {category === 'voter' && <span className="text-rose-600">*</span>}
+                  </span>
+                </label>
+                {category === 'voter' && (
+                  <span
+                    className={`text-[10px] font-mono font-bold ${
+                      duplicateVoter
+                        ? 'text-rose-600'
+                        : cleanNikDigits.length === 16
+                        ? 'text-emerald-700'
+                        : cleanNikDigits.length > 0
+                        ? 'text-amber-700'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {cleanNikDigits.length}/16 Digit
+                  </span>
+                )}
+              </div>
               <input
+                ref={nikInputRef}
                 type="text"
                 inputMode="numeric"
+                required={category === 'voter'}
                 maxLength={16}
                 value={nik}
-                onChange={(e) => setNik(e.target.value.replace(/\D/g, '').slice(0, 16))}
+                onChange={(e) => {
+                  setDuplicateTriggerSource('manual');
+                  setNik(e.target.value.replace(/\D/g, '').slice(0, 16));
+                }}
                 placeholder="3174xxxxxxxxxxxx"
-                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                aria-invalid={Boolean(duplicateVoter)}
+                className={`w-full min-h-[42px] px-3.5 py-2 rounded-xl border text-sm font-mono focus:outline-none transition-colors ${
+                  duplicateVoter
+                    ? 'border-2 border-rose-500 bg-rose-50/60 text-rose-900 ring-2 ring-rose-500/20 focus:ring-rose-500/40'
+                    : 'border-slate-300 text-slate-900 focus:ring-2 focus:ring-blue-600'
+                }`}
               />
+              {category === 'voter' && duplicateVoter && (
+                <p className="text-[11px] font-bold text-rose-600 flex items-center gap-1 pt-0.5">
+                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                  <span>NIK duplikat terdeteksi! Ganti NIK untuk melanjutkan.</span>
+                </p>
+              )}
+              {category === 'voter' && !duplicateVoter && cleanNikDigits.length > 0 && cleanNikDigits.length < 16 && (
+                <p className="text-[11px] font-semibold text-amber-700 pt-0.5">
+                  NIK harus tepat 16 digit (kurang {16 - cleanNikDigits.length} digit).
+                </p>
+              )}
             </div>
 
             <div className="space-y-1">
@@ -896,6 +1210,53 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
               />
             </div>
           </div>
+
+          {/* Tempat Lahir, Tanggal Lahir & Jenis Kelamin (Auto-filled from OCR, editable manually) */}
+          {category === 'voter' && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+              <div className="space-y-1">
+                <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                  <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Tempat Lahir</span>
+                </label>
+                <input
+                  type="text"
+                  maxLength={80}
+                  value={tempatLahir}
+                  onChange={(e) => setTempatLahir(e.target.value)}
+                  placeholder="Contoh: JAKARTA"
+                  className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Tanggal Lahir</span>
+                </label>
+                <input
+                  type="text"
+                  maxLength={30}
+                  value={tanggalLahir}
+                  onChange={(e) => setTanggalLahir(e.target.value)}
+                  placeholder="Contoh: 14-08-1992"
+                  className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700">Jenis Kelamin</label>
+                <select
+                  value={jenisKelamin}
+                  onChange={(e) => setJenisKelamin(e.target.value as 'Laki-laki' | 'Perempuan')}
+                  className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-slate-300 bg-white text-sm text-slate-900"
+                >
+                  <option value="Laki-laki">Laki-laki</option>
+                  <option value="Perempuan">Perempuan</option>
+                </select>
+              </div>
+            </div>
+          )}
 
           {/* Account Credentials (for Relawan / Korcam / Korwil) */}
           {category !== 'voter' && (
@@ -977,10 +1338,10 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
             <WilayahSelector value={wilayah} onChange={setWilayah} required />
 
             {category === 'voter' && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                <div className="sm:col-span-2 space-y-1">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-1">
+                <div className="sm:col-span-3 space-y-1">
                   <label className="block text-xs font-bold text-slate-700">
-                    Alamat Lengkap (Jalan, Nomor Rumah, RT/RW) <span className="text-rose-600">*</span>
+                    Alamat Lengkap (Jalan, Gang, Nomor Rumah) <span className="text-rose-600">*</span>
                   </label>
                   <input
                     type="text"
@@ -988,20 +1349,20 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
                     maxLength={250}
                     value={alamat}
                     onChange={(e) => setAlamat(e.target.value)}
-                    placeholder="Contoh: Jl. Fatmawati No. 12 RT 004/RW 002"
+                    placeholder="Contoh: Jl. Fatmawati No. 12"
                     className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-sm text-slate-900"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-xs font-bold text-slate-700">Jenis Kelamin</label>
-                  <select
-                    value={jenisKelamin}
-                    onChange={(e) => setJenisKelamin(e.target.value as 'Laki-laki' | 'Perempuan')}
-                    className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-slate-300 bg-white text-sm text-slate-900"
-                  >
-                    <option value="Laki-laki">Laki-laki</option>
-                    <option value="Perempuan">Perempuan</option>
-                  </select>
+                  <label className="block text-xs font-bold text-slate-700">RT / RW</label>
+                  <input
+                    type="text"
+                    maxLength={20}
+                    value={rtRw}
+                    onChange={(e) => setRtRw(e.target.value)}
+                    placeholder="004/002"
+                    className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-sm font-mono text-slate-900"
+                  />
                 </div>
               </div>
             )}
@@ -1051,20 +1412,33 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
           {/* Submit Footer */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
             <div className="flex items-center gap-2 text-xs text-slate-600">
-              <Award className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>
-                Otomatis mendapatkan <strong className="text-emerald-700">+{POINTS_REWARD[category]} Poin</strong> setelah pendaftaran tersimpan.
-              </span>
+              {category === 'voter' && duplicateVoter ? (
+                <>
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span className="font-bold text-rose-700">
+                    Tombol Simpan dinonaktifkan karena NIK sudah terdaftar.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Award className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    Otomatis mendapatkan <strong className="text-emerald-700">+{POINTS_REWARD[category]} Poin</strong> setelah pendaftaran tersimpan.
+                  </span>
+                </>
+              )}
             </div>
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="min-h-[46px] px-6 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 disabled:bg-blue-400 text-white text-sm font-extrabold inline-flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+              disabled={isSubmitting || (category === 'voter' && Boolean(duplicateVoter))}
+              className="min-h-[46px] px-6 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed text-white text-sm font-extrabold inline-flex items-center justify-center gap-2 shadow-sm cursor-pointer transition-colors"
             >
               <UserPlus className="w-4 h-4" />
               <span>
                 {isSubmitting
                   ? 'Menyimpan & Menyinkronkan...'
+                  : category === 'voter' && duplicateVoter
+                  ? 'NIK Sudah Terdaftar (Simpan Nonaktif)'
                   : category === 'voter'
                   ? 'Simpan Voter & Sinkron ke Peta (+10 Poin)'
                   : category === 'relawan'
@@ -1075,6 +1449,113 @@ export const CommandRegistView: React.FC<CommandRegistViewProps> = ({
           </div>
         </form>
       </div>
+
+      {/* Modal Scan KTP / ID (OCR Gemini Vision) */}
+      <ScanKtpOcrModal
+        isOpen={showOcrModal}
+        onClose={() => setShowOcrModal(false)}
+        onOcrSuccess={handleOcrExtractionSuccess}
+      />
+
+      {/* MODAL POP-UP PERINGATAN DUPLIKAT NIK (MERAH / KUNING WARNING) */}
+      {showDuplicatePopup && duplicateVoter && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4"
+        >
+          <div className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border-2 border-rose-500">
+            {/* Warning Top Strip */}
+            <div className="bg-gradient-to-r from-rose-600 via-red-600 to-amber-500 px-5 py-4 text-white flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-white/20 border border-white/30 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-6 h-6 text-amber-200" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-100 block">
+                    Deteksi Duplikat NIK
+                  </span>
+                  <h3 className="text-base font-black leading-snug">
+                    Data Konstituen Sudah Ada
+                  </h3>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDuplicatePopup(false)}
+                className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white cursor-pointer"
+                aria-label="Tutup peringatan duplikat"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Teks Peringatan Utama */}
+              <div className="rounded-2xl bg-amber-50 border border-amber-300 p-3.5 text-rose-950">
+                <p className="text-sm font-black leading-snug">
+                  Peringatan: NIK sudah terdaftar sebagai Pendaftaran Konstituen (Voter).
+                </p>
+                <p className="text-xs text-amber-900 mt-1">
+                  Data ganda tidak dapat disimpan kembali. Periksa ringkasan data yang sudah tercatat di bawah ini:
+                </p>
+              </div>
+
+              {/* Ringkasan Data Terdaftar */}
+              <div className="rounded-2xl bg-rose-50/70 border border-rose-200 p-4 space-y-2.5 text-xs">
+                <div className="flex items-start justify-between gap-2 pb-2 border-b border-rose-200/70">
+                  <span className="text-rose-700 font-semibold">Nama Lengkap</span>
+                  <span className="font-black text-slate-900 text-right">
+                    {duplicateVoter.nama}
+                  </span>
+                </div>
+                <div className="flex items-start justify-between gap-2 pb-2 border-b border-rose-200/70">
+                  <span className="text-rose-700 font-semibold">Kelurahan / Kecamatan</span>
+                  <span className="font-bold text-slate-900 text-right">
+                    Kel. {duplicateVoter.kelurahan || '-'}, Kec. {duplicateVoter.kecamatan || '-'}
+                    {duplicateVoter.kabupatenKota ? `, ${duplicateVoter.kabupatenKota}` : ''}
+                  </span>
+                </div>
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-rose-700 font-semibold">Tanggal Pendaftaran</span>
+                  <span className="font-mono font-bold text-slate-900 text-right">
+                    {duplicateVoter.waktuDaftar || '-'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDuplicatePopup(false);
+                    setDetailVoterToView(duplicateVoter);
+                  }}
+                  className="min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Eye className="w-4 h-4" />
+                  <span>Lihat Data Konstituen</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleScanUlangOrGantiNik(duplicateTriggerSource === 'ocr')}
+                  className="min-h-[44px] px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Scan Ulang / Ganti NIK</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Detail Konstituen (dibuka dari "Lihat Data Konstituen") */}
+      <VoterDetailModal
+        voter={detailVoterToView}
+        onClose={() => setDetailVoterToView(null)}
+      />
     </div>
   );
 };

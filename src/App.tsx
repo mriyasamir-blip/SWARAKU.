@@ -189,13 +189,22 @@ export default function App() {
   const [staffUser, setStaffUser] = useState<UserAccount | null>(() => readSavedStaffSession());
   const [userAccounts, setUserAccounts] = useState<UserAccount[]>([]);
 
-  // Operational Campaign Data for Admin & Superadmin Modules (Firestore-synced, zero dummy defaults)
+  // Operational Campaign Data for Admin & Superadmin Modules (Firestore-synced, preserves legacy OCR cache)
   const [voterOcrRecords, setVoterOcrRecords] = useState<VoterOcrRecord[]>(() => {
     if (typeof window === 'undefined') return [];
     try {
-      const raw = localStorage.getItem(LOCAL_CACHE_KEYS.VOTERS);
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
+      const primary = JSON.parse(localStorage.getItem(LOCAL_CACHE_KEYS.VOTERS) || '[]');
+      const legacy = JSON.parse(localStorage.getItem(LOCAL_CACHE_KEYS.VOTERS_FALLBACK) || '[]');
+      const combined = [
+        ...(Array.isArray(primary) ? primary : []),
+        ...(Array.isArray(legacy) ? legacy : []),
+      ] as VoterOcrRecord[];
+      const dedup = new Map<string, VoterOcrRecord>();
+      combined.forEach((v) => {
+        const key = (v.nik || v.id || '').replace(/\D/g, '') || v.id;
+        if (key && !dedup.has(key)) dedup.set(key, v);
+      });
+      return Array.from(dedup.values());
     } catch {
       return [];
     }

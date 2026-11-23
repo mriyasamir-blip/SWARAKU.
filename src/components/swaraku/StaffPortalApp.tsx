@@ -1229,6 +1229,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             <CommandRegistView
               currentUser={staffUser}
               userAccounts={userAccounts}
+              voterOcrRecords={voterOcrRecords}
               onSaveVoter={handleSaveVoterWithRole}
               onAddUser={onAddUser}
               onSaveTimSukses={onSaveTimSukses}
