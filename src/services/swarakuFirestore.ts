@@ -318,7 +318,7 @@ export async function registerManualVoterProfile(
     throw new Error('Format alamat email tidak valid.');
   }
   if (cleanAddress.length < 5) throw new Error('Alamat lengkap wajib diisi dengan jelas.');
-  if (cleanRegion.length < 2) throw new Error('Dapil atau kelurahan wajib diisi.');
+  if (cleanRegion.length < 2) throw new Error('Kelurahan atau wilayah wajib diisi.');
 
   const emailKey = makeEmailLookupId(cleanEmail);
   const existingSignupSnap = await getDoc(doc(db, 'voter_signups', emailKey));

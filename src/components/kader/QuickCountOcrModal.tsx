@@ -349,7 +349,7 @@ export const QuickCountOcrModal: React.FC<QuickCountOcrModalProps> = ({
         id: `b1-ocr-${Date.now()}`,
         kecamatan: kecamatanName,
         kelurahan: kelurahanName,
-        dapil: 'DAPIL DKI JAKARTA II',
+        dapil: kelurahanName || kecamatanName,
         waktuUpload: 'Baru saja',
         koordinatorNama: saksiNama,
         suaraPaslon1: paslon1,

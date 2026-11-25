@@ -1,995 +1,413 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Map as GoogleMap,
   AdvancedMarker,
   InfoWindow,
-  useAdvancedMarkerRef,
   useMap,
 } from '@vis.gl/react-google-maps';
-import { SwarakuMapsProvider, SwarakuMapsDiagnosticNotice } from '../maps/SwarakuMapsProvider';
 import {
-  TimSuksesWilayahRecord,
-  PetaWilayahMarker,
-  normalizeWilayahName,
-} from '../../data/petaSuaraData';
-import { lookupSmartCoordinates, parseVoterRegionAndAddress } from '../../utils/geocoding';
-import { VoterOcrRecord, UserAccount } from '../../types/vore';
-import {
-  Search,
-  Filter,
-  Users,
   MapPin,
+  Users,
   Building2,
-  CheckCircle2,
-  UserPlus,
-  Plus,
-  Phone,
+  LocateFixed,
   Layers,
-  Sparkles,
+  UserCheck,
+  Navigation,
   ExternalLink,
-  ChevronRight,
-  TrendingUp,
-  RefreshCw,
-  Compass,
-  RotateCcw,
-  Info,
 } from 'lucide-react';
+import type { VoterOcrRecord } from '../../types/vore';
+import { lookupSmartCoordinates } from '../../utils/geocoding';
+import { isRealGpsCoordinate } from '../../services/geolocationTrackerService';
+import { resolveVoterProvinsi } from '../../utils/hierarchyAccess';
+import {
+  SwarakuMapsProvider,
+  SwarakuMapsDiagnosticNotice,
+} from '../maps/SwarakuMapsProvider';
+
+// ============================================================================
+// SWARAKU — PETA SUARA GOOGLE MAPS VIEW (MURNI KONSTITUEN / VOTERS)
+// - Zero dummy / sample / non-voter layers
+// - Zero referensi Dapil
+// - Marker klaster Kelurahan/Kecamatan & titik konstituen sesuai filter aktif
+// ============================================================================
+
+const INDONESIA_CENTER = { lat: -2.5489, lng: 118.0149 };
+
+export interface VoterMapCluster {
+  key: string;
+  provinsi: string;
+  kota: string;
+  kecamatan: string;
+  kelurahan: string;
+  lat: number;
+  lng: number;
+  voters: VoterOcrRecord[];
+}
 
 interface PetaSuaraGoogleMapsViewProps {
-  timSuksesList: TimSuksesWilayahRecord[];
-  voterList: VoterOcrRecord[];
-  currentUser?: UserAccount | null;
-  onOpenDaftarTimSukses: (wilayahPreselect?: { kota?: string; kecamatan?: string; kelurahan?: string }) => void;
-  onOpenInputVoter: (wilayahPreselect?: { kota?: string; kecamatan?: string; kelurahan?: string; lat?: number; lng?: number }) => void;
-  onResetDataToZero?: () => void;
-  targetVoter?: VoterOcrRecord | null;
+  voters: VoterOcrRecord[];
+  selectedKecamatan?: string;
+  selectedKelurahan?: string;
+  focusVoter?: VoterOcrRecord | null;
+  onSelectCluster?: (cluster: VoterMapCluster) => void;
 }
 
-// Marker Item Sub-component with Anchored InfoWindow
-interface MarkerWithAnchorProps {
-  markerData: PetaWilayahMarker;
-  isSelected: boolean;
-  onSelect: () => void;
-  onClose: () => void;
-  onAddVoterInRegion: (m: PetaWilayahMarker) => void;
-  onAssignTimSuksesInRegion: (m: PetaWilayahMarker) => void;
-}
-
-const MarkerWithAnchor: React.FC<MarkerWithAnchorProps> = ({
-  markerData,
-  isSelected,
-  onSelect,
-  onClose,
-  onAddVoterInRegion,
-  onAssignTimSuksesInRegion,
-}) => {
-  const [markerRef, marker] = useAdvancedMarkerRef();
-
-  // Pin styling based on whether area has coordinator and voters
-  const hasKoordinator = markerData.koordinatorNama !== 'Belum ada koordinator';
-  const hasVoters = markerData.totalVoters > 0;
-
-  let pinBgColor = '#0284c7'; // Cyan default
-  let borderColor = '#0369a1';
-  let badgeColor = 'bg-cyan-600';
-
-  if (hasVoters && hasKoordinator) {
-    pinBgColor = '#059669'; // Emerald strong
-    borderColor = '#047857';
-    badgeColor = 'bg-emerald-600';
-  } else if (!hasKoordinator) {
-    pinBgColor = '#e11d48'; // Rose alert (blank coordinator)
-    borderColor = '#be123c';
-    badgeColor = 'bg-rose-600';
+function resolveVoterDisplayCoords(v: VoterOcrRecord): { lat: number; lng: number } | null {
+  if (isRealGpsCoordinate(v.lat, v.lng)) {
+    return { lat: v.lat!, lng: v.lng! };
   }
+  const smart = lookupSmartCoordinates(v.kelurahan, v.kecamatan, v.kabupatenKota);
+  if (smart && isRealGpsCoordinate(smart.lat, smart.lng)) {
+    return { lat: smart.lat, lng: smart.lng };
+  }
+  return null;
+}
 
-  return (
-    <>
-      <AdvancedMarker
-        ref={markerRef}
-        position={{ lat: markerData.lat, lng: markerData.lng }}
-        onClick={onSelect}
-        title={`${markerData.kelurahan}, ${markerData.kecamatan} (${markerData.totalVoters} Suara)`}
-      >
-        {/* Custom Marker Pin with Voter Count Badge */}
-        <div className="relative group cursor-pointer transform transition-transform hover:scale-110 active:scale-95">
-          <div
-            style={{ backgroundColor: pinBgColor, borderColor }}
-            className="w-10 h-10 rounded-2xl flex items-center justify-center text-white font-extrabold shadow-lg border-2"
-          >
-            <MapPin className="w-5 h-5 text-white" />
-          </div>
-
-          {/* Floating Badge Voter Count */}
-          <span
-            className={`absolute -top-2 -right-2 px-1.5 py-0.5 rounded-full text-[10px] font-black text-white ${badgeColor} border-2 border-white shadow-xs font-mono`}
-          >
-            {markerData.totalVoters}
-          </span>
-
-          {/* Tooltip Label on Hover */}
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1 hidden group-hover:block bg-slate-900/90 text-white text-[10px] font-bold px-2 py-1 rounded-md whitespace-nowrap shadow-md pointer-events-none z-30">
-            {markerData.kelurahan} ({markerData.totalVoters} Suara)
-          </div>
-        </div>
-      </AdvancedMarker>
-
-      {/* Anchored InfoWindow with Detailed Business Breakdown */}
-      {isSelected && marker && (
-        <InfoWindow
-          anchor={marker}
-          onCloseClick={onClose}
-          maxWidth={320}
-        >
-          <div className="p-1 space-y-3 text-slate-800 text-xs font-sans">
-            {/* Header: Wilayah Info - Persis sesuai format spesifik */}
-            <div className="border-b border-slate-200 pb-2">
-              <span className="text-[10px] uppercase font-extrabold text-cyan-700 block tracking-wider">
-                {markerData.kota}
-              </span>
-              <h3 className="text-sm font-black text-slate-900 leading-tight">
-                {markerData.kelurahan}
-              </h3>
-              <p className="text-[11px] text-slate-700 font-bold mt-0.5">
-                {markerData.kecamatan.toLowerCase().startsWith('kecamatan') ? markerData.kecamatan : `Kecamatan ${markerData.kecamatan}`}, {markerData.kota}
-              </p>
-            </div>
-
-            {/* Koordinator Wilayah */}
-            <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
-              <span className="text-[10px] font-bold text-slate-500 uppercase block">
-                Koordinator Wilayah / Tim Sukses
-              </span>
-
-              {hasKoordinator ? (
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <span className="font-extrabold text-slate-900 block truncate text-xs">
-                      {markerData.koordinatorNama}
-                    </span>
-                    <span className="text-[10px] text-emerald-700 font-bold block">
-                      ✓ Penugasan Aktif
-                    </span>
-                  </div>
-
-                  {markerData.koordinatorHp && markerData.koordinatorHp !== '-' && (
-                    <a
-                      href={`https://wa.me/62${markerData.koordinatorHp.replace(/^0/, '').replace(/\D/g, '')}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 shadow-2xs"
-                    >
-                      <Phone className="w-3 h-3" />
-                      <span>WA</span>
-                    </a>
-                  )}
-                </div>
-              ) : (
-                <div className="flex items-center justify-between gap-2 text-rose-700">
-                  <span className="font-bold text-[11px]">Belum ada koordinator</span>
-                  <button
-                    type="button"
-                    onClick={() => onAssignTimSuksesInRegion(markerData)}
-                    className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold rounded-md cursor-pointer"
-                  >
-                    + Tugaskan
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Total Suara & Rincian Input (Tim Sukses vs Kader vs Daftar Online) */}
-            <div className="p-2.5 bg-gradient-to-br from-cyan-50 to-teal-50 border border-cyan-200 rounded-xl space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-cyan-900 uppercase">
-                  Total Suara (Voter) Terkumpul
-                </span>
-                <span className="text-base font-black font-mono text-cyan-900">
-                  {markerData.totalVoters}
-                </span>
-              </div>
-
-              {/* Rincian: Korwil vs Korcam vs Daftar Online */}
-              <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-cyan-200/70 text-[11px]">
-                <div className="p-1.5 bg-white/80 rounded-lg border border-cyan-200">
-                  <span className="text-[9px] text-slate-500 block leading-tight font-semibold">
-                    Korwil
-                  </span>
-                  <span className="text-xs font-black font-mono text-cyan-700 block mt-0.5">
-                    {markerData.voterTimSuksesCount}
-                  </span>
-                </div>
-
-                <div className="p-1.5 bg-white/80 rounded-lg border border-teal-200">
-                  <span className="text-[9px] text-slate-500 block leading-tight font-semibold">
-                    Korcam
-                  </span>
-                  <span className="text-xs font-black font-mono text-emerald-700 block mt-0.5">
-                    {markerData.voterKaderCount}
-                  </span>
-                </div>
-
-                <div className="p-1.5 bg-white/80 rounded-lg border border-blue-200">
-                  <span className="text-[9px] text-slate-500 block leading-tight font-semibold">
-                    Daftar Online
-                  </span>
-                  <span className="text-xs font-black font-mono text-blue-700 block mt-0.5">
-                    {markerData.voterOnlineCount || 0}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* DAFTAR FOTO & IDENTITAS VOTER DI TITIK INI */}
-            {markerData.recentVoters && markerData.recentVoters.length > 0 && (
-              <div className="space-y-1.5 pt-1 border-t border-slate-200">
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className="font-extrabold text-slate-800">
-                    Pemilih Terdaftar di Titik Ini ({markerData.recentVoters.length}):
-                  </span>
-                  <span className="text-[9px] font-bold text-teal-700 bg-teal-50 px-1.5 py-0.2 rounded border border-teal-200">
-                    ✓ Real-Time Cloud
-                  </span>
-                </div>
-
-                <div className="max-h-40 overflow-y-auto space-y-1.5 pr-0.5">
-                  {markerData.recentVoters.map((v: VoterOcrRecord) => {
-                    const isOnline =
-                      v.diinputOlehRole === 'voter' ||
-                      v.registrationSource === 'google_sso' ||
-                      v.registrationSource === 'manual_signup';
-                    const sourceBadge =
-                      v.registrationSource === 'manual_signup'
-                        ? 'Daftar Mandiri'
-                        : v.registrationSource === 'google_sso'
-                        ? 'Google SSO'
-                        : 'Scan KTP';
-
-                    return (
-                      <div
-                        key={v.id}
-                        className="p-1.5 bg-white rounded-xl border border-slate-200 shadow-2xs flex items-center gap-2"
-                      >
-                        {v.fotoKtpUrl ? (
-                          <img
-                            src={v.fotoKtpUrl}
-                            alt="Foto KTP"
-                            className="w-10 h-7 object-cover rounded-md border border-slate-200 shrink-0 shadow-2xs"
-                          />
-                        ) : (
-                          <div
-                            className={`w-10 h-7 rounded-md border flex items-center justify-center text-[9px] shrink-0 font-black ${
-                              isOnline
-                                ? 'bg-blue-50 border-blue-200 text-blue-700'
-                                : 'bg-slate-100 border-dashed border-slate-300 text-slate-500'
-                            }`}
-                          >
-                            {isOnline ? 'WEB' : 'KTP'}
-                          </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="text-[11px] font-black text-slate-900 block truncate">
-                              {v.nama}
-                            </span>
-                            <span
-                              className={`text-[8px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                                isOnline
-                                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                  : 'bg-teal-50 text-teal-700 border border-teal-200'
-                              }`}
-                            >
-                              {sourceBadge}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1 text-[9px] text-slate-500 font-mono">
-                            <span>{v.nikMasked || v.nik}</span>
-                            <span>·</span>
-                            <span className="text-teal-700 font-bold">{v.dapilLabel || v.tps}</span>
-                          </div>
-                          {v.alamat && (
-                            <span className="text-[8px] text-slate-400 block truncate">
-                              {v.alamat}
-                              {v.rtRw && v.rtRw !== '-' ? ` (RT ${v.rtRw})` : ''}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Quick Action Button */}
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={() => onAddVoterInRegion(markerData)}
-                className="w-full py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer transition-all active:scale-95"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>+ Input Voter di Wilayah Ini</span>
-              </button>
-            </div>
-          </div>
-        </InfoWindow>
-      )}
-    </>
-  );
-};
-
-// Auto-pan / Camera handler using Google Maps useMap hook
-const MapCameraHandler: React.FC<{
-  markers: PetaWilayahMarker[];
-  selectedMarkerId: string | null;
-  targetVoter?: VoterOcrRecord | null;
-}> = ({ markers, selectedMarkerId, targetVoter }) => {
+const MapViewportSync: React.FC<{
+  clusters: VoterMapCluster[];
+  focusCoords: { lat: number; lng: number } | null;
+  fitNonce: number;
+}> = ({ clusters, focusCoords, fitNonce }) => {
   const map = useMap();
 
   useEffect(() => {
     if (!map) return;
-
-    // 1. Prioritas Utama: Fokus ke voter spesifik yang diminta user
-    if (targetVoter && typeof targetVoter.lat === 'number' && typeof targetVoter.lng === 'number') {
-      map.panTo({ lat: targetVoter.lat, lng: targetVoter.lng });
-      map.setZoom(16);
+    if (focusCoords) {
+      map.panTo(focusCoords);
+      map.setZoom(15);
       return;
     }
 
-    // 2. Fokus ke marker wilayah yang diklik
-    if (selectedMarkerId) {
-      const selected = markers.find((m) => m.id === selectedMarkerId);
-      if (selected && selected.lat && selected.lng) {
-        map.panTo({ lat: selected.lat, lng: selected.lng });
-        map.setZoom(15);
-        return;
-      }
+    if (clusters.length === 0) {
+      map.panTo(INDONESIA_CENTER);
+      map.setZoom(5);
+      return;
     }
 
-    // 3. Penataan batas multi marker
-    if (markers.length === 1) {
-      map.panTo({ lat: markers[0].lat, lng: markers[0].lng });
-      map.setZoom(14);
-    } else if (markers.length > 1) {
-      const g = typeof window !== 'undefined' ? (window as any).google : undefined;
-      if (g?.maps?.LatLngBounds) {
-        const bounds = new g.maps.LatLngBounds();
-        let validPoints = 0;
-        markers.forEach((m) => {
-          if (m.lat && m.lng) {
-            bounds.extend({ lat: m.lat, lng: m.lng });
-            validPoints++;
-          }
-        });
-        if (validPoints > 0) {
-          map.fitBounds(bounds, { top: 50, bottom: 50, left: 50, right: 50 });
-        }
-      }
+    if (clusters.length === 1) {
+      map.panTo({ lat: clusters[0].lat, lng: clusters[0].lng });
+      map.setZoom(13);
+      return;
     }
-  }, [map, markers, selectedMarkerId, targetVoter]);
+
+    const gmaps = (
+      window as unknown as {
+        google?: {
+          maps?: {
+            LatLngBounds?: new () => { extend: (pt: { lat: number; lng: number }) => void };
+          };
+        };
+      }
+    ).google?.maps;
+    if (gmaps?.LatLngBounds) {
+      const bounds = new gmaps.LatLngBounds();
+      clusters.forEach((c) => bounds.extend({ lat: c.lat, lng: c.lng }));
+      map.fitBounds(bounds as Parameters<typeof map.fitBounds>[0], 60);
+    }
+  }, [map, clusters, focusCoords, fitNonce]);
 
   return null;
 };
 
 export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = ({
-  timSuksesList,
-  voterList,
-  currentUser,
-  onOpenDaftarTimSukses,
-  onOpenInputVoter,
-  onResetDataToZero,
-  targetVoter,
+  voters,
+  selectedKecamatan,
+  selectedKelurahan,
+  focusVoter,
+  onSelectCluster,
 }) => {
-  // Filters State
-  const [selectedKotaFilter, setSelectedKotaFilter] = useState<string>('Semua');
-  const [selectedKecFilter, setSelectedKecFilter] = useState<string>('Semua');
-  const [selectedKelFilter, setSelectedKelFilter] = useState<string>('Semua');
-  const [selectedKoordinatorFilter, setSelectedKoordinatorFilter] = useState<string>('Semua');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [activeClusterKey, setActiveClusterKey] = useState<string | null>(null);
+  const [mapTypeId, setMapTypeId] = useState<'roadmap' | 'hybrid'>('roadmap');
+  const [fitNonce, setFitNonce] = useState(0);
 
-  // Selected Marker for InfoWindow
-  const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
-
-  // 1. DYNAMIC AGGREGATION: Build dynamic markers from Tim Sukses & Voters
-  // ZERO DUMMY DATA: All markers are generated exclusively from registered data!
-  const dynamicMarkers = useMemo<PetaWilayahMarker[]>(() => {
-    const markersMap = new Map<string, PetaWilayahMarker>();
-
-    // Step A: Register wilayah from Tim Sukses
-    timSuksesList.forEach((ts) => {
-      let tsLat = ts.lat;
-      let tsLng = ts.lng;
-      const isErrTsJaksel =
-        tsLat &&
-        Math.abs(tsLat - -6.2615) < 0.001 &&
-        !ts.kota.toLowerCase().includes('selatan');
-
-      ts.kecamatanList.forEach((kec) => {
-        const kelList = ts.kelurahanList.length > 0 ? ts.kelurahanList : ['Seluruh Kelurahan'];
-        kelList.forEach((kel) => {
-          let resolvedLat = tsLat;
-          let resolvedLng = tsLng;
-          if (!resolvedLat || !resolvedLng || isErrTsJaksel) {
-            const smart = lookupSmartCoordinates(kel, kec, ts.kota);
-            if (smart) {
-              resolvedLat = smart.lat;
-              resolvedLng = smart.lng;
-            }
-          }
-
-          const key = `${normalizeWilayahName(ts.kota)}_${normalizeWilayahName(kec)}_${normalizeWilayahName(kel)}`;
-          if (!markersMap.has(key)) {
-            markersMap.set(key, {
-              id: key,
-              kota: ts.kota,
-              kecamatan: kec,
-              kelurahan: kel,
-              lat: resolvedLat || -6.1264,
-              lng: resolvedLng || 106.7885,
-              koordinatorNama: ts.nama,
-              koordinatorHp: ts.noHp,
-              koordinatorRole: 'Tim Sukses',
-              totalVoters: 0,
-              voterTimSuksesCount: 0,
-              voterKaderCount: 0,
-              voterOnlineCount: 0,
-              voterListNiks: [],
-              terakhirUpdate: ts.waktuDaftar,
-            });
-          } else {
-            // Update coordinator if previously empty
-            const existing = markersMap.get(key)!;
-            if (existing.koordinatorNama === 'Belum ada koordinator') {
-              existing.koordinatorNama = ts.nama;
-              existing.koordinatorHp = ts.noHp;
-            }
-          }
-        });
-      });
-    });
-
-    // Step B: Connect & Aggregate Voters (Including e-KTP OCR, Lapangan, & Self-Registered Voters)
-    voterList.forEach((v) => {
-      const parsedFallback =
-        !v.kelurahan || !v.kecamatan || !v.kabupatenKota
-          ? parseVoterRegionAndAddress(v.dapilLabel || v.kelurahan || '', v.alamat)
-          : null;
-
-      let vKota = (v.kabupatenKota || parsedFallback?.kabupatenKota || '').trim();
-      const vKec = (v.kecamatan || parsedFallback?.kecamatan || 'Wilayah Terdaftar').trim();
-      const vKel = (v.kelurahan || parsedFallback?.kelurahan || v.dapilLabel || 'Kelurahan Terdaftar').trim();
-
-      // Fix city if missing or if mistakenly saved as Jakarta Selatan for Penjaringan
-      if (!vKota || vKota === 'Kota Jakarta Selatan') {
-        if (vKec.toLowerCase().includes('penjaringan')) {
-          vKota = 'Jakarta Utara';
-        } else if (!vKota) {
-          vKota = 'Wilayah Terdaftar';
-        }
+  // Kelompokkan voters per Kelurahan / Kecamatan secara dinamis untuk pin peta yang rapi
+  const clusters = useMemo<VoterMapCluster[]>(() => {
+    const grouped = new Map<
+      string,
+      {
+        provinsi: string;
+        kota: string;
+        kecamatan: string;
+        kelurahan: string;
+        latSum: number;
+        lngSum: number;
+        coordCount: number;
+        voters: VoterOcrRecord[];
       }
+    >();
 
-      // Find matching Tim Sukses for coordinator assignment if available
-      const matchingTs = timSuksesList.find((ts) => {
-        const kecMatch = ts.kecamatanList.some(
-          (k) => normalizeWilayahName(k) === normalizeWilayahName(vKec)
-        );
-        return kecMatch;
-      });
+    voters.forEach((v) => {
+      const prov = resolveVoterProvinsi(v);
+      const kota = (v.kabupatenKota || '').trim() || 'Kota/Kab. Belum Diisi';
+      const kec = (v.kecamatan || '').trim() || 'Kecamatan Belum Diisi';
+      const kel = (v.kelurahan || '').trim() || kec;
+      const key = `${prov.toLowerCase()}|${kota.toLowerCase()}|${kec.toLowerCase()}|${kel.toLowerCase()}`;
 
-      const key = `${normalizeWilayahName(vKota)}_${normalizeWilayahName(vKec)}_${normalizeWilayahName(vKel)}`;
-
-      let marker = markersMap.get(key);
-      if (!marker) {
-        let markerLat = v.lat;
-        let markerLng = v.lng;
-
-        // Detect if coordinates are the erroneous static fallback (-6.2615)
-        const isErroneousJaksel =
-          markerLat !== undefined &&
-          Math.abs(markerLat - -6.2615) < 0.001 &&
-          !vKota.toLowerCase().includes('selatan') &&
-          !vKec.toLowerCase().includes('cilandak');
-
-        if (!markerLat || !markerLng || isErroneousJaksel) {
-          const smart = lookupSmartCoordinates(vKel, vKec, vKota);
-          if (smart) {
-            markerLat = smart.lat;
-            markerLng = smart.lng;
-          } else {
-            // Default center if nothing matches (Penjaringan / Jakarta Utara precision)
-            markerLat = vKota.toLowerCase().includes('utara') || vKec.toLowerCase().includes('penjaringan')
-              ? -6.1264
-              : -6.1754; // Monas center, NEVER forced Jakarta Selatan
-            markerLng = vKota.toLowerCase().includes('utara') || vKec.toLowerCase().includes('penjaringan')
-              ? 106.7885
-              : 106.8272;
-          }
+      const coords = resolveVoterDisplayCoords(v);
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.voters.push(v);
+        if (coords) {
+          existing.latSum += coords.lat;
+          existing.lngSum += coords.lng;
+          existing.coordCount += 1;
         }
-
-        // Registered by voter before Tim Sukses existed in that area
-        marker = {
-          id: key,
-          kota: vKota,
-          kecamatan: vKec,
-          kelurahan: vKel,
-          lat: markerLat,
-          lng: markerLng,
-          koordinatorNama: matchingTs ? matchingTs.nama : 'Belum ada koordinator',
-          koordinatorHp: matchingTs ? matchingTs.noHp : undefined,
-          totalVoters: 0,
-          voterTimSuksesCount: 0,
-          voterKaderCount: 0,
-          voterOnlineCount: 0,
-          voterListNiks: [],
-          recentVoters: [],
-          terakhirUpdate: v.waktuDaftar,
-        };
-        markersMap.set(key, marker);
-      }
-
-      // Increment Voter Counters
-      marker.totalVoters += 1;
-      marker.voterListNiks.push(v.nik);
-      if (!marker.recentVoters) marker.recentVoters = [];
-      marker.recentVoters.push(v);
-
-      if (v.diinputOlehRole === 'tim_sukses') {
-        marker.voterTimSuksesCount += 1;
-      } else if (
-        v.diinputOlehRole === 'voter' ||
-        v.registrationSource === 'google_sso' ||
-        v.registrationSource === 'manual_signup'
-      ) {
-        marker.voterOnlineCount = (marker.voterOnlineCount || 0) + 1;
       } else {
-        marker.voterKaderCount += 1;
+        grouped.set(key, {
+          provinsi: prov,
+          kota,
+          kecamatan: kec,
+          kelurahan: kel,
+          latSum: coords ? coords.lat : 0,
+          lngSum: coords ? coords.lng : 0,
+          coordCount: coords ? 1 : 0,
+          voters: [v],
+        });
       }
     });
 
-    return Array.from(markersMap.values());
-  }, [timSuksesList, voterList]);
-
-  // 2. DYNAMIC FILTER OPTIONS (Derived purely from active data)
-  const kotaFilterOptions = useMemo(() => {
-    return Array.from(new Set(dynamicMarkers.map((m) => m.kota))).filter(Boolean);
-  }, [dynamicMarkers]);
-
-  const kecamatanFilterOptions = useMemo(() => {
-    const relevant = selectedKotaFilter === 'Semua'
-      ? dynamicMarkers
-      : dynamicMarkers.filter((m) => m.kota === selectedKotaFilter);
-    return Array.from(new Set(relevant.map((m) => m.kecamatan))).filter(Boolean);
-  }, [dynamicMarkers, selectedKotaFilter]);
-
-  const kelurahanFilterOptions = useMemo(() => {
-    let relevant = dynamicMarkers;
-    if (selectedKotaFilter !== 'Semua') {
-      relevant = relevant.filter((m) => m.kota === selectedKotaFilter);
-    }
-    if (selectedKecFilter !== 'Semua') {
-      relevant = relevant.filter((m) => m.kecamatan === selectedKecFilter);
-    }
-    return Array.from(new Set(relevant.map((m) => m.kelurahan))).filter(Boolean);
-  }, [dynamicMarkers, selectedKotaFilter, selectedKecFilter]);
-
-  const koordinatorFilterOptions = useMemo(() => {
-    const names = timSuksesList.map((ts) => ts.nama);
-    return Array.from(new Set(names)).filter(Boolean);
-  }, [timSuksesList]);
-
-  // 3. FILTERED MARKERS
-  const filteredMarkers = useMemo(() => {
-    return dynamicMarkers.filter((m) => {
-      if (selectedKotaFilter !== 'Semua' && m.kota !== selectedKotaFilter) return false;
-      if (selectedKecFilter !== 'Semua' && m.kecamatan !== selectedKecFilter) return false;
-      if (selectedKelFilter !== 'Semua' && m.kelurahan !== selectedKelFilter) return false;
-      if (
-        selectedKoordinatorFilter !== 'Semua' &&
-        m.koordinatorNama !== selectedKoordinatorFilter
-      ) {
-        return false;
+    const result: VoterMapCluster[] = [];
+    grouped.forEach((entry, key) => {
+      if (entry.coordCount > 0) {
+        result.push({
+          key,
+          provinsi: entry.provinsi,
+          kota: entry.kota,
+          kecamatan: entry.kecamatan,
+          kelurahan: entry.kelurahan,
+          lat: entry.latSum / entry.coordCount,
+          lng: entry.lngSum / entry.coordCount,
+          voters: entry.voters,
+        });
       }
-
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const match =
-          m.kota.toLowerCase().includes(q) ||
-          m.kecamatan.toLowerCase().includes(q) ||
-          m.kelurahan.toLowerCase().includes(q) ||
-          m.koordinatorNama.toLowerCase().includes(q);
-        if (!match) return false;
-      }
-
-      return true;
     });
-  }, [
-    dynamicMarkers,
-    selectedKotaFilter,
-    selectedKecFilter,
-    selectedKelFilter,
-    selectedKoordinatorFilter,
-    searchQuery,
-  ]);
 
-  // 4. MACRO METRICS
-  const grandTotalVoters = voterList.length;
-  const totalVoterByTimSukses = voterList.filter((v) => v.diinputOlehRole === 'tim_sukses').length;
-  const totalVoterByOnline = voterList.filter(
-    (v) =>
-      v.diinputOlehRole === 'voter' ||
-      v.registrationSource === 'google_sso' ||
-      v.registrationSource === 'manual_signup'
-  ).length;
-  const totalVoterByKader = Math.max(0, grandTotalVoters - totalVoterByTimSukses - totalVoterByOnline);
-  const totalWilayahTerpetakan = dynamicMarkers.length;
-  const totalKoordinatorAktif = timSuksesList.length;
+    return result.sort((a, b) => b.voters.length - a.voters.length);
+  }, [voters]);
 
-  // Auto-fokus dan buka InfoWindow saat targetVoter dipilih dari luar (Command Center / Database Voters)
+  const activeCluster = useMemo(
+    () => clusters.find((c) => c.key === activeClusterKey) || null,
+    [clusters, activeClusterKey]
+  );
+
+  // Jika ada focusVoter dari tabel, arahkan ke klaster voter tersebut
+  const focusCoords = useMemo(() => {
+    if (!focusVoter) return null;
+    return resolveVoterDisplayCoords(focusVoter);
+  }, [focusVoter]);
+
+  // Sinkronkan auto-open InfoWindow saat focusVoter berubah
   useEffect(() => {
-    if (targetVoter) {
-      const matched = dynamicMarkers.find(
-        (m) =>
-          m.voterListNiks.includes(targetVoter.nik) ||
-          (normalizeWilayahName(m.kelurahan) === normalizeWilayahName(targetVoter.kelurahan) &&
-            normalizeWilayahName(m.kecamatan) === normalizeWilayahName(targetVoter.kecamatan))
-      );
-      if (matched) {
-        setSelectedMarkerId(matched.id);
-      }
+    if (!focusVoter) return;
+    const match = clusters.find((c) => c.voters.some((v) => v.id === focusVoter.id));
+    if (match) {
+      setActiveClusterKey(match.key);
     }
-  }, [targetVoter, dynamicMarkers]);
+  }, [focusVoter, clusters]);
 
-  // Default Map Center (center on target voter if available, then first marker, then Monas)
-  const defaultCenter = useMemo(() => {
-    if (targetVoter && typeof targetVoter.lat === 'number' && typeof targetVoter.lng === 'number') {
-      return { lat: targetVoter.lat, lng: targetVoter.lng };
-    }
-    if (filteredMarkers.length > 0) {
-      return { lat: filteredMarkers[0].lat, lng: filteredMarkers[0].lng };
-    }
-    return { lat: -6.2088, lng: 106.8456 }; // Monas
-  }, [filteredMarkers, targetVoter]);
+  const unmappedCount = useMemo(
+    () => voters.filter((v) => !resolveVoterDisplayCoords(v)).length,
+    [voters]
+  );
 
   return (
-    <div className="space-y-4">
-      {/* Top Action & Control Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-black text-slate-900 tracking-tight">
-              Peta Suara Terpadu (Google Maps API)
-            </h2>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-200">
-              Live GIS
-            </span>
-          </div>
-          <p className="text-xs text-slate-500">
-            Sebaran seluruh pemilih terdaftar (Daftar Online, Google SSO, e-KTP) &amp; wilayah kerja koordinator
-          </p>
+    <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-xs">
+      {/* Map Toolbar */}
+      <div className="px-4 sm:px-5 py-3 border-b border-slate-100 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs font-extrabold text-slate-900">
+          <Navigation className="w-4 h-4 text-blue-600" />
+          <span>
+            Sebaran Suara Konstituen ({voters.length.toLocaleString('id-ID')} Voter di{' '}
+            {clusters.length} Titik Wilayah)
+          </span>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => onOpenDaftarTimSukses()}
-            className="px-3.5 py-2 bg-gradient-to-r from-cyan-700 to-teal-700 hover:from-cyan-800 hover:to-teal-800 text-white font-extrabold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+            onClick={() => setMapTypeId((prev) => (prev === 'roadmap' ? 'hybrid' : 'roadmap'))}
+            className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-[11px] font-bold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer"
           >
-            <Users className="w-3.5 h-3.5" />
-            <span>+ Daftar Korwil</span>
+            <Layers className="w-3.5 h-3.5 text-slate-500" />
+            <span>{mapTypeId === 'roadmap' ? 'Mode Satelit' : 'Mode Peta'}</span>
           </button>
 
           <button
             type="button"
-            onClick={() => onOpenInputVoter()}
-            className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+            onClick={() => {
+              setActiveClusterKey(null);
+              setFitNonce((n) => n + 1);
+            }}
+            className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-[11px] font-bold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer"
           >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span>+ Input Data Voter</span>
+            <LocateFixed className="w-3.5 h-3.5 text-blue-600" />
+            <span>Reset Zoom</span>
           </button>
-
-          {onResetDataToZero && (
-            <button
-              type="button"
-              onClick={onResetDataToZero}
-              title="Kosongkan seluruh data Peta Suara ke kondisi awal (0 Data)"
-              className="p-2 bg-white hover:bg-slate-100 text-slate-500 hover:text-rose-600 border border-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
-          )}
         </div>
       </div>
 
-      {/* Macro Statistics KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        <div className="p-3 bg-gradient-to-br from-slate-900 to-cyan-950 rounded-2xl text-white border border-slate-800 shadow-sm">
-          <span className="text-[10px] uppercase font-bold text-cyan-300 block">
-            Total Voter Terkumpul
-          </span>
-          <span className="text-xl font-black font-mono text-white mt-1 block">
-            {grandTotalVoters.toLocaleString('id-ID')}
-          </span>
-          <span className="text-[10px] text-slate-300 block mt-0.5">
-            {totalWilayahTerpetakan} Titik Wilayah Terpetakan
-          </span>
-        </div>
-
-        <div className="p-3 bg-white rounded-2xl border border-blue-200 shadow-2xs">
-          <span className="text-[10px] uppercase font-bold text-blue-700 block">
-            Voters Daftar Online
-          </span>
-          <span className="text-xl font-black font-mono text-blue-700 mt-1 block">
-            {totalVoterByOnline}
-          </span>
-          <span className="text-[10px] text-slate-400 block mt-0.5">
-            Google SSO &amp; Daftar Mandiri
-          </span>
-        </div>
-
-        <div className="p-3 bg-white rounded-2xl border border-cyan-200 shadow-2xs">
-          <span className="text-[10px] uppercase font-bold text-cyan-700 block">
-            Input Korwil
-          </span>
-          <span className="text-xl font-black font-mono text-cyan-700 mt-1 block">
-            {totalVoterByTimSukses}
-          </span>
-          <span className="text-[10px] text-slate-400 block mt-0.5">
-            {grandTotalVoters > 0 ? Math.round((totalVoterByTimSukses / grandTotalVoters) * 100) : 0}% Total Suara
-          </span>
-        </div>
-
-        <div className="p-3 bg-white rounded-2xl border border-emerald-200 shadow-2xs">
-          <span className="text-[10px] uppercase font-bold text-emerald-700 block">
-            Input Korcam &amp; Relawan
-          </span>
-          <span className="text-xl font-black font-mono text-emerald-700 mt-1 block">
-            {totalVoterByKader}
-          </span>
-          <span className="text-[10px] text-slate-400 block mt-0.5">
-            {grandTotalVoters > 0 ? Math.round((totalVoterByKader / grandTotalVoters) * 100) : 0}% Total Suara
-          </span>
-        </div>
-      </div>
-
-      {/* ZERO DUMMY DATA STATE BANNER (Appears when 0 regions / voters exist) */}
-      {dynamicMarkers.length === 0 && (
-        <div className="p-4 bg-gradient-to-r from-amber-50 via-cyan-50 to-emerald-50 border border-cyan-200 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-cyan-700 text-white flex items-center justify-center shrink-0">
-              <Info className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-xs font-black text-slate-900">
-                Peta Suara Bersih (0 Data Awal)
-              </h4>
-              <p className="text-xs text-slate-600 mt-0.5 max-w-xl leading-relaxed">
-                Tidak ada data wilayah statis/dummy. Mulai dengan mendaftarkan <strong>Korwil</strong> untuk menetapkan wilayah kerja (Kota, Kecamatan &amp; Kelurahan) atau input <strong>Data Voter</strong> baru. Titik koordinat dan marker Google Maps akan otomatis muncul secara dinamis.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => onOpenDaftarTimSukses()}
-              className="px-3.5 py-2 bg-cyan-700 hover:bg-cyan-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
-            >
-              + Daftar Korwil
-            </button>
-            <button
-              type="button"
-              onClick={() => onOpenInputVoter()}
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
-            >
-              + Input Voter
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Dynamic Filter Controls Bar */}
-      <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-2.5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-            <Filter className="w-3.5 h-3.5 text-cyan-700" />
-            <span>Filter Wilayah &amp; Koordinator Dinamis</span>
-          </div>
-
-          <div className="relative w-48 sm:w-64">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari kelurahan, korcam..."
-              className="w-full pl-7 pr-3 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:bg-white focus:outline-hidden"
-            />
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-          {/* Filter Kota */}
-          <div>
-            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Kota/Kab:</label>
-            <select
-              value={selectedKotaFilter}
-              onChange={(e) => setSelectedKotaFilter(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-medium focus:bg-white focus:outline-hidden"
-            >
-              <option value="Semua">Semua Kota ({kotaFilterOptions.length})</option>
-              {kotaFilterOptions.map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Filter Kecamatan */}
-          <div>
-            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Kecamatan:</label>
-            <select
-              value={selectedKecFilter}
-              onChange={(e) => setSelectedKecFilter(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-medium focus:bg-white focus:outline-hidden"
-            >
-              <option value="Semua">Semua Kecamatan ({kecamatanFilterOptions.length})</option>
-              {kecamatanFilterOptions.map((kec) => (
-                <option key={kec} value={kec}>
-                  {kec}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Filter Kelurahan */}
-          <div>
-            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Kelurahan:</label>
-            <select
-              value={selectedKelFilter}
-              onChange={(e) => setSelectedKelFilter(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-medium focus:bg-white focus:outline-hidden"
-            >
-              <option value="Semua">Semua Kelurahan ({kelurahanFilterOptions.length})</option>
-              {kelurahanFilterOptions.map((kel) => (
-                <option key={kel} value={kel}>
-                  {kel}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Filter Koordinator */}
-          <div>
-            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Koordinator:</label>
-            <select
-              value={selectedKoordinatorFilter}
-              onChange={(e) => setSelectedKoordinatorFilter(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-medium focus:bg-white focus:outline-hidden"
-            >
-              <option value="Semua">Semua Koordinator ({koordinatorFilterOptions.length})</option>
-              {koordinatorFilterOptions.map((kor) => (
-                <option key={kor} value={kor}>
-                  {kor}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Google Maps Render Container */}
-      <div className="relative w-full h-[540px] rounded-3xl overflow-hidden border border-slate-200 shadow-md bg-slate-50">
+      {/* Google Map Canvas */}
+      <div className="relative w-full h-[380px] sm:h-[440px] bg-slate-100">
         <SwarakuMapsProvider
           fallback={
-            <div className="h-full w-full p-5 overflow-y-auto flex flex-col justify-between bg-slate-50">
-              <div className="space-y-3">
-                <SwarakuMapsDiagnosticNotice />
-
-                {filteredMarkers.length === 0 ? (
-                  <div className="p-8 text-center text-sm text-slate-500 bg-white rounded-2xl border border-slate-200">
-                    Belum ada titik wilayah atau voter yang sesuai dengan filter.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {filteredMarkers.map((m) => (
-                      <div
-                        key={m.id}
-                        className="p-3.5 rounded-2xl bg-white border border-slate-200 space-y-2 shadow-2xs"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <p className="text-xs font-extrabold text-slate-900">{m.kelurahan}</p>
-                            <p className="text-[11px] text-slate-500">
-                              {m.kecamatan}, {m.kota}
-                            </p>
-                          </div>
-                          <span className="text-xs font-mono font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-lg">
-                            {m.totalVoters} Pemilih
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-600">
-                          Koordinator: <strong className="text-slate-800">{m.koordinatorNama}</strong>
-                        </p>
-                        <p className="text-[10px] font-mono text-slate-500">
-                          {m.lat.toFixed(5)}, {m.lng.toFixed(5)}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+            <div className="h-full w-full p-4 sm:p-6 overflow-y-auto flex flex-col justify-center bg-slate-50">
+              <SwarakuMapsDiagnosticNotice
+                title="Peta Suara Google Maps dialihkan ke Mode Rekapitulasi"
+                subtitle="Rekapitulasi Kecamatan dinamis dan daftar konstituen tetap aktif di bawah."
+              />
             </div>
           }
         >
           <GoogleMap
-            mapId="DEMO_MAP_ID"
-            defaultZoom={12}
-            defaultCenter={defaultCenter}
+            mapId="swaraku-peta-suara-voters-map"
+            defaultCenter={INDONESIA_CENTER}
+            defaultZoom={5}
+            mapTypeId={mapTypeId}
             gestureHandling="greedy"
             disableDefaultUI={false}
+            streetViewControl={false}
+            mapTypeControl={false}
             internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-            style={{ width: '100%', height: '100%' }}
+            className="w-full h-full"
           >
-            {/* Auto-pan / Auto-fit bounds on markers */}
-            <MapCameraHandler
-              markers={filteredMarkers}
-              selectedMarkerId={selectedMarkerId}
-              targetVoter={targetVoter}
-            />
+          <MapViewportSync
+            clusters={clusters}
+            focusCoords={focusCoords}
+            fitNonce={fitNonce}
+          />
 
-            {filteredMarkers.map((m) => (
-              <MarkerWithAnchor
-                key={m.id}
-                markerData={m}
-                isSelected={selectedMarkerId === m.id}
-                onSelect={() => setSelectedMarkerId(m.id)}
-                onClose={() => setSelectedMarkerId(null)}
-                onAddVoterInRegion={(item) => {
-                  setSelectedMarkerId(null);
-                  onOpenInputVoter({
-                    kota: item.kota,
-                    kecamatan: item.kecamatan,
-                    kelurahan: item.kelurahan,
-                    lat: item.lat,
-                    lng: item.lng,
-                  });
+          {clusters.map((cluster) => {
+            const count = cluster.voters.length;
+            const isSelected =
+              activeClusterKey === cluster.key ||
+              (selectedKelurahan &&
+                cluster.kelurahan.toLowerCase() === selectedKelurahan.toLowerCase()) ||
+              (selectedKecamatan &&
+                !selectedKelurahan &&
+                cluster.kecamatan.toLowerCase() === selectedKecamatan.toLowerCase());
+
+            const pinTone =
+              count >= 20
+                ? 'bg-emerald-600 border-white text-white'
+                : count >= 5
+                ? 'bg-blue-600 border-white text-white'
+                : 'bg-cyan-600 border-white text-white';
+
+            return (
+              <AdvancedMarker
+                key={cluster.key}
+                position={{ lat: cluster.lat, lng: cluster.lng }}
+                onClick={() => {
+                  setActiveClusterKey(cluster.key);
+                  onSelectCluster?.(cluster);
                 }}
-                onAssignTimSuksesInRegion={(item) => {
-                  setSelectedMarkerId(null);
-                  onOpenDaftarTimSukses({
-                    kota: item.kota,
-                    kecamatan: item.kecamatan,
-                    kelurahan: item.kelurahan,
-                  });
-                }}
-              />
-            ))}
+                zIndex={isSelected ? 40 : count}
+              >
+                <div className="flex flex-col items-center cursor-pointer group">
+                  <div
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border-2 shadow-md transition-transform ${
+                      isSelected ? 'scale-110 ring-4 ring-blue-300/60' : 'group-hover:scale-105'
+                    } ${pinTone}`}
+                  >
+                    <Users className="w-3.5 h-3.5 shrink-0" />
+                    <span className="text-[11px] font-black tabular-nums">{count}</span>
+                    <span className="text-[10px] font-bold max-w-[100px] truncate hidden sm:inline">
+                      {cluster.kelurahan}
+                    </span>
+                  </div>
+                  <div className="w-2.5 h-2.5 rotate-45 -mt-1.5 bg-slate-800/80" />
+                </div>
+              </AdvancedMarker>
+            );
+          })}
+
+          {activeCluster && (
+            <InfoWindow
+              position={{ lat: activeCluster.lat, lng: activeCluster.lng }}
+              onCloseClick={() => setActiveClusterKey(null)}
+              pixelOffset={[0, -34]}
+            >
+              <div className="min-w-[240px] max-w-[290px] p-1 text-slate-900 space-y-2.5">
+                <div className="border-b border-slate-100 pb-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wide">
+                      Sebaran Konstituen
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-black">
+                      {activeCluster.voters.length} Voter
+                    </span>
+                  </div>
+                  <p className="text-sm font-black text-slate-900 mt-0.5">
+                    Kel. {activeCluster.kelurahan}
+                  </p>
+                  <p className="text-[11px] text-slate-600 flex items-center gap-1 mt-0.5">
+                    <Building2 className="w-3 h-3 text-slate-400 shrink-0" />
+                    <span>
+                      Kec. {activeCluster.kecamatan}, {activeCluster.kota}
+                    </span>
+                  </p>
+                  <p className="text-[10px] text-slate-500">{activeCluster.provinsi}</p>
+                </div>
+
+                {/* Daftar Ringkas Voter di Wilayah Ini */}
+                <div className="max-h-[150px] overflow-y-auto space-y-1.5 pr-1">
+                  {activeCluster.voters.slice(0, 8).map((v) => (
+                    <div
+                      key={v.id}
+                      className="p-2 rounded-lg bg-slate-50 border border-slate-200/80 text-[11px]"
+                    >
+                      <p className="font-bold text-slate-900 truncate">{v.nama}</p>
+                      <p className="text-[10px] text-slate-500 font-mono">{v.nikMasked}</p>
+                      <p className="text-[10px] text-slate-600 flex items-center gap-1 mt-0.5">
+                        <UserCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span className="truncate">
+                          Input: {v.diinputOlehNama || v.terdaftarOleh || '-'}
+                        </span>
+                      </p>
+                    </div>
+                  ))}
+                  {activeCluster.voters.length > 8 && (
+                    <p className="text-[10px] text-center text-slate-500 font-semibold">
+                      +{activeCluster.voters.length - 8} konstituen lainnya di wilayah ini
+                    </p>
+                  )}
+                </div>
+
+                <a
+                  href={`https://www.google.com/maps?q=${activeCluster.lat},${activeCluster.lng}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-1.5 px-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Buka Lokasi di Google Maps</span>
+                </a>
+              </div>
+            </InfoWindow>
+          )}
           </GoogleMap>
         </SwarakuMapsProvider>
 
-        {/* Legend Overlay at Bottom Right */}
-        <div className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-md p-3 rounded-2xl border border-slate-200 shadow-lg text-[10px] space-y-1.5 z-10 max-w-xs">
-          <span className="font-extrabold text-slate-800 uppercase block tracking-wider">
-            Legenda Peta Suara
-          </span>
-          <div className="space-y-1 text-slate-600">
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-md bg-emerald-600 shrink-0"></span>
-              <span>Ada Koordinator &amp; Suara Masuk</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-md bg-cyan-600 shrink-0"></span>
-              <span>Koordinator Korwil Aktif</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-md bg-rose-600 shrink-0"></span>
-              <span>Belum Ada Koordinator Wilayah</span>
+        {voters.length === 0 && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 bg-white/60 backdrop-blur-[1px]">
+            <div className="bg-white border border-slate-200 rounded-2xl px-5 py-4 shadow-md text-center max-w-sm space-y-1">
+              <MapPin className="w-6 h-6 text-slate-400 mx-auto" />
+              <p className="text-sm font-extrabold text-slate-900">Belum Ada Data Konstituen</p>
+              <p className="text-xs text-slate-600">
+                Peta Suara menampilkan data konstituen/voter yang diinput oleh tim lapangan sesuai
+                cakupan wilayah Anda.
+              </p>
             </div>
           </div>
-        </div>
+        )}
       </div>
+
+      {unmappedCount > 0 && (
+        <div className="px-4 py-2 bg-amber-50 border-t border-amber-200 text-[11px] text-amber-800 font-medium">
+          Catatan: {unmappedCount} data konstituen belum memiliki koordinat wilayah presisi, namun
+          tetap terhitung dalam rekapitulasi administratif dan daftar di bawah.
+        </div>
+      )}
     </div>
   );
 };

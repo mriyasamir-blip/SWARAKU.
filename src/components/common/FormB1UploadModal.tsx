@@ -28,7 +28,7 @@ export const FormB1UploadModal: React.FC<FormB1UploadModalProps> = ({
   defaultKecamatan = 'Kec. Cilandak',
   defaultKelurahan = 'Kel. Sukamaju & Sekitarnya (5 Kelurahan)',
   defaultKoordinator = 'Koordinator Saksi Kecamatan',
-  defaultDapil = 'DAPIL DKI JAKARTA II (Dapil 3)',
+  defaultDapil = '',
   onSubmitB1,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);

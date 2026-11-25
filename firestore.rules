@@ -82,12 +82,13 @@ service cloud.firestore {
       return data.keys().hasAll(['id', 'role', 'nama', 'username'])
         && data.keys().hasOnly([
           'id', 'role', 'nama', 'username', 'email', 'nik', 'jabatan', 'wilayah',
-          'kota', 'kecamatan', 'kelurahan', 'points',
+          'provinsi', 'kota', 'kecamatan', 'kelurahan', 'points',
           'idPegawai', 'divisi', 'tps', 'noHp', 'fotoUrl', 'password',
           'status', 'dibuatPada', 'updatedAt',
           'timSuksesId', 'timSuksesNama', 'didaftarkanOlehTimSukses',
           'korcamId', 'korcamNama',
-          'kaderList', 'kaderIds'
+          'kaderList', 'kaderIds',
+          'latitude', 'longitude', 'accuracy', 'lastLocationUpdate', 'gpsState'
         ])
         && data.id is string && isValidId(data.id)
         && data.role in ['super_admin', 'admin', 'tim_sukses', 'kader', 'relawan']
@@ -97,6 +98,7 @@ service cloud.firestore {
         && (!('nik' in data) || (data.nik is string && data.nik.size() <= 32))
         && (!('jabatan' in data) || (data.jabatan is string && data.jabatan.size() <= 160))
         && (!('wilayah' in data) || (data.wilayah is string && data.wilayah.size() <= 160))
+        && (!('provinsi' in data) || (data.provinsi is string && data.provinsi.size() <= 120))
         && (!('kota' in data) || (data.kota is string && data.kota.size() <= 120))
         && (!('kecamatan' in data) || (data.kecamatan is string && data.kecamatan.size() <= 120))
         && (!('kelurahan' in data) || (data.kelurahan is string && data.kelurahan.size() <= 120))
@@ -116,7 +118,12 @@ service cloud.firestore {
         && (!('korcamId' in data) || (data.korcamId is string && data.korcamId.size() <= 128))
         && (!('korcamNama' in data) || (data.korcamNama is string && data.korcamNama.size() <= 120))
         && (!('kaderList' in data) || (data.kaderList is list && data.kaderList.size() <= 200 && (data.kaderList.size() == 0 || data.kaderList[0] is string)))
-        && (!('kaderIds' in data) || (data.kaderIds is list && data.kaderIds.size() <= 200 && (data.kaderIds.size() == 0 || data.kaderIds[0] is string)));
+        && (!('kaderIds' in data) || (data.kaderIds is list && data.kaderIds.size() <= 200 && (data.kaderIds.size() == 0 || data.kaderIds[0] is string)))
+        && (!('latitude' in data) || data.latitude == null || (data.latitude is number && data.latitude >= -90 && data.latitude <= 90))
+        && (!('longitude' in data) || data.longitude == null || (data.longitude is number && data.longitude >= -180 && data.longitude <= 180))
+        && (!('accuracy' in data) || data.accuracy == null || (data.accuracy is number && data.accuracy >= 0 && data.accuracy <= 100000))
+        && (!('lastLocationUpdate' in data) || data.lastLocationUpdate == null || data.lastLocationUpdate is timestamp || (data.lastLocationUpdate is string && data.lastLocationUpdate.size() <= 80))
+        && (!('gpsState' in data) || data.gpsState == null || data.gpsState in ['online', 'background', 'offline']);
     }
 
     function isValidReferralCode(data) {

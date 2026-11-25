@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import type { User } from 'firebase/auth';
 import {
   Home,
@@ -51,7 +51,6 @@ import type { TimSuksesWilayahRecord } from '../../data/petaSuaraData';
 import type { CalegInfoDoc, CampaignEventDoc, RewardDoc } from '../../types/swaraku';
 import { UserRoleManagementView } from '../admin/UserRoleManagementView';
 import { MonitoringMapView } from '../MonitoringMapView';
-import { canAccessMonitoring, isFullMonitorRole } from '../../services/locationService';
 import { SuperadminView } from './SuperadminView';
 import { EventLocationMap } from '../maps/EventLocationMap';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
@@ -76,6 +75,13 @@ import { AutoCekNikModal } from '../common/AutoCekNikModal';
 import { FieldRoleDashboard } from './FieldRoleDashboard';
 import { RelawanAgendaRewardView } from '../relawan/RelawanAgendaRewardView';
 import { formatWilayahLabel } from '../../data/wilayahIndonesia';
+import type { LocationTrackerHookResult } from '../../hooks/useLocationTracker';
+import {
+  canAccessMonitoringRelawan,
+  filterScopedVotersForPetaSuara,
+  resolveAreaProvinsi,
+  resolveVoterCreatorHierarchy,
+} from '../../utils/hierarchyAccess';
 
 export type StaffTab =
   | 'beranda'
@@ -151,6 +157,7 @@ interface StaffPortalAppProps {
   onResetDataToZero: () => void;
   onTriggerCloudSync: () => Promise<void>;
   onOpenWebsiteMode?: () => void;
+  locationTracker?: LocationTrackerHookResult;
 }
 
 const ROLE_META: Record<
@@ -271,6 +278,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
   onResetDataToZero,
   onTriggerCloudSync,
   onOpenWebsiteMode,
+  locationTracker,
 }) => {
   const [activeTab, setActiveTab] = useState<StaffTab>('beranda');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -300,14 +308,28 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
   const isKorcam = staffUser.role === 'kader';
   const isRelawan = staffUser.role === 'relawan';
 
-  // Strict Role Access Matrix
-  const canAccessPetaSuara = isAdminOrSuper || isKorwil; // Korcam & Relawan do NOT access Peta Suara
+  // Strict Role Access Matrix (Global Territorial Hierarchy)
+  const canAccessPetaSuara = true; // Semua role dapat mengakses Peta Suara sesuai cakupan hierarki masing-masing
+  const canAccessMonitoringMenu = canAccessMonitoringRelawan(staffUser.role);
   const canUseAiPilcaleg = isAdminOrSuper || isKorwil;
   const canAccessCampaignPanel = isAdminOrSuper || isKorwil || isKorcam;
   const canAccessFieldOps = isAdminOrSuper || isKorwil || isKorcam;
   const hasGoogleSuperAdmin = Boolean(authUser && isSuperAdminEmail(authUser.email));
   const korwilSupervisor =
     staffUser.timSuksesNama || staffUser.didaftarkanOlehTimSukses || '';
+
+  // Proteksi rute: Relawan dilarang mengakses Monitoring Relawan
+  useEffect(() => {
+    if (activeTab === 'monitoring_kader' && !canAccessMonitoringMenu) {
+      setActiveTab('beranda');
+    }
+  }, [activeTab, canAccessMonitoringMenu]);
+
+  // Hitung voters sesuai cakupan wilayah user untuk badge Peta Suara
+  const scopedPetaSuaraCount = useMemo(
+    () => filterScopedVotersForPetaSuara(staffUser, voterOcrRecords, userAccounts).length,
+    [staffUser, voterOcrRecords, userAccounts]
+  );
 
   const relawanCount = useMemo(
     () => userAccounts.filter((u) => u.role === 'relawan').length,
@@ -341,11 +363,20 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
         : staffUser.role === 'relawan'
         ? 'relawan'
         : 'admin';
+    const hierarchyMeta = resolveVoterCreatorHierarchy(staffUser, userAccounts);
+    const resolvedProvinsi =
+      resolveAreaProvinsi(voter.provinsi, voter.kabupatenKota || staffUser.kota) ||
+      voter.provinsi ||
+      '';
     onSaveVoter({
       ...voter,
+      provinsi: resolvedProvinsi,
       diinputOlehRole: voter.diinputOlehRole || roleTag,
       diinputOlehNama: voter.diinputOlehNama || staffUser.nama,
       terdaftarOleh: voter.terdaftarOleh || staffUser.nama,
+      createdById: voter.createdById || hierarchyMeta.createdById,
+      korcamId: voter.korcamId || hierarchyMeta.korcamId,
+      korwilId: voter.korwilId || hierarchyMeta.korwilId,
     });
   };
 
@@ -412,10 +443,10 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
     if (canAccessPetaSuara) {
       items.push({
         id: 'peta_suara',
-        label: 'Peta Suara (Google Maps)',
+        label: 'Peta Suara',
         shortLabel: 'Peta Suara',
         icon: <Compass className="w-5 h-5" />,
-        badge: voterOcrRecords.length > 0 ? voterOcrRecords.length : undefined,
+        badge: scopedPetaSuaraCount > 0 ? scopedPetaSuaraCount : undefined,
       });
     }
 
@@ -455,14 +486,10 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
       );
     }
 
-    if (canAccessMonitoring(staffUser.role)) {
+    if (canAccessMonitoringMenu) {
       items.push({
         id: 'monitoring_kader',
-        label: isFullMonitorRole(staffUser.role)
-          ? 'Monitoring Relawan & Tim'
-          : isKorwil
-          ? 'Monitoring Korcam & Relawan'
-          : 'Monitoring Relawan',
+        label: 'Monitoring Relawan',
         shortLabel: 'Monitoring',
         icon: <Navigation className="w-5 h-5" />,
       });
@@ -505,13 +532,14 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
     return items;
   }, [
     canAccessPetaSuara,
+    canAccessMonitoringMenu,
     canAccessFieldOps,
     canAccessCampaignPanel,
     isAdminOrSuper,
     isKorwil,
     isKorcam,
     isRelawan,
-    staffUser.role,
+    scopedPetaSuaraCount,
     voterOcrRecords.length,
     events.length,
     myRelawanCount,
@@ -520,6 +548,11 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
   ]);
 
   const handleSelectTab = (tab: StaffTab) => {
+    if (tab === 'monitoring_kader' && !canAccessMonitoringMenu) {
+      setActiveTab('beranda');
+      setMobileMenuOpen(false);
+      return;
+    }
     setActiveTab(tab);
     setMobileMenuOpen(false);
   };
@@ -624,6 +657,53 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Mode Live Patroli (Korcam & Relawan — Screen Wake Lock API) */}
+        {locationTracker?.isTrackedUser && (
+          <div className="px-4 pt-3">
+            <div
+              className={`p-3 rounded-2xl border transition-colors space-y-2 ${
+                locationTracker.livePatroliEnabled
+                  ? 'bg-emerald-50 border-emerald-200'
+                  : 'bg-slate-50 border-slate-200'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-extrabold text-slate-800 leading-tight">
+                  Aktifkan Mode Live Tracking
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={locationTracker.livePatroliEnabled}
+                  onClick={() => locationTracker.toggleLivePatroli()}
+                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                    locationTracker.livePatroliEnabled ? 'bg-emerald-600' : 'bg-slate-300'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-xs transition-transform ${
+                      locationTracker.livePatroliEnabled ? 'translate-x-4.5' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+              {locationTracker.livePatroliEnabled ? (
+                <div className="flex items-center gap-1.5 text-[10px] font-extrabold text-emerald-800">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600" />
+                  </span>
+                  <span>Live GPS Aktif · Layar Tetap Menyala</span>
+                </div>
+              ) : (
+                <p className="text-[10px] text-slate-500 leading-snug">
+                  GPS otomatis terkirim saat bertugas. Nyalakan untuk menjaga layar tetap aktif.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Quick Actions per Role */}
         <div className="px-4 pt-3 pb-1 grid grid-cols-2 gap-2">
@@ -748,6 +828,20 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          {locationTracker?.isTrackedUser && locationTracker.livePatroliEnabled && (
+            <button
+              type="button"
+              onClick={() => locationTracker.toggleLivePatroli()}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-extrabold cursor-pointer"
+              title="Mode Live Tracking Aktif"
+            >
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600" />
+              </span>
+              <span className="hidden xs:inline">Live GPS Aktif</span>
+            </button>
+          )}
           <span className="text-[10px] font-mono font-extrabold px-2 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-800">
             {kaderPoints} Pts
           </span>
@@ -909,6 +1003,78 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* Mode "Live Patroli" (Screen Wake Lock API) Banner untuk Korcam & Relawan */}
+              {locationTracker?.isTrackedUser && (
+                <div
+                  className={`rounded-3xl border p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors ${
+                    locationTracker.livePatroliEnabled
+                      ? 'bg-emerald-50/80 border-emerald-300'
+                      : 'bg-white border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div
+                      className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
+                        locationTracker.livePatroliEnabled
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      <Navigation className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-sm font-black text-slate-900">
+                          Mode Live Patroli &amp; Share Live Location
+                        </h3>
+                        {locationTracker.livePatroliEnabled ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-extrabold">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-200 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+                            </span>
+                            Live GPS Aktif
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-[10px] font-bold">
+                            GPS Otomatis ({locationTracker.gpsState === 'online' ? 'Terhubung' : 'Standby'})
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        {locationTracker.livePatroliEnabled
+                          ? 'Layar dijaga tetap menyala (Screen Wake Lock) agar titik koordinat GPS Anda terkirim stabil ke Dashboard Monitoring Relawan tanpa terputus.'
+                          : 'Aktifkan Mode Live Tracking saat patroli di lapangan agar layar HP tidak otomatis mati/sleep dan posisi GPS terus tersinkronisasi.'}
+                      </p>
+                      {locationTracker.lastCoords && (
+                        <p className="text-[11px] font-mono text-slate-500">
+                          Koordinat terkini: {locationTracker.lastCoords.latitude.toFixed(5)},{' '}
+                          {locationTracker.lastCoords.longitude.toFixed(5)}
+                          {locationTracker.accuracy ? ` (±${locationTracker.accuracy}m)` : ''}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => locationTracker.toggleLivePatroli()}
+                    className={`min-h-[44px] px-4 py-2.5 rounded-xl text-xs font-extrabold inline-flex items-center justify-center gap-2 shrink-0 cursor-pointer transition-colors ${
+                      locationTracker.livePatroliEnabled
+                        ? 'bg-white hover:bg-rose-50 text-rose-700 border border-rose-200'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                    }`}
+                  >
+                    <Radio className="w-4 h-4" />
+                    <span>
+                      {locationTracker.livePatroliEnabled
+                        ? 'Matikan Mode Live Tracking'
+                        : 'Aktifkan Mode Live Tracking'}
+                    </span>
+                  </button>
+                </div>
+              )}
 
               {/* Admin / SuperAdmin Overview KPI & Quick Access Cards */}
               {isAdminOrSuper && (
@@ -1254,20 +1420,14 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             />
           )}
 
-          {/* 3. PETA SUARA (GOOGLE MAPS) — SuperAdmin, Admin, & Korwil ONLY (NO Korcam/Relawan) */}
+          {/* 3. PETA SUARA (MURNI KONSTITUEN / VOTERS SESUAI HAK AKSES HIERARKI WILAYAH) */}
           {activeTab === 'peta_suara' && canAccessPetaSuara && (
             <div className="bg-white rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4">
               <MonitoringPetaSuaraScreen
                 voterList={voterOcrRecords}
-                dptList={dptList}
-                timSuksesList={timSuksesList}
+                userAccounts={userAccounts}
                 currentUser={staffUser}
-                onSaveTimSukses={onSaveTimSukses}
-                onSaveVoter={handleSaveVoterWithRole}
-                onResetDataToZero={isAdminOrSuper ? () => setConfirmResetOpen(true) : undefined}
-                onOpenWhatsAppBlazt={() => setShowBlaztModal(true)}
                 onNavigateTab={(tab) => handleSelectTab(tab as StaffTab)}
-                onOpenTambahNikModal={() => setShowTambahNikModal(true)}
               />
             </div>
           )}
@@ -1304,24 +1464,12 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             />
           )}
 
-          {/* 6. MONITORING RELAWAN & KORCAM (GPS REAL-TIME FIRESTORE) */}
-          {activeTab === 'monitoring_kader' && canAccessMonitoring(staffUser.role) && (
-            <div className="bg-white rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4">
-              <MonitoringMapView
-                currentUser={{
-                  id: staffUser.id || staffUser.username,
-                  username: staffUser.username,
-                  nama: staffUser.nama,
-                  role: staffUser.role,
-                  kota: staffUser.kota,
-                  kecamatan: staffUser.kecamatan,
-                  kelurahan: staffUser.kelurahan,
-                  kaderIds: staffUser.kaderIds,
-                  kaderList: staffUser.kaderList,
-                }}
-                userAccounts={userAccounts}
-              />
-            </div>
+          {/* 6. MONITORING RELAWAN (LIVE MAP & DAFTAR REAL-TIME FIRESTORE — DIPROTEKSI UNTUK RELAWAN) */}
+          {activeTab === 'monitoring_kader' && canAccessMonitoringMenu && (
+            <MonitoringMapView
+              currentUser={staffUser}
+              userAccounts={userAccounts}
+            />
           )}
 
           {/* 7. COMMAND CENTER (ADMIN & SUPERADMIN) */}

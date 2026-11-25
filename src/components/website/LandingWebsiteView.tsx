@@ -2025,14 +2025,14 @@ export const LandingWebsiteView: React.FC<LandingWebsiteViewProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Daerah Pemilihan (Dapil) / Wilayah *
+                        Wilayah Tugas (Kota / Kecamatan / Kelurahan) *
                       </label>
                       <input
                         type="text"
                         required
                         value={formData.dapil}
                         onChange={(e) => setFormData({ ...formData, dapil: e.target.value })}
-                        placeholder="Dapil 2 (Kec. Cilandak, Pasar Minggu)"
+                        placeholder="Contoh: Jakarta Selatan (Kec. Cilandak, Pasar Minggu)"
                         className="w-full py-2.5 px-3 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-cyan-500 focus:outline-hidden"
                       />
                     </div>

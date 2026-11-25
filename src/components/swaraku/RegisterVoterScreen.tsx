@@ -42,7 +42,7 @@ export const RegisterVoterScreen: React.FC<RegisterVoterScreenProps> = ({
       return;
     }
     if (region.trim().length < 2) {
-      setErrorMsg('Daerah / Dapil wajib diisi (contoh: Kecamatan Cilandak).');
+      setErrorMsg('Kelurahan / Kecamatan wajib diisi (contoh: Kel. Cilandak Barat, Kec. Cilandak).');
       return;
     }
     if (phone.trim().length < 6) {
@@ -98,7 +98,7 @@ export const RegisterVoterScreen: React.FC<RegisterVoterScreenProps> = ({
         </div>
 
         <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-3.5 text-xs text-emerald-900">
-          Isi data diri Anda secara manual untuk mengaktifkan <strong>Kantong Poin (+100 Poin Awal)</strong> dan menampilkan informasi Caleg sesuai Daerah / Dapil Anda.
+          Isi data diri Anda secara manual untuk mengaktifkan <strong>Kantong Poin (+100 Poin Awal)</strong> dan menampilkan informasi Caleg sesuai Wilayah / Kelurahan Anda.
         </div>
 
         {errorMsg && (
@@ -128,7 +128,7 @@ export const RegisterVoterScreen: React.FC<RegisterVoterScreenProps> = ({
           <div className="space-y-1.5">
             <label htmlFor="reg-region" className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
               <MapPin className="w-3.5 h-3.5 text-blue-700" />
-              <span>2. Daerah / Dapil <span className="text-rose-600">*</span></span>
+              <span>2. Kelurahan / Kecamatan <span className="text-rose-600">*</span></span>
             </label>
             <input
               id="reg-region"
@@ -137,7 +137,7 @@ export const RegisterVoterScreen: React.FC<RegisterVoterScreenProps> = ({
               maxLength={120}
               value={region}
               onChange={(e) => setRegion(e.target.value)}
-              placeholder="Contoh: Dapil 1 Jakarta Selatan / Kec. Cilandak"
+              placeholder="Contoh: Kel. Cilandak Barat, Kec. Cilandak, Jakarta Selatan"
               className="w-full min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-300 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
             />
           </div>

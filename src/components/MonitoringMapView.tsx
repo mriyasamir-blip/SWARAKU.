@@ -5,120 +5,184 @@ import {
   InfoWindow,
   useMap,
 } from '@vis.gl/react-google-maps';
-import { ExternalLink, Navigation, Radio, RefreshCw } from 'lucide-react';
+import { collection, onSnapshot } from 'firebase/firestore';
 import {
-  fetchAllLiveLocationsOnce,
-  isFullMonitorRole,
+  Users,
+  Radio,
+  Clock,
+  WifiOff,
+  Search,
+  MapPin,
+  ShieldCheck,
+  UserCheck,
+  Navigation,
+  ExternalLink,
+  RefreshCw,
+  AlertCircle,
+  Filter,
+} from 'lucide-react';
+import { firestore } from '../lib/firebase';
+import type { GpsTrackingState, UserAccount } from '../types/vore';
+import {
+  subscribeAllLiveLocations,
+  type LiveLocationRecord,
+} from '../services/locationService';
+import { isRealGpsCoordinate } from '../services/geolocationTrackerService';
+import {
+  SwarakuMapsProvider,
+  SwarakuMapsDiagnosticNotice,
+} from './maps/SwarakuMapsProvider';
+import {
+  canAccessMonitoringRelawan,
+  canViewerMonitorTarget,
+  isFullAccessRole,
   isKorcamRole,
   isKorwilRole,
-  resolveMonitoredLocations,
-  subscribeAllLiveLocations,
-  type EnrichedLiveLocationRecord,
-  type LiveLocationRecord,
-  type MonitoringAccountInfo,
-  type MonitoringViewerContext,
-  type TrackedRole,
-} from '../services/locationService';
-import { SwarakuMapsProvider } from './maps/SwarakuMapsProvider';
+  resolveUserProvinsi,
+} from '../utils/hierarchyAccess';
+
+// ============================================================================
+// SWARAKU — DASHBOARD "MONITORING RELAWAN" (LIVE MAP & DAFTAR REAL-TIME)
+// - Akses: Zuper Admin, Super Admin, Admin, Korwil, Korcam (sesuai hierarki wilayah)
+// - Diblokir untuk role Relawan
+// - Listener real-time onSnapshot ke `user_accounts` (+ merge `live_locations`)
+// - 3 Status Visual: Hijau (GPS Online <3m), Kuning/Oranye (Background / 3-10m),
+//   Merah/Abu-abu (GPS Offline >10m / logout / belum pernah kirim GPS)
+// - Zero static fallback coordinates!
+// ============================================================================
+
+const INDONESIA_OVERVIEW_CENTER = { lat: -2.5489, lng: 118.0149 };
+
+type VisualGpsStatus = 'online' | 'background' | 'offline';
+type RoleFilterValue = 'semua' | 'korcam' | 'relawan';
+type StatusFilterValue = 'semua' | VisualGpsStatus;
+
+interface MonitoredFieldMember {
+  id: string;
+  nama: string;
+  username: string;
+  role: 'korcam' | 'relawan';
+  roleLabel: 'Korcam' | 'Relawan';
+  provinsi: string;
+  kota: string;
+  kecamatan: string;
+  kelurahan: string;
+  wilayahDisplay: string;
+  noHp: string;
+  latitude: number | null;
+  longitude: number | null;
+  accuracy: number | null;
+  hasRealCoords: boolean;
+  rawGpsState: GpsTrackingState;
+  visualStatus: VisualGpsStatus;
+  lastUpdateMs: number | null;
+  lastSeenLabel: string;
+  koordinatorLabel: string;
+}
 
 interface MonitoringMapViewProps {
-  currentUser: MonitoringViewerContext;
-  userAccounts?: MonitoringAccountInfo[];
+  currentUser: UserAccount;
+  userAccounts?: UserAccount[];
 }
 
-const STALE_MINUTES = 10;
-
-function toDateObj(val: LiveLocationRecord['lastUpdated']): Date | null {
-  if (!val) return null;
-  if (
-    typeof val === 'object' &&
-    'toDate' in val &&
-    typeof val.toDate === 'function'
-  ) {
-    return val.toDate();
+function parseTimestampMs(raw: unknown): number | null {
+  if (!raw) return null;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (raw instanceof Date) return raw.getTime();
+  if (typeof raw === 'object' && raw !== null) {
+    const obj = raw as { toMillis?: () => number; toDate?: () => Date; seconds?: number };
+    if (typeof obj.toMillis === 'function') return obj.toMillis();
+    if (typeof obj.toDate === 'function') return obj.toDate().getTime();
+    if (typeof obj.seconds === 'number') return obj.seconds * 1000;
   }
-  const d = new Date(val as string | number);
-  return isNaN(d.getTime()) ? null : d;
+  if (typeof raw === 'string') {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 }
 
-function formatWib(val: LiveLocationRecord['lastUpdated']): string {
-  const d = toDateObj(val);
-  if (!d) return 'Belum pernah aktif';
-  return (
-    d.toLocaleString('id-ID', {
-      timeZone: 'Asia/Jakarta',
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }) + ' WIB'
-  );
+/**
+ * Logika 3 Status Visual:
+ * - Hijau (GPS Online): gpsState === "online" DAN update terakhir < 3 menit.
+ * - Kuning/Oranye (Background / Idle): gpsState === "background" ATAU update terakhir 3–10 menit lalu.
+ * - Merah/Abu-abu (GPS Offline): Tidak ada update > 10 menit ATAU gpsState === "offline" / belum pernah kirim GPS.
+ */
+function computeVisualGpsStatus(
+  rawState: GpsTrackingState | undefined,
+  lastUpdateMs: number | null,
+  hasRealCoords: boolean,
+  nowMs: number
+): VisualGpsStatus {
+  if (!hasRealCoords || !lastUpdateMs || rawState === 'offline') {
+    return 'offline';
+  }
+  const ageMs = Math.max(0, nowMs - lastUpdateMs);
+  const THREE_MIN = 3 * 60 * 1000;
+  const TEN_MIN = 10 * 60 * 1000;
+
+  if (ageMs > TEN_MIN) {
+    return 'offline';
+  }
+  if (rawState === 'background' || ageMs >= THREE_MIN) {
+    return 'background';
+  }
+  return 'online';
 }
 
-function formatRelativeTime(val: LiveLocationRecord['lastUpdated'], nowMs: number): string {
-  const d = toDateObj(val);
-  if (!d) return '';
-  const diffSec = Math.max(0, Math.floor((nowMs - d.getTime()) / 1000));
-  if (diffSec < 15) return 'Baru saja (Live)';
+function formatLastSeen(lastUpdateMs: number | null, nowMs: number): string {
+  if (!lastUpdateMs) return 'Belum pernah aktif';
+  const diffSec = Math.max(0, Math.floor((nowMs - lastUpdateMs) / 1000));
+  if (diffSec < 15) return 'Baru saja';
   if (diffSec < 60) return `${diffSec} dtk lalu`;
   const diffMin = Math.floor(diffSec / 60);
   if (diffMin < 60) return `${diffMin} mnt lalu`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr} jam lalu`;
-  const diffDay = Math.floor(diffHr / 24);
-  return `${diffDay} hari lalu`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} jam lalu`;
+  return new Date(lastUpdateMs).toLocaleString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
-function getEffectiveStatus(
-  rec: LiveLocationRecord,
-  nowMs: number
-): 'Aktif' | 'Sinyal Terhenti' | 'Ditolak' | 'Tidak Aktif' {
-  if (rec.gpsStatus === 'Ditolak') return 'Ditolak';
-  if (rec.gpsStatus !== 'Aktif') return 'Tidak Aktif';
-  const last = toDateObj(rec.lastUpdated);
-  if (last && nowMs - last.getTime() > STALE_MINUTES * 60 * 1000) {
-    return 'Sinyal Terhenti';
-  }
-  return 'Aktif';
+function buildWilayahDisplay(u: UserAccount): string {
+  const parts = [u.kelurahan, u.kecamatan, u.kota].filter((p) => Boolean(p && p.trim() && p !== '-'));
+  if (parts.length > 0) return parts.join(', ');
+  return u.wilayah || 'Wilayah belum diatur';
 }
 
-function getStatusSortRank(status: 'Aktif' | 'Sinyal Terhenti' | 'Ditolak' | 'Tidak Aktif'): number {
-  if (status === 'Aktif') return 0;
-  if (status === 'Sinyal Terhenti') return 1;
-  if (status === 'Ditolak') return 2;
-  return 3;
-}
-
-const MapViewportController: React.FC<{
-  records: EnrichedLiveLocationRecord[];
-  focusedRecord: EnrichedLiveLocationRecord | null;
-}> = ({ records, focusedRecord }) => {
+/**
+ * Helper internal untuk mengontrol panTo, setZoom, dan fitBounds secara halus
+ * menggunakan instance Google Map (`useMap()`).
+ */
+const MapCameraController: React.FC<{
+  focusTarget: MonitoredFieldMember | null;
+  focusNonce: number;
+  plottableMembers: MonitoredFieldMember[];
+}> = ({ focusTarget, focusNonce, plottableMembers }) => {
   const map = useMap();
-  const hasFittedInitialRef = useRef(false);
+  const hasAutoFittedRef = useRef(false);
 
+  // Sinkronisasi Daftar -> Peta: panTo & setZoom tepat ke titik marker yang dipilih
   useEffect(() => {
-    if (!map) return;
+    if (!map || !focusTarget || !focusTarget.hasRealCoords) return;
+    if (focusTarget.latitude === null || focusTarget.longitude === null) return;
+    map.panTo({ lat: focusTarget.latitude, lng: focusTarget.longitude });
+    map.setZoom(16);
+  }, [map, focusTarget, focusNonce]);
 
-    if (
-      focusedRecord &&
-      typeof focusedRecord.latitude === 'number' &&
-      typeof focusedRecord.longitude === 'number'
-    ) {
-      map.panTo({ lat: focusedRecord.latitude, lng: focusedRecord.longitude });
-      map.setZoom(16);
-      return;
-    }
-
-    if (records.length === 0 || hasFittedInitialRef.current) return;
-    hasFittedInitialRef.current = true;
-
-    if (records.length === 1) {
-      map.setCenter({
-        lat: records[0].latitude as number,
-        lng: records[0].longitude as number,
-      });
-      map.setZoom(15);
+  // Fit bounds awal sekali saat marker pertama kali muncul
+  useEffect(() => {
+    if (!map || hasAutoFittedRef.current || plottableMembers.length === 0) return;
+    if (plottableMembers.length === 1) {
+      const only = plottableMembers[0];
+      if (only.latitude !== null && only.longitude !== null) {
+        map.panTo({ lat: only.latitude, lng: only.longitude });
+        map.setZoom(14);
+        hasAutoFittedRef.current = true;
+      }
       return;
     }
 
@@ -126,829 +190,917 @@ const MapViewportController: React.FC<{
       window as unknown as {
         google?: {
           maps?: {
-            LatLngBounds?: new () => {
-              extend: (p: { lat: number; lng: number }) => void;
-            };
+            LatLngBounds?: new () => { extend: (pt: { lat: number; lng: number }) => void };
           };
         };
       }
     ).google?.maps;
     if (gmaps?.LatLngBounds) {
       const bounds = new gmaps.LatLngBounds();
-      records.forEach((rec) => {
-        if (typeof rec.latitude === 'number' && typeof rec.longitude === 'number') {
-          bounds.extend({ lat: rec.latitude, lng: rec.longitude });
+      plottableMembers.forEach((m) => {
+        if (m.latitude !== null && m.longitude !== null) {
+          bounds.extend({ lat: m.latitude, lng: m.longitude });
         }
       });
-      map.fitBounds(bounds as unknown as Parameters<typeof map.fitBounds>[0]);
+      map.fitBounds(bounds as Parameters<typeof map.fitBounds>[0], 56);
+      hasAutoFittedRef.current = true;
     }
-  }, [map, records, focusedRecord]);
+  }, [map, plottableMembers]);
 
   return null;
 };
 
 export const MonitoringMapView: React.FC<MonitoringMapViewProps> = ({
   currentUser,
-  userAccounts = [],
+  userAccounts: propUserAccounts = [],
 }) => {
-  const isFullAccess = isFullMonitorRole(currentUser.role);
-  const isKorwil = isKorwilRole(currentUser.role);
-  const isKorcam = isKorcamRole(currentUser.role);
+  const [cloudUsers, setCloudUsers] = useState<UserAccount[]>(propUserAccounts);
+  const [legacyLiveRecords, setLegacyLiveRecords] = useState<LiveLocationRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [listenerError, setListenerError] = useState<string | null>(null);
 
-  const [rawLiveRecords, setRawLiveRecords] = useState<LiveLocationRecord[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [nowMs, setNowMs] = useState<number>(Date.now());
-  const [refreshTick, setRefreshTick] = useState<number>(0);
+  // Filters
+  const isViewerKorcam = isKorcamRole(currentUser.role);
+  const isViewerKorwil = isKorwilRole(currentUser.role);
+  const isViewerFull = isFullAccessRole(currentUser.role);
 
-  const [search, setSearch] = useState<string>('');
-  const [roleFilter, setRoleFilter] = useState<'Semua' | TrackedRole>('Semua');
-  const [korwilFilter, setKorwilFilter] = useState<string>('Semua');
-  const [korcamFilter, setKorcamFilter] = useState<string>('Semua');
-  const [statusFilter, setStatusFilter] = useState<
-    'Semua' | 'Aktif' | 'Sinyal Terhenti' | 'Belum Aktif'
-  >('Semua');
+  const [roleFilter, setRoleFilter] = useState<RoleFilterValue>(
+    isViewerKorcam ? 'relawan' : 'semua'
+  );
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('semua');
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [focusRequestId, setFocusRequestId] = useState<string | null>(null);
-  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  // Selected member & focus trigger for List -> Map panTo/setZoom + InfoWindow
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const [focusNonce, setFocusNonce] = useState(0);
 
+  // Clock ticker setiap 15 detik agar status 3-menit / 10-menit & Last Seen selalu real-time
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
   useEffect(() => {
-    setLoading(true);
-    const unsubscribe = subscribeAllLiveLocations(
-      (data) => {
-        setRawLiveRecords(data);
-        setLoading(false);
-      },
-      () => setLoading(false)
-    );
-    return () => unsubscribe();
-  }, [refreshTick]);
-
-  // Refresh relative timestamps every 5s for Share Live Location responsiveness
-  useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 5_000);
-    return () => clearInterval(timer);
+    const t = window.setInterval(() => setNowMs(Date.now()), 15_000);
+    return () => window.clearInterval(t);
   }, []);
 
-  const records = useMemo(
-    () => resolveMonitoredLocations(currentUser, rawLiveRecords, userAccounts),
-    [currentUser, rawLiveRecords, userAccounts]
-  );
+  // Proteksi rute jika role tidak diizinkan (mis. Relawan)
+  const hasAccess = canAccessMonitoringRelawan(currentUser.role);
 
-  const handleRefreshData = async () => {
-    setRefreshing(true);
-    setNowMs(Date.now());
-    try {
-      const fresh = await fetchAllLiveLocationsOnce();
-      setRawLiveRecords(fresh);
-    } catch {
-      // Fallback ke re-subscribe listener
-    } finally {
-      setRefreshing(false);
-      setRefreshTick((t) => t + 1);
-    }
-  };
+  // Real-time Firestore listener pada koleksi `user_accounts`
+  useEffect(() => {
+    if (!hasAccess) return;
 
-  const korwilOptions = useMemo(() => {
-    if (!isFullAccess) return [];
-    const map = new Map<string, string>();
-    records.forEach((r) => {
-      if (r.role === 'Korwil') {
-        map.set(r.userId, r.nama);
-      } else if (r.timSuksesId && r.namaTimSukses && !map.has(r.timSuksesId)) {
-        map.set(r.timSuksesId, r.namaTimSukses);
+    setIsLoading(true);
+    const unsubUsers = onSnapshot(
+      collection(firestore, 'user_accounts'),
+      (snap) => {
+        const list: UserAccount[] = [];
+        snap.forEach((docSnap) => {
+          const d = docSnap.data();
+          list.push({
+            id: d.id || docSnap.id,
+            role: d.role || 'relawan',
+            nama: d.nama || '',
+            username: d.username || '',
+            email: d.email || '',
+            jabatan: d.jabatan || '',
+            wilayah: d.wilayah || '',
+            provinsi: d.provinsi || undefined,
+            kota: d.kota || undefined,
+            kecamatan: d.kecamatan || undefined,
+            kelurahan: d.kelurahan || undefined,
+            noHp: d.noHp || '',
+            status: d.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif',
+            timSuksesId: d.timSuksesId || undefined,
+            timSuksesNama: d.timSuksesNama || undefined,
+            didaftarkanOlehTimSukses: d.didaftarkanOlehTimSukses || undefined,
+            korcamId: d.korcamId || undefined,
+            korcamNama: d.korcamNama || undefined,
+            kaderList: Array.isArray(d.kaderList) ? d.kaderList : undefined,
+            kaderIds: Array.isArray(d.kaderIds) ? d.kaderIds : undefined,
+            latitude: typeof d.latitude === 'number' ? d.latitude : null,
+            longitude: typeof d.longitude === 'number' ? d.longitude : null,
+            accuracy: typeof d.accuracy === 'number' ? d.accuracy : null,
+            lastLocationUpdate: d.lastLocationUpdate ?? undefined,
+            gpsState:
+              d.gpsState === 'online' || d.gpsState === 'background' || d.gpsState === 'offline'
+                ? d.gpsState
+                : undefined,
+          });
+        });
+        setCloudUsers(list);
+        setIsLoading(false);
+        setListenerError(null);
+      },
+      (err) => {
+        console.warn('[MonitoringRelawan] onSnapshot user_accounts error:', err);
+        setListenerError('Koneksi real-time ke database lokasi mengalami gangguan sementara.');
+        setIsLoading(false);
       }
+    );
+
+    // Secondary listener untuk kompatibilitas koleksi `live_locations`
+    const unsubLegacy = subscribeAllLiveLocations(
+      (records: LiveLocationRecord[]) => {
+        setLegacyLiveRecords(records);
+      },
+      () => {
+        // optional fallback collection
+      }
+    );
+
+    return () => {
+      unsubUsers();
+      unsubLegacy();
+    };
+  }, [hasAccess]);
+
+  // Gabungkan daftar akun dari Firestore + prop jika ada yang belum tersinkron
+  const allAccounts = useMemo<UserAccount[]>(() => {
+    const byId = new Map<string, UserAccount>();
+    propUserAccounts.forEach((u) => {
+      if (u?.id) byId.set(u.id, u);
     });
-    return Array.from(map.entries()).map(([id, nama]) => ({ id, nama }));
-  }, [records, isFullAccess]);
-
-  const korcamOptions = useMemo(() => {
-    if (!isFullAccess && !isKorwil) return [];
-    const map = new Map<string, string>();
-    records.forEach((r) => {
-      if (r.role === 'Korcam') {
-        map.set(r.userId, r.nama);
-      } else if (r.korcamId && r.namaKorcam && !map.has(r.korcamId)) {
-        map.set(r.korcamId, r.namaKorcam);
-      }
+    cloudUsers.forEach((u) => {
+      if (u?.id) byId.set(u.id, u);
     });
-    return Array.from(map.entries()).map(([id, nama]) => ({ id, nama }));
-  }, [records, isFullAccess, isKorwil]);
+    return Array.from(byId.values());
+  }, [cloudUsers, propUserAccounts]);
 
-  const filteredRecords = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const list = records.filter((rec) => {
-      if (
-        q &&
-        !rec.nama.toLowerCase().includes(q) &&
-        !(rec.address || '').toLowerCase().includes(q) &&
-        !(rec.kelurahan || '').toLowerCase().includes(q) &&
-        !(rec.kecamatan || '').toLowerCase().includes(q) &&
-        !(rec.kota || '').toLowerCase().includes(q)
-      ) {
-        return false;
-      }
+  // Map legacy live_locations by userId untuk fallback baca koordinat jika user_accounts belum punya
+  const legacyByUserId = useMemo(() => {
+    const map = new Map<string, LiveLocationRecord>();
+    legacyLiveRecords.forEach((rec) => {
+      if (rec.userId) map.set(rec.userId, rec);
+    });
+    return map;
+  }, [legacyLiveRecords]);
 
-      if (!isKorcam && roleFilter !== 'Semua' && rec.role !== roleFilter) {
-        return false;
-      }
+  // Terapkan Aturan Hak Akses & Filter Hierarki Wilayah (Poin 1)
+  const scopedMembers = useMemo<MonitoredFieldMember[]>(() => {
+    if (!hasAccess) return [];
 
-      if (isFullAccess && korwilFilter !== 'Semua') {
-        const matchKorwil =
-          rec.userId === korwilFilter || rec.timSuksesId === korwilFilter;
-        if (!matchKorwil) return false;
-      }
+    const visibleUsers = allAccounts.filter((u) =>
+      canViewerMonitorTarget(currentUser, u, allAccounts)
+    );
 
-      if ((isFullAccess || isKorwil) && korcamFilter !== 'Semua') {
-        const matchKorcam =
-          rec.userId === korcamFilter || rec.korcamId === korcamFilter;
-        if (!matchKorcam) return false;
-      }
+    return visibleUsers
+      .map((u) => {
+        const legacy = legacyByUserId.get(u.id) || legacyByUserId.get(u.username);
+        const userLat = isRealGpsCoordinate(u.latitude, u.longitude) ? u.latitude! : null;
+        const userLng = isRealGpsCoordinate(u.latitude, u.longitude) ? u.longitude! : null;
+        const userTimeMs = parseTimestampMs(u.lastLocationUpdate);
 
-      const eff = getEffectiveStatus(rec, nowMs);
-      if (statusFilter === 'Aktif' && eff !== 'Aktif') return false;
-      if (statusFilter === 'Sinyal Terhenti' && eff !== 'Sinyal Terhenti') {
-        return false;
-      }
-      if (
-        statusFilter === 'Belum Aktif' &&
-        eff !== 'Tidak Aktif' &&
-        eff !== 'Ditolak'
-      ) {
-        return false;
-      }
+        const legacyHasCoords = legacy ? isRealGpsCoordinate(legacy.latitude, legacy.longitude) : false;
+        const legacyTimeMs = legacy ? parseTimestampMs(legacy.lastUpdated) : null;
 
+        // Pilih sumber koordinat terbaru (utamakan user_accounts, fallback ke live_locations jika lebih baru)
+        let finalLat: number | null = userLat;
+        let finalLng: number | null = userLng;
+        let finalAcc: number | null = typeof u.accuracy === 'number' ? u.accuracy : null;
+        let finalTimeMs: number | null = userTimeMs;
+        let rawState: GpsTrackingState = u.gpsState || 'offline';
+
+        if (
+          legacy &&
+          legacyHasCoords &&
+          (!userLat || (legacyTimeMs && (!userTimeMs || legacyTimeMs > userTimeMs)))
+        ) {
+          finalLat = legacy.latitude;
+          finalLng = legacy.longitude;
+          finalAcc = legacy.accuracy ?? finalAcc;
+          finalTimeMs = legacyTimeMs ?? finalTimeMs;
+          if (!u.gpsState) {
+            rawState = legacy.gpsStatus === 'Aktif' ? 'online' : 'offline';
+          }
+        }
+
+        const hasRealCoords = isRealGpsCoordinate(finalLat, finalLng);
+        const visualStatus = computeVisualGpsStatus(rawState, finalTimeMs, hasRealCoords, nowMs);
+        const isKorcam = isKorcamRole(u.role);
+
+        return {
+          id: u.id,
+          nama: u.nama || u.username || 'Tanpa Nama',
+          username: u.username || '',
+          role: isKorcam ? 'korcam' : 'relawan',
+          roleLabel: isKorcam ? 'Korcam' : 'Relawan',
+          provinsi: resolveUserProvinsi(u),
+          kota: u.kota || '',
+          kecamatan: u.kecamatan || '',
+          kelurahan: u.kelurahan || '',
+          wilayahDisplay: buildWilayahDisplay(u),
+          noHp: u.noHp || '-',
+          latitude: hasRealCoords ? finalLat : null,
+          longitude: hasRealCoords ? finalLng : null,
+          accuracy: finalAcc,
+          hasRealCoords,
+          rawGpsState: rawState,
+          visualStatus,
+          lastUpdateMs: finalTimeMs,
+          lastSeenLabel: formatLastSeen(finalTimeMs, nowMs),
+          koordinatorLabel: isKorcam
+            ? u.timSuksesNama || u.didaftarkanOlehTimSukses || '-'
+            : u.korcamNama || u.timSuksesNama || '-',
+        } as MonitoredFieldMember;
+      })
+      .sort((a, b) => {
+        // Prioritaskan Online -> Background -> Offline, lalu nama alfabetis
+        const order: Record<VisualGpsStatus, number> = { online: 0, background: 1, offline: 2 };
+        if (order[a.visualStatus] !== order[b.visualStatus]) {
+          return order[a.visualStatus] - order[b.visualStatus];
+        }
+        return a.nama.localeCompare(b.nama, 'id-ID');
+      });
+  }, [hasAccess, allAccounts, currentUser, legacyByUserId, nowMs]);
+
+  // Statistik KPI (bagian atas, sesuai cakupan wilayah user yang login)
+  const kpiStats = useMemo(() => {
+    const total = scopedMembers.length;
+    const totalKorcam = scopedMembers.filter((m) => m.role === 'korcam').length;
+    const totalRelawan = scopedMembers.filter((m) => m.role === 'relawan').length;
+    const online = scopedMembers.filter((m) => m.visualStatus === 'online').length;
+    const background = scopedMembers.filter((m) => m.visualStatus === 'background').length;
+    const offline = scopedMembers.filter((m) => m.visualStatus === 'offline').length;
+    return { total, totalKorcam, totalRelawan, online, background, offline };
+  }, [scopedMembers]);
+
+  // Terapkan filter UI (Peran, Status GPS, Pencarian Nama)
+  const filteredMembers = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return scopedMembers.filter((m) => {
+      if (isViewerKorcam && m.role !== 'relawan') return false;
+      if (!isViewerKorcam && roleFilter !== 'semua' && m.role !== roleFilter) return false;
+      if (statusFilter !== 'semua' && m.visualStatus !== statusFilter) return false;
+      if (q) {
+        const hay = `${m.nama} ${m.username} ${m.wilayahDisplay} ${m.kota} ${m.kecamatan} ${m.kelurahan}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       return true;
     });
+  }, [scopedMembers, isViewerKorcam, roleFilter, statusFilter, searchQuery]);
 
-    return list.sort((a, b) => {
-      const rankDiff =
-        getStatusSortRank(getEffectiveStatus(a, nowMs)) -
-        getStatusSortRank(getEffectiveStatus(b, nowMs));
-      if (rankDiff !== 0) return rankDiff;
-      const tA = toDateObj(a.lastUpdated)?.getTime() || 0;
-      const tB = toDateObj(b.lastUpdated)?.getTime() || 0;
-      return tB - tA;
-    });
-  }, [
-    records,
-    search,
-    isFullAccess,
-    isKorwil,
-    isKorcam,
-    roleFilter,
-    korwilFilter,
-    korcamFilter,
-    statusFilter,
-    nowMs,
-  ]);
-
-  const stats = useMemo(() => {
-    const korwilList = records.filter((r) => r.role === 'Korwil');
-    const korcamList = records.filter((r) => r.role === 'Korcam');
-    const relawanList = records.filter((r) => r.role === 'Relawan');
-    const totalAll = records.length;
-    const aktifAll = records.filter((r) => getEffectiveStatus(r, nowMs) === 'Aktif').length;
-    return {
-      totalKorwil: korwilList.length,
-      aktifKorwil: korwilList.filter((r) => getEffectiveStatus(r, nowMs) === 'Aktif').length,
-      totalKorcam: korcamList.length,
-      aktifKorcam: korcamList.filter((r) => getEffectiveStatus(r, nowMs) === 'Aktif').length,
-      totalRelawan: relawanList.length,
-      aktifRelawan: relawanList.filter((r) => getEffectiveStatus(r, nowMs) === 'Aktif').length,
-      totalAll,
-      aktifAll,
-      belumAktifAll: totalAll - aktifAll,
-    };
-  }, [records, nowMs]);
-
-  const validGpsRecords = useMemo(
-    () =>
-      filteredRecords.filter(
-        (r) => typeof r.latitude === 'number' && typeof r.longitude === 'number'
-      ),
-    [filteredRecords]
+  // Hanya anggota yang memiliki koordinat GPS riil yang di-plot ke peta (ZERO static fallback)
+  const plottableMembers = useMemo(
+    () => filteredMembers.filter((m) => m.hasRealCoords && m.latitude !== null && m.longitude !== null),
+    [filteredMembers]
   );
 
-  const selectedRecord = useMemo(
-    () => validGpsRecords.find((r) => r.userId === selectedUserId) || null,
-    [validGpsRecords, selectedUserId]
+  const selectedMember = useMemo(
+    () => filteredMembers.find((m) => m.id === selectedMemberId) || null,
+    [filteredMembers, selectedMemberId]
   );
 
-  const focusedRecord = useMemo(
-    () => validGpsRecords.find((r) => r.userId === focusRequestId) || null,
-    [validGpsRecords, focusRequestId]
-  );
-
-  const initialCenter = useMemo(() => {
-    const first = validGpsRecords[0];
-    if (first && typeof first.latitude === 'number' && typeof first.longitude === 'number') {
-      return { lat: first.latitude, lng: first.longitude };
+  const handleSelectRow = (member: MonitoredFieldMember) => {
+    setSelectedMemberId(member.id);
+    if (member.hasRealCoords) {
+      setFocusNonce((n) => n + 1);
     }
-    return null;
-  }, [validGpsRecords]);
-
-  const handleFocusMarker = (rec: EnrichedLiveLocationRecord) => {
-    if (rec.latitude === null || rec.longitude === null) return;
-    setSelectedUserId(rec.userId);
-    setFocusRequestId(rec.userId);
-    mapContainerRef.current?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center',
-    });
   };
 
-  const getRoleColorClasses = (role: TrackedRole) => {
-    if (role === 'Korwil') {
-      return {
-        dot: 'bg-blue-600',
-        ping: 'bg-blue-400',
-        badge: 'bg-blue-100 text-blue-700',
-        pill: 'bg-blue-700 text-white border-blue-800',
-      };
-    }
-    if (role === 'Korcam') {
-      return {
-        dot: 'bg-emerald-600',
-        ping: 'bg-emerald-400',
-        badge: 'bg-emerald-100 text-emerald-700',
-        pill: 'bg-emerald-700 text-white border-emerald-800',
-      };
-    }
-    return {
-      dot: 'bg-amber-500',
-      ping: 'bg-amber-400',
-      badge: 'bg-amber-100 text-amber-800',
-      pill: 'bg-slate-900 text-white border-slate-700',
-    };
-  };
+  // Proteksi Rute jika role Relawan mencoba masuk
+  if (!hasAccess) {
+    return (
+      <div className="bg-white rounded-3xl border border-rose-200 p-8 text-center space-y-3 shadow-xs">
+        <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+          <AlertCircle className="w-6 h-6" />
+        </div>
+        <h3 className="text-base font-extrabold text-slate-900">Akses Terbatas</h3>
+        <p className="text-xs text-slate-600 max-w-md mx-auto">
+          Menu Monitoring Relawan hanya dapat diakses oleh Admin, Korwil, dan Korcam sesuai
+          hierarki wilayah tugas.
+        </p>
+      </div>
+    );
+  }
 
-  const headerTitle = isFullAccess
-    ? 'Monitoring Relawan, Korcam & Korwil'
-    : isKorwil
-    ? 'Monitoring Relawan & Korcam'
-    : 'Monitoring Relawan';
-
-  const headerSubtitle = isFullAccess
-    ? 'Pantau titik Share Live Location GPS seluruh Korwil, Korcam, dan Relawan secara real-time lintas perangkat.'
-    : isKorwil
-    ? 'Pantau titik Share Live Location GPS seluruh Korcam dan Relawan di wilayah koordinasi Anda secara real-time.'
-    : 'Pantau titik Share Live Location GPS seluruh Relawan di bawah koordinasi Anda secara real-time.';
-
-  const showCoordinatorCol = isFullAccess || isKorwil;
+  const scopeTitle = isViewerFull
+    ? 'Cakupan Nasional (Seluruh Indonesia — Korcam & Relawan)'
+    : isViewerKorwil
+    ? `Wilayah Korwil: ${currentUser.kota || currentUser.wilayah || 'Wilayah Binaan'} (Korcam & Relawan)`
+    : `Wilayah Korcam: ${[currentUser.kecamatan, currentUser.kota].filter(Boolean).join(', ') || currentUser.wilayah || 'Wilayah Binaan'} (Relawan Binaan)`;
 
   return (
-    <div className="space-y-5 bg-white text-gray-900">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-bold text-gray-900">{headerTitle}</h1>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
-              <Radio className="w-3 h-3 animate-pulse" />
-              <span>Share Live Location Real-Time</span>
+    <div className="space-y-5">
+      {/* Header Light Mode */}
+      <div className="bg-white rounded-3xl border border-slate-200 p-5 sm:p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600" />
             </span>
+            <span>Real-Time Firestore Live Location</span>
           </div>
-          <p className="text-sm text-gray-500 mt-1">{headerSubtitle}</p>
+          <h2 className="text-xl font-black text-slate-900 tracking-tight">
+            Monitoring Relawan &amp; Tim Lapangan
+          </h2>
+          <p className="text-xs text-slate-600">{scopeTitle}</p>
         </div>
-        <button
-          type="button"
-          onClick={handleRefreshData}
-          disabled={refreshing}
-          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 cursor-pointer shrink-0"
-        >
-          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-          <span>{refreshing ? 'Menyegarkan...' : 'Refresh Lokasi'}</span>
-        </button>
-      </div>
 
-      {/* Ringkasan Status */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {isFullAccess ? (
-          <>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="text-xs font-medium text-gray-500">Korwil (Live GPS)</div>
-              <div className="mt-1 text-2xl font-bold text-blue-600 tabular-nums">
-                {stats.aktifKorwil}{' '}
-                <span className="text-sm font-normal text-gray-400">/ {stats.totalKorwil}</span>
-              </div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="text-xs font-medium text-gray-500">Korcam (Live GPS)</div>
-              <div className="mt-1 text-2xl font-bold text-emerald-600 tabular-nums">
-                {stats.aktifKorcam}{' '}
-                <span className="text-sm font-normal text-gray-400">/ {stats.totalKorcam}</span>
-              </div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="text-xs font-medium text-gray-500">Relawan (Live GPS)</div>
-              <div className="mt-1 text-2xl font-bold text-amber-600 tabular-nums">
-                {stats.aktifRelawan}{' '}
-                <span className="text-sm font-normal text-gray-400">/ {stats.totalRelawan}</span>
-              </div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="text-xs font-medium text-gray-500">Total Titik di Peta</div>
-              <div className="mt-1 text-2xl font-bold text-gray-900 tabular-nums">
-                {validGpsRecords.length}
-              </div>
-            </div>
-          </>
-        ) : isKorwil ? (
-          <>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="text-xs font-medium text-gray-500">Korcam (Live GPS)</div>
-              <div className="mt-1 text-2xl font-bold text-emerald-600 tabular-nums">
-                {stats.aktifKorcam}{' '}
-                <span className="text-sm font-normal text-gray-400">/ {stats.totalKorcam}</span>
-              </div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="text-xs font-medium text-gray-500">Relawan (Live GPS)</div>
-              <div className="mt-1 text-2xl font-bold text-amber-600 tabular-nums">
-                {stats.aktifRelawan}{' '}
-                <span className="text-sm font-normal text-gray-400">/ {stats.totalRelawan}</span>
-              </div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="text-xs font-medium text-gray-500">Belum Aktif / Terhenti</div>
-              <div className="mt-1 text-2xl font-bold text-gray-600 tabular-nums">
-                {stats.belumAktifAll}
-              </div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="text-xs font-medium text-gray-500">Titik di Peta</div>
-              <div className="mt-1 text-2xl font-bold text-blue-600 tabular-nums">
-                {validGpsRecords.length}
-              </div>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="text-xs font-medium text-gray-500">Total Relawan Binaan</div>
-              <div className="mt-1 text-2xl font-bold text-gray-900 tabular-nums">
-                {stats.totalRelawan}
-              </div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="text-xs font-medium text-gray-500">Relawan Live Terhubung</div>
-              <div className="mt-1 text-2xl font-bold text-emerald-600 tabular-nums">
-                {stats.aktifRelawan}
-              </div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="text-xs font-medium text-gray-500">Belum Aktif / Terhenti</div>
-              <div className="mt-1 text-2xl font-bold text-gray-600 tabular-nums">
-                {stats.belumAktifAll}
-              </div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <div className="text-xs font-medium text-gray-500">Titik di Peta</div>
-              <div className="mt-1 text-2xl font-bold text-blue-600 tabular-nums">
-                {validGpsRecords.length}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Filter Bar */}
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={
-            isFullAccess
-              ? 'Cari nama Korwil / Korcam / Relawan atau Kelurahan...'
-              : isKorwil
-              ? 'Cari nama Korcam / Relawan atau Kelurahan...'
-              : 'Cari nama Relawan atau Kelurahan...'
-          }
-          className="min-w-[200px] flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-        />
-
-        {!isKorcam && (
-          <select
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value as 'Semua' | TrackedRole)}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
-          >
-            <option value="Semua">Semua Role</option>
-            {isFullAccess && <option value="Korwil">Korwil</option>}
-            <option value="Korcam">Korcam</option>
-            <option value="Relawan">Relawan</option>
-          </select>
-        )}
-
-        {isFullAccess && (
-          <select
-            value={korwilFilter}
-            onChange={(e) => setKorwilFilter(e.target.value)}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
-          >
-            <option value="Semua">Semua Korwil</option>
-            {korwilOptions.map((t) => (
-              <option key={t.id} value={t.id}>
-                Korwil: {t.nama}
-              </option>
-            ))}
-          </select>
-        )}
-
-        {(isFullAccess || isKorwil) && korcamOptions.length > 0 && (
-          <select
-            value={korcamFilter}
-            onChange={(e) => setKorcamFilter(e.target.value)}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
-          >
-            <option value="Semua">Semua Korcam</option>
-            {korcamOptions.map((k) => (
-              <option key={k.id} value={k.id}>
-                Korcam: {k.nama}
-              </option>
-            ))}
-          </select>
-        )}
-
-        <select
-          value={statusFilter}
-          onChange={(e) =>
-            setStatusFilter(
-              e.target.value as 'Semua' | 'Aktif' | 'Sinyal Terhenti' | 'Belum Aktif'
-            )
-          }
-          className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
-        >
-          <option value="Semua">Semua Status GPS</option>
-          <option value="Aktif">Live Terhubung</option>
-          <option value="Sinyal Terhenti">Sinyal Terhenti (&gt;10 mnt)</option>
-          <option value="Belum Aktif">Belum Aktif / Ditolak</option>
-        </select>
-      </div>
-
-      {/* Peta Monitoring */}
-      <div
-        ref={mapContainerRef}
-        className="relative h-[440px] w-full overflow-hidden rounded-xl border border-gray-200 bg-gray-100"
-      >
-        {initialCenter && validGpsRecords.length > 0 ? (
-          <SwarakuMapsProvider
-            fallback={
-              <div className="flex h-full w-full flex-col items-center justify-center bg-gray-50 p-6 text-center text-gray-600">
-                <p className="text-sm font-semibold text-gray-800">
-                  Peta Google Maps tidak dapat dimuat pada domain ini
-                </p>
-                <p className="mt-1 max-w-md text-xs text-gray-500">
-                  Data titik koordinat GPS real-time tetap tampil pada tabel di bawah ini.
-                </p>
-              </div>
-            }
-          >
-            <GoogleMap
-              defaultCenter={initialCenter}
-              defaultZoom={14}
-              mapId="SWARAKU_LIVE_MONITORING_MAP"
-              gestureHandling="greedy"
-              mapTypeControl={false}
-              streetViewControl={false}
-              internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-              className="h-full w-full"
-            >
-              <MapViewportController
-                records={validGpsRecords}
-                focusedRecord={focusedRecord}
-              />
-
-              {validGpsRecords.map((rec) => {
-                const colors = getRoleColorClasses(rec.role);
-                const eff = getEffectiveStatus(rec, nowMs);
-                const isLive = eff === 'Aktif';
-                const shortName = rec.nama.split(' ').slice(0, 2).join(' ');
-
-                return (
-                  <AdvancedMarker
-                    key={rec.userId}
-                    position={{
-                      lat: rec.latitude as number,
-                      lng: rec.longitude as number,
-                    }}
-                    title={`${rec.nama} (${rec.role}) · ${eff}`}
-                    onClick={() => setSelectedUserId(rec.userId)}
-                  >
-                    <div className="flex flex-col items-center cursor-pointer select-none">
-                      <span
-                        className={`mb-1 px-2 py-0.5 rounded-md border text-[10px] font-bold shadow-sm whitespace-nowrap ${colors.pill}`}
-                      >
-                        {shortName}
-                      </span>
-                      <div className="relative flex items-center justify-center">
-                        {isLive && (
-                          <span
-                            className={`absolute inline-flex h-7 w-7 rounded-full opacity-50 animate-ping ${colors.ping}`}
-                          />
-                        )}
-                        <div
-                          className={`relative h-4 w-4 rounded-full border-2 border-white shadow-md ${
-                            isLive ? colors.dot : 'bg-gray-400'
-                          }`}
-                        />
-                      </div>
-                    </div>
-                  </AdvancedMarker>
-                );
-              })}
-
-              {selectedRecord &&
-                typeof selectedRecord.latitude === 'number' &&
-                typeof selectedRecord.longitude === 'number' && (
-                  <InfoWindow
-                    position={{
-                      lat: selectedRecord.latitude,
-                      lng: selectedRecord.longitude,
-                    }}
-                    onCloseClick={() => setSelectedUserId(null)}
-                  >
-                    <div className="min-w-[230px] space-y-1.5 text-gray-900">
-                      <div className="text-sm font-bold">{selectedRecord.nama}</div>
-                      <div className="flex items-center gap-1.5 text-xs">
-                        <span
-                          className={`rounded px-1.5 py-0.5 font-semibold ${
-                            getRoleColorClasses(selectedRecord.role).badge
-                          }`}
-                        >
-                          {selectedRecord.role}
-                        </span>
-                        <span
-                          className={`font-semibold ${
-                            getEffectiveStatus(selectedRecord, nowMs) === 'Aktif'
-                              ? 'text-emerald-700'
-                              : 'text-gray-600'
-                          }`}
-                        >
-                          {getEffectiveStatus(selectedRecord, nowMs) === 'Aktif'
-                            ? 'Live Terhubung'
-                            : getEffectiveStatus(selectedRecord, nowMs)}
-                        </span>
-                      </div>
-                      {(selectedRecord.kelurahan || selectedRecord.kecamatan) && (
-                        <div className="text-xs text-gray-700">
-                          <strong>Wilayah:</strong>{' '}
-                          {[
-                            selectedRecord.kelurahan ? `Kel. ${selectedRecord.kelurahan}` : '',
-                            selectedRecord.kecamatan ? `Kec. ${selectedRecord.kecamatan}` : '',
-                            selectedRecord.kota || '',
-                          ]
-                            .filter(Boolean)
-                            .join(', ')}
-                        </div>
-                      )}
-                      {selectedRecord.namaTimSukses && (
-                        <div className="text-xs text-gray-700">
-                          <strong>Korwil:</strong> {selectedRecord.namaTimSukses}
-                        </div>
-                      )}
-                      {selectedRecord.namaKorcam && (
-                        <div className="text-xs text-gray-700">
-                          <strong>Korcam:</strong> {selectedRecord.namaKorcam}
-                        </div>
-                      )}
-                      <div className="text-xs text-gray-700">
-                        <strong>Koordinat:</strong>{' '}
-                        {selectedRecord.address ||
-                          `${selectedRecord.latitude.toFixed(6)}, ${selectedRecord.longitude.toFixed(6)}`}
-                      </div>
-                      {selectedRecord.accuracy !== null && (
-                        <div className="text-[11px] text-gray-500">
-                          Akurasi GPS: ±{selectedRecord.accuracy} meter
-                        </div>
-                      )}
-                      <div className="text-[11px] text-gray-500">
-                        Update: {formatRelativeTime(selectedRecord.lastUpdated, nowMs)} (
-                        {formatWib(selectedRecord.lastUpdated)})
-                      </div>
-                      <div className="pt-1.5">
-                        <a
-                          href={`https://www.google.com/maps/dir/?api=1&destination=${selectedRecord.latitude},${selectedRecord.longitude}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-blue-700"
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                          <span>Buka Rute Google Maps</span>
-                        </a>
-                      </div>
-                    </div>
-                  </InfoWindow>
-                )}
-            </GoogleMap>
-          </SwarakuMapsProvider>
-        ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gray-50 p-4">
-            <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-center text-sm text-gray-600 shadow-xs max-w-md space-y-1">
-              <p className="font-semibold text-gray-800">
-                {loading
-                  ? 'Memuat data Share Live Location real-time...'
-                  : 'Belum ada titik lokasi GPS aktif yang sesuai filter saat ini.'}
-              </p>
-              {!loading && (
-                <p className="text-xs text-gray-500">
-                  Titik live akan langsung muncul di peta saat{' '}
-                  {isKorcam ? 'Relawan binaan' : 'Korcam atau Relawan'} mengaktifkan izin GPS pada perangkatnya.
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-
-        <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white/95 px-3 py-2 text-xs font-medium text-gray-700 shadow">
-          {isFullAccess && (
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block h-3 w-3 rounded-full bg-blue-600" />
-              Korwil
+        {/* Legend Marker */}
+        <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold">
+          {!isViewerKorcam && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-800">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
+              Pin Biru = Korcam
             </span>
           )}
-          {(isFullAccess || isKorwil) && (
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block h-3 w-3 rounded-full bg-emerald-600" />
-              Korcam
-            </span>
-          )}
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-3 rounded-full bg-amber-500" />
-            Relawan
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
+            Pin Hijau = Relawan
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 border border-slate-200 text-slate-700">
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
+            <span>{plottableMembers.length} titik di peta</span>
           </span>
         </div>
       </div>
 
-      {/* Tabel Daftar Monitoring */}
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-500">
-            <tr>
-              <th className="px-4 py-3">Nama &amp; Wilayah</th>
-              <th className="px-4 py-3">Role</th>
-              {showCoordinatorCol && <th className="px-4 py-3">Koordinator</th>}
-              <th className="px-4 py-3">Status Live GPS</th>
-              <th className="px-4 py-3">Lokasi / Koordinat</th>
-              <th className="px-4 py-3">Update Terakhir</th>
-              <th className="px-4 py-3 text-right">Aksi</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {loading ? (
-              <tr>
-                <td
-                  colSpan={showCoordinatorCol ? 7 : 6}
-                  className="px-4 py-6 text-center text-gray-400"
+      {listenerError && (
+        <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>{listenerError}</span>
+        </div>
+      )}
+
+      {/* 1. Kartu Ringkasan Statistik (Bagian Atas) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <button
+          type="button"
+          onClick={() => setStatusFilter('semua')}
+          className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+            statusFilter === 'semua'
+              ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+              : 'bg-white hover:bg-slate-50 text-slate-900 border-slate-200'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span
+              className={`text-xs font-bold ${
+                statusFilter === 'semua' ? 'text-slate-300' : 'text-slate-500'
+              }`}
+            >
+              Total Tim Lapangan
+            </span>
+            <Users
+              className={`w-4 h-4 ${
+                statusFilter === 'semua' ? 'text-blue-400' : 'text-blue-600'
+              }`}
+            />
+          </div>
+          <p className="text-2xl sm:text-3xl font-black tabular-nums">{kpiStats.total}</p>
+          <p
+            className={`text-[11px] mt-1 font-medium ${
+              statusFilter === 'semua' ? 'text-slate-300' : 'text-slate-500'
+            }`}
+          >
+            {isViewerKorcam
+              ? `${kpiStats.totalRelawan} Relawan binaan`
+              : `${kpiStats.totalKorcam} Korcam · ${kpiStats.totalRelawan} Relawan`}
+          </p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter(statusFilter === 'online' ? 'semua' : 'online')}
+          className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+            statusFilter === 'online'
+              ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+              : 'bg-white hover:bg-emerald-50/50 text-slate-900 border-emerald-200'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span
+              className={`text-xs font-bold ${
+                statusFilter === 'online' ? 'text-emerald-100' : 'text-emerald-800'
+              }`}
+            >
+              GPS Online
+            </span>
+            <Radio
+              className={`w-4 h-4 ${
+                statusFilter === 'online' ? 'text-white' : 'text-emerald-600'
+              }`}
+            />
+          </div>
+          <p className="text-2xl sm:text-3xl font-black tabular-nums">{kpiStats.online}</p>
+          <p
+            className={`text-[11px] mt-1 font-medium ${
+              statusFilter === 'online' ? 'text-emerald-100' : 'text-emerald-700'
+            }`}
+          >
+            Aktif &lt; 3 menit terakhir
+          </p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter(statusFilter === 'background' ? 'semua' : 'background')}
+          className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+            statusFilter === 'background'
+              ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
+              : 'bg-white hover:bg-amber-50/60 text-slate-900 border-amber-200'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span
+              className={`text-xs font-bold ${
+                statusFilter === 'background' ? 'text-amber-50' : 'text-amber-800'
+              }`}
+            >
+              Background / Idle
+            </span>
+            <Clock
+              className={`w-4 h-4 ${
+                statusFilter === 'background' ? 'text-white' : 'text-amber-600'
+              }`}
+            />
+          </div>
+          <p className="text-2xl sm:text-3xl font-black tabular-nums">{kpiStats.background}</p>
+          <p
+            className={`text-[11px] mt-1 font-medium ${
+              statusFilter === 'background' ? 'text-amber-50' : 'text-amber-700'
+            }`}
+          >
+            Background atau 3–10 mnt lalu
+          </p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStatusFilter(statusFilter === 'offline' ? 'semua' : 'offline')}
+          className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+            statusFilter === 'offline'
+              ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+              : 'bg-white hover:bg-rose-50/50 text-slate-900 border-slate-200'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span
+              className={`text-xs font-bold ${
+                statusFilter === 'offline' ? 'text-rose-100' : 'text-slate-600'
+              }`}
+            >
+              GPS Offline
+            </span>
+            <WifiOff
+              className={`w-4 h-4 ${
+                statusFilter === 'offline' ? 'text-white' : 'text-rose-500'
+              }`}
+            />
+          </div>
+          <p className="text-2xl sm:text-3xl font-black tabular-nums">{kpiStats.offline}</p>
+          <p
+            className={`text-[11px] mt-1 font-medium ${
+              statusFilter === 'offline' ? 'text-rose-100' : 'text-slate-500'
+            }`}
+          >
+            &gt; 10 menit / Logout / Belum GPS
+          </p>
+        </button>
+      </div>
+
+      {/* 2. Live Map Google Maps API */}
+      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-xs">
+        <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Navigation className="w-4 h-4 text-blue-600" />
+            <h3 className="text-sm font-extrabold text-slate-900">
+              Live Map Posisi Tim Lapangan
+            </h3>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600 font-semibold">
+            <span className="inline-flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" /> Online
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-amber-500" /> Background
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-slate-400" /> Offline
+            </span>
+          </div>
+        </div>
+
+        <div className="relative w-full h-[380px] sm:h-[440px] bg-slate-100">
+          <SwarakuMapsProvider
+            fallback={
+              <div className="h-full w-full p-4 sm:p-6 overflow-y-auto flex flex-col justify-center bg-slate-50">
+                <SwarakuMapsDiagnosticNotice
+                  title="Peta Live Google Maps tidak dapat dimuat saat ini"
+                  subtitle="Daftar tim lapangan, status GPS real-time, dan koordinat tetap tersedia pada tabel di bawah."
+                />
+              </div>
+            }
+          >
+            <GoogleMap
+              mapId="swaraku-monitoring-relawan-map"
+              defaultCenter={INDONESIA_OVERVIEW_CENTER}
+              defaultZoom={5}
+              gestureHandling="greedy"
+              disableDefaultUI={false}
+              streetViewControl={false}
+              mapTypeControl={true}
+              internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
+              className="w-full h-full"
+            >
+            <MapCameraController
+              focusTarget={selectedMember}
+              focusNonce={focusNonce}
+              plottableMembers={plottableMembers}
+            />
+
+            {plottableMembers.map((member) => {
+              if (member.latitude === null || member.longitude === null) return null;
+              const isSelected = selectedMemberId === member.id;
+              const isKorcam = member.role === 'korcam';
+              const isOnline = member.visualStatus === 'online';
+              const isBackground = member.visualStatus === 'background';
+
+              // Warna pin: Korcam = Biru, Relawan = Hijau; redup/abu-abu jika Offline
+              const pinBg = !isOnline && !isBackground
+                ? 'bg-slate-400 border-slate-500 text-white opacity-75'
+                : isKorcam
+                ? 'bg-blue-600 border-white text-white'
+                : 'bg-emerald-600 border-white text-white';
+
+              const statusRing = isOnline
+                ? isKorcam
+                  ? 'ring-4 ring-blue-400/50'
+                  : 'ring-4 ring-emerald-400/50'
+                : isBackground
+                ? 'ring-4 ring-amber-400/70'
+                : 'ring-2 ring-slate-300';
+
+              const dotColor = isOnline
+                ? 'bg-emerald-400'
+                : isBackground
+                ? 'bg-amber-400'
+                : 'bg-rose-400';
+
+              return (
+                <AdvancedMarker
+                  key={member.id}
+                  position={{ lat: member.latitude, lng: member.longitude }}
+                  onClick={() => setSelectedMemberId(member.id)}
+                  zIndex={isSelected ? 50 : isOnline ? 30 : isBackground ? 20 : 10}
                 >
-                  Memuat data lokasi real-time...
-                </td>
-              </tr>
-            ) : filteredRecords.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={showCoordinatorCol ? 7 : 6}
-                  className="px-4 py-6 text-center text-gray-400"
-                >
-                  {records.length === 0
-                    ? isKorcam
-                      ? 'Belum ada akun Relawan binaan yang terdaftar di wilayah Anda.'
-                      : isKorwil
-                      ? 'Belum ada akun Korcam atau Relawan binaan yang terdaftar di wilayah Anda.'
-                      : 'Belum ada data personel yang terpantau.'
-                    : 'Tidak ada data yang cocok dengan filter pencarian.'}
-                </td>
-              </tr>
-            ) : (
-              filteredRecords.map((rec) => {
-                const eff = getEffectiveStatus(rec, nowMs);
-                const hasCoords =
-                  typeof rec.latitude === 'number' &&
-                  typeof rec.longitude === 'number';
-
-                const badgeStyle =
-                  eff === 'Aktif'
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : eff === 'Sinyal Terhenti'
-                    ? 'bg-amber-100 text-amber-800'
-                    : eff === 'Ditolak'
-                    ? 'bg-rose-100 text-rose-700'
-                    : 'bg-gray-100 text-gray-600';
-
-                const roleColor = getRoleColorClasses(rec.role);
-                const wilayahStr =
-                  [
-                    rec.kelurahan ? `Kel. ${rec.kelurahan}` : '',
-                    rec.kecamatan ? `Kec. ${rec.kecamatan}` : '',
-                    rec.kota || '',
-                  ]
-                    .filter(Boolean)
-                    .join(', ') || rec.wilayah || '';
-
-                const relTime = formatRelativeTime(rec.lastUpdated, nowMs);
-
-                return (
-                  <tr key={rec.userId} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <div className="font-semibold text-gray-900">{rec.nama}</div>
-                      {wilayahStr && (
-                        <div className="text-[11px] text-gray-500 mt-0.5">{wilayahStr}</div>
-                      )}
-                    </td>
-
-                    <td className="px-4 py-3">
+                  <div className="relative flex flex-col items-center cursor-pointer group">
+                    {isOnline && (
                       <span
-                        className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${roleColor.badge}`}
-                      >
-                        {rec.role}
-                      </span>
-                    </td>
-
-                    {showCoordinatorCol && (
-                      <td className="px-4 py-3 text-gray-600 text-xs">
-                        {rec.namaKorcam
-                          ? `Korcam: ${rec.namaKorcam}`
-                          : rec.namaTimSukses
-                          ? `Korwil: ${rec.namaTimSukses}`
-                          : '-'}
-                      </td>
+                        className={`absolute -inset-1.5 rounded-full animate-ping opacity-40 ${
+                          isKorcam ? 'bg-blue-500' : 'bg-emerald-500'
+                        }`}
+                      />
                     )}
-
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${badgeStyle}`}
-                      >
-                        {eff === 'Aktif' && (
-                          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                        )}
-                        <span>
-                          {eff === 'Aktif'
-                            ? 'Live Terhubung'
-                            : eff === 'Sinyal Terhenti'
-                            ? 'Sinyal Terhenti (>10 mnt)'
-                            : eff === 'Ditolak'
-                            ? 'Izin GPS Ditolak'
-                            : 'Belum Aktif'}
-                        </span>
-                      </span>
-                    </td>
-
-                    <td className="max-w-xs truncate px-4 py-3 text-xs text-gray-600">
-                      {rec.address
-                        ? rec.address
-                        : hasCoords
-                        ? `${rec.latitude?.toFixed(6)}, ${rec.longitude?.toFixed(6)}`
-                        : 'Menunggu sinyal GPS'}
-                    </td>
-
-                    <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-500">
-                      {relTime ? (
-                        <div>
-                          <div className="font-semibold text-gray-800">{relTime}</div>
-                          <div className="text-[10px] text-gray-400">
-                            {formatWib(rec.lastUpdated)}
-                          </div>
-                        </div>
+                    <div
+                      className={`relative flex items-center gap-1 px-2.5 py-1.5 rounded-full border-2 shadow-lg transition-transform ${
+                        isSelected ? 'scale-110' : 'group-hover:scale-105'
+                      } ${pinBg} ${statusRing}`}
+                    >
+                      {isKorcam ? (
+                        <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
                       ) : (
-                        <span>Belum pernah aktif</span>
+                        <UserCheck className="w-3.5 h-3.5 shrink-0" />
                       )}
-                    </td>
+                      <span className="text-[11px] font-extrabold max-w-[110px] truncate">
+                        {member.nama.split(' ')[0]}
+                      </span>
+                      <span className={`w-2 h-2 rounded-full shrink-0 border border-white ${dotColor}`} />
+                    </div>
+                    <div
+                      className={`w-2.5 h-2.5 rotate-45 -mt-1.5 border-r border-b ${
+                        !isOnline && !isBackground
+                          ? 'bg-slate-400 border-slate-500'
+                          : isKorcam
+                          ? 'bg-blue-600 border-blue-700'
+                          : 'bg-emerald-600 border-emerald-700'
+                      }`}
+                    />
+                  </div>
+                </AdvancedMarker>
+              );
+            })}
 
-                    <td className="px-4 py-3 text-right">
-                      <div className="inline-flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          disabled={!hasCoords}
-                          onClick={() => handleFocusMarker(rec)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-                        >
-                          <Navigation className="w-3 h-3" />
-                          <span>Lihat di Peta</span>
-                        </button>
-                        {hasCoords && (
-                          <a
-                            href={`https://www.google.com/maps/dir/?api=1&destination=${rec.latitude},${rec.longitude}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                            title="Buka rute di Google Maps"
+            {selectedMember &&
+              selectedMember.hasRealCoords &&
+              selectedMember.latitude !== null &&
+              selectedMember.longitude !== null && (
+                <InfoWindow
+                  position={{ lat: selectedMember.latitude, lng: selectedMember.longitude }}
+                  onCloseClick={() => setSelectedMemberId(null)}
+                  pixelOffset={[0, -34]}
+                >
+                  <div className="min-w-[230px] max-w-[270px] p-1 text-slate-900 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-black text-slate-900 leading-tight">
+                          {selectedMember.nama}
+                        </p>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
+                              selectedMember.role === 'korcam'
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-emerald-100 text-emerald-800'
+                            }`}
                           >
-                            <ExternalLink className="w-3 h-3" />
-                            <span>Rute</span>
-                          </a>
-                        )}
+                            {selectedMember.roleLabel}
+                          </span>
+                          <StatusBadge status={selectedMember.visualStatus} compact />
+                        </div>
                       </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                    </div>
+
+                    <div className="text-[11px] text-slate-700 space-y-1 border-t border-slate-100 pt-2">
+                      <p className="flex items-start gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                        <span>
+                          <b>Wilayah:</b> {selectedMember.wilayahDisplay}
+                        </span>
+                      </p>
+                      <p className="flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span>
+                          <b>Last Seen:</b> {selectedMember.lastSeenLabel}
+                        </span>
+                      </p>
+                      <p className="font-mono text-[10px] text-slate-500">
+                        {selectedMember.latitude.toFixed(5)}, {selectedMember.longitude.toFixed(5)}
+                        {selectedMember.accuracy ? ` (±${selectedMember.accuracy}m)` : ''}
+                      </p>
+                    </div>
+
+                    <a
+                      href={`https://www.google.com/maps?q=${selectedMember.latitude},${selectedMember.longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-1.5 px-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Buka di Google Maps</span>
+                    </a>
+                  </div>
+                </InfoWindow>
+              )}
+            </GoogleMap>
+          </SwarakuMapsProvider>
+
+          {/* Overlay info jika belum ada satupun koordinat GPS riil */}
+          {!isLoading && plottableMembers.length === 0 && (
+            <div className="pointer-events-none absolute inset-x-4 bottom-4 flex justify-center">
+              <div className="bg-white/95 backdrop-blur-xs border border-slate-200 rounded-2xl px-4 py-2.5 shadow-md text-xs text-slate-700 font-semibold flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
+                <span>
+                  Belum ada tim lapangan dalam filter ini yang mengirimkan titik koordinat GPS aktif.
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 3. Filter & Daftar Tim Lapangan */}
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="p-4 sm:p-5 border-b border-slate-100 space-y-3">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-slate-500" />
+              <h3 className="text-sm font-extrabold text-slate-900">
+                Daftar Tim Lapangan ({filteredMembers.length})
+              </h3>
+            </div>
+
+            <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5">
+              {/* Pencarian Nama */}
+              <div className="relative min-w-[210px] flex-1 sm:flex-initial">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Cari nama atau wilayah..."
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-hidden"
+                />
+              </div>
+
+              {/* Filter Peran (khusus Korcam hanya tampil Relawan) */}
+              {!isViewerKorcam ? (
+                <select
+                  value={roleFilter}
+                  onChange={(e) => setRoleFilter(e.target.value as RoleFilterValue)}
+                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:border-blue-500 focus:outline-hidden"
+                  aria-label="Filter Peran"
+                >
+                  <option value="semua">Semua Peran</option>
+                  <option value="korcam">Korcam</option>
+                  <option value="relawan">Relawan</option>
+                </select>
+              ) : (
+                <span className="px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold text-center">
+                  Peran: Relawan Binaan
+                </span>
+              )}
+
+              {/* Filter Status GPS */}
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as StatusFilterValue)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:border-blue-500 focus:outline-hidden"
+                aria-label="Filter Status GPS"
+              >
+                <option value="semua">Semua Status GPS</option>
+                <option value="online">GPS Online</option>
+                <option value="background">Background / Idle</option>
+                <option value="offline">GPS Offline</option>
+              </select>
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            Klik baris nama untuk langsung menggeser peta (pan &amp; zoom) ke lokasi GPS personel
+            tersebut dan membuka detail InfoWindow.
+          </p>
+        </div>
+
+        {/* Desktop Table */}
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold">
+                <th className="py-3 px-4">Nama Lengkap</th>
+                <th className="py-3 px-4">Peran</th>
+                <th className="py-3 px-4">Wilayah Tugas (Kota, Kec, Kel)</th>
+                <th className="py-3 px-4">Status GPS</th>
+                <th className="py-3 px-4">Last Seen</th>
+                <th className="py-3 px-4 text-right">Lokasi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredMembers.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-10 px-4 text-center text-slate-500">
+                    Tidak ada personel tim lapangan yang cocok dengan filter saat ini.
+                  </td>
+                </tr>
+              ) : (
+                filteredMembers.map((member) => {
+                  const isSelected = selectedMemberId === member.id;
+                  return (
+                    <tr
+                      key={member.id}
+                      onClick={() => handleSelectRow(member)}
+                      className={`transition-colors cursor-pointer ${
+                        isSelected
+                          ? 'bg-blue-50/80 hover:bg-blue-50'
+                          : 'hover:bg-slate-50'
+                      }`}
+                    >
+                      <td className="py-3.5 px-4">
+                        <p className="font-extrabold text-slate-900">{member.nama}</p>
+                        <p className="text-[11px] text-slate-500">@{member.username}</p>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                            member.role === 'korcam'
+                              ? 'bg-blue-50 text-blue-800 border-blue-200'
+                              : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          }`}
+                        >
+                          {member.role === 'korcam' ? (
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                          ) : (
+                            <UserCheck className="w-3.5 h-3.5" />
+                          )}
+                          {member.roleLabel}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <p className="font-semibold text-slate-800">{member.wilayahDisplay}</p>
+                        {member.provinsi && (
+                          <p className="text-[10px] text-slate-500">{member.provinsi}</p>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <StatusBadge status={member.visualStatus} />
+                      </td>
+                      <td className="py-3.5 px-4 font-semibold text-slate-700 whitespace-nowrap">
+                        {member.lastSeenLabel}
+                      </td>
+                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                        {member.hasRealCoords && member.latitude !== null && member.longitude !== null ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-blue-100 text-slate-800 font-mono text-[10px] font-bold">
+                            <MapPin className="w-3 h-3 text-blue-600" />
+                            Fokus Peta
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-semibold text-slate-400 italic">
+                            Lokasi GPS belum tersedia
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile Cards */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {filteredMembers.length === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-500">
+              Tidak ada personel tim lapangan yang cocok dengan filter saat ini.
+            </div>
+          ) : (
+            filteredMembers.map((member) => {
+              const isSelected = selectedMemberId === member.id;
+              return (
+                <button
+                  key={member.id}
+                  type="button"
+                  onClick={() => handleSelectRow(member)}
+                  className={`w-full p-4 text-left space-y-2 transition-colors cursor-pointer ${
+                    isSelected ? 'bg-blue-50/80' : 'bg-white hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-extrabold text-slate-900 truncate">
+                        {member.nama}
+                      </p>
+                      <span
+                        className={`inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                          member.role === 'korcam'
+                            ? 'bg-blue-50 text-blue-800 border-blue-200'
+                            : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        }`}
+                      >
+                        {member.roleLabel}
+                      </span>
+                    </div>
+                    <StatusBadge status={member.visualStatus} />
+                  </div>
+                  <p className="text-xs text-slate-600 flex items-start gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                    <span>{member.wilayahDisplay}</span>
+                  </p>
+                  <div className="flex items-center justify-between text-[11px] pt-1">
+                    <span className="text-slate-500 font-medium">
+                      Last Seen: <b className="text-slate-700">{member.lastSeenLabel}</b>
+                    </span>
+                    {member.hasRealCoords ? (
+                      <span className="text-blue-700 font-bold">Lihat di Peta →</span>
+                    ) : (
+                      <span className="text-slate-400 italic">Lokasi GPS belum tersedia</span>
+                    )}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
       </div>
     </div>
+  );
+};
+
+const StatusBadge: React.FC<{ status: VisualGpsStatus; compact?: boolean }> = ({
+  status,
+  compact = false,
+}) => {
+  if (status === 'online') {
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold ${
+          compact ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-1 text-[11px]'
+        }`}
+      >
+        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+        GPS Online
+      </span>
+    );
+  }
+  if (status === 'background') {
+    return (
+      <span
+        className={`inline-flex items-center gap-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 font-bold ${
+          compact ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-1 text-[11px]'
+        }`}
+      >
+        <span className="w-2 h-2 rounded-full bg-amber-500" />
+        Background / Idle
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-600 font-bold ${
+        compact ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-1 text-[11px]'
+      }`}
+    >
+      <span className="w-2 h-2 rounded-full bg-rose-500" />
+      GPS Offline
+    </span>
   );
 };

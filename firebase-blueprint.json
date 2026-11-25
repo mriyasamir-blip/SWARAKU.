@@ -52,6 +52,7 @@
         "nik": { "type": "string", "maxLength": 32 },
         "jabatan": { "type": "string", "maxLength": 160 },
         "wilayah": { "type": "string", "maxLength": 160 },
+        "provinsi": { "type": "string", "maxLength": 120 },
         "kota": { "type": "string", "maxLength": 120 },
         "kecamatan": { "type": "string", "maxLength": 120 },
         "kelurahan": { "type": "string", "maxLength": 120 },
@@ -71,7 +72,12 @@
         "korcamId": { "type": "string", "maxLength": 128 },
         "korcamNama": { "type": "string", "maxLength": 120 },
         "kaderList": { "type": "array" },
-        "kaderIds": { "type": "array" }
+        "kaderIds": { "type": "array" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "accuracy": { "type": "number" },
+        "lastLocationUpdate": { "type": "string", "format": "date-time" },
+        "gpsState": { "type": "string", "enum": ["online", "background", "offline"] }
       },
       "required": ["id", "role", "nama", "username"]
     },

@@ -150,7 +150,7 @@ export const MonitoringPendukungModal: React.FC<MonitoringPendukungModalProps> =
                 onChange={(e) => setSelectedKelurahan(e.target.value)}
                 className="text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700 py-1.5 px-3 rounded-xl focus:ring-2 focus:ring-cyan-500 focus:outline-hidden cursor-pointer"
               >
-                <option value="Semua Kelurahan">Semua Kelurahan (Dapil II)</option>
+                <option value="Semua Kelurahan">Semua Kelurahan</option>
                 <option value="Kel. Sukamaju">Kel. Sukamaju</option>
                 <option value="Kel. Cilandak Barat">Kel. Cilandak Barat</option>
                 <option value="Kel. Lebak Bulus">Kel. Lebak Bulus</option>
@@ -333,7 +333,7 @@ export const MonitoringPendukungModal: React.FC<MonitoringPendukungModalProps> =
             <div className="p-4 bg-white border border-slate-200/90 rounded-2xl space-y-2.5 shadow-xs">
               <div className="flex items-center justify-between pb-1 border-b border-slate-100">
                 <span className="font-black text-slate-800 text-xs">
-                  Rincian Akumulasi Pendukung Per Kelurahan (Dapil II):
+                  Rincian Akumulasi Pendukung Per Kelurahan:
                 </span>
                 <span className="text-[10px] text-slate-400 font-mono">
                   Terupdate 2026

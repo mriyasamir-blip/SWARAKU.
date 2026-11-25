@@ -189,6 +189,8 @@ export type AdminModuleTab =
   | 'operasi_lapangan'
   | 'manajemen_user';
 
+export type GpsTrackingState = 'online' | 'background' | 'offline';
+
 export interface UserAccount {
   id: string;
   role: UserRole;
@@ -198,6 +200,7 @@ export interface UserAccount {
   jabatan: string;
   wilayah: string;
   nik?: string;
+  provinsi?: string;
   kota?: string;
   kecamatan?: string;
   kelurahan?: string;
@@ -219,6 +222,12 @@ export interface UserAccount {
   korcamNama?: string;
   kaderList?: string[];
   kaderIds?: string[];
+  // Live Location Tracking (Firestore user_accounts/{userId})
+  latitude?: number | null;
+  longitude?: number | null;
+  accuracy?: number | null;
+  lastLocationUpdate?: unknown;
+  gpsState?: GpsTrackingState;
 }
 
 export interface VoterOcrRecord {
@@ -246,9 +255,11 @@ export interface VoterOcrRecord {
   terdaftarOleh: string;
   diinputOlehRole?: 'tim_sukses' | 'kader' | 'relawan' | 'admin' | 'voter';
   diinputOlehNama?: string;
+  createdById?: string;
+  korcamId?: string;
+  korwilId?: string;
   registrationSource?: 'ocr_ktp' | 'lapangan' | 'google_sso' | 'manual_signup' | 'command_regist';
   voterUid?: string;
-  dapilLabel?: string;
   lat?: number;
   lng?: number;
 }

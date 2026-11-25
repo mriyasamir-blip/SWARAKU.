@@ -313,7 +313,7 @@ export const CommandCenterView: React.FC<CommandCenterViewProps> = ({
             </span>
           </div>
           <span className="text-[10px] text-cyan-600 font-bold mt-1 block">
-            {totalPaslon1 > 0 ? 'Unggul di Wilayah Dapil' : 'Menunggu Input C1 / B1'}
+            {totalPaslon1 > 0 ? 'Unggul di Wilayah Terdata' : 'Menunggu Input C1 / B1'}
           </span>
         </div>
 
@@ -865,7 +865,7 @@ export const CommandCenterView: React.FC<CommandCenterViewProps> = ({
                     <table className="w-full text-xs text-left">
                       <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold">
                         <tr>
-                          <th className="p-3">Kecamatan &amp; Dapil</th>
+                          <th className="p-3">Kecamatan &amp; Kelurahan</th>
                           <th className="p-3">Koordinator PPK / Saksi</th>
                           <th className="p-3 text-center">Cakupan TPS</th>
                           <th className="p-3 text-center">Paslon 01</th>
@@ -961,17 +961,11 @@ export const CommandCenterView: React.FC<CommandCenterViewProps> = ({
         </div>
       )}
 
-      {/* Tab: MONITORING PETA SUARA DAPIL (Google Maps API & GIS) */}
+      {/* Tab: MONITORING PETA SUARA KONSTITUEN (Google Maps API & GIS) */}
       {activeTab === 'peta_suara' && (
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
           <MonitoringPetaSuaraScreen
             voterList={voterList}
-            dptList={dptList}
-            timSuksesList={timSuksesList}
-            onSaveTimSukses={onSaveTimSukses}
-            onSaveVoter={onSaveVoter}
-            onResetDataToZero={onResetDataToZero}
-            onOpenWhatsAppBlazt={() => setShowBlaztModal(true)}
             targetVoter={focusedVoterForMap}
           />
         </div>
@@ -1017,7 +1011,7 @@ export const CommandCenterView: React.FC<CommandCenterViewProps> = ({
                     <th className="pb-2">Nama Lengkap</th>
                     <th className="pb-2">TPS &amp; Kelurahan</th>
                     <th className="pb-2">Usia / JK</th>
-                    <th className="pb-2">Dapil</th>
+                    <th className="pb-2">Kota / Kabupaten</th>
                     <th className="pb-2">Status Pendukung</th>
                     <th className="pb-2 text-center">Status DPT</th>
                   </tr>
@@ -1052,7 +1046,7 @@ export const CommandCenterView: React.FC<CommandCenterViewProps> = ({
                           <span className="text-[10px] text-slate-500">{d.kelurahan}, {d.kecamatan}</span>
                         </td>
                         <td className="py-3 text-slate-600">{d.usia} thn ({d.jenisKelamin})</td>
-                        <td className="py-3 text-slate-600">{d.dapil}</td>
+                        <td className="py-3 text-slate-600">{d.kabupatenKota || d.kelurahan}</td>
                         <td className="py-3">
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-200">
                             {d.statusPendukung}

@@ -237,7 +237,6 @@ export function loyaltyVoterToOcrRecord(
     kecamatan: geo.kecamatan,
     kabupatenKota: geo.kabupatenKota,
     provinsi: geo.provinsi,
-    dapilLabel: voter.region || geo.kelurahan,
     tps: 'Reg. Online',
     noHp: voter.phone || '-',
     waktuDaftar,
@@ -368,8 +367,7 @@ function mapDocToVoterOcrRecord(
     kelurahan: d.kelurahan || parsedFallback?.kelurahan || '',
     kecamatan: d.kecamatan || parsedFallback?.kecamatan || '',
     kabupatenKota: d.kabupatenKota || parsedFallback?.kabupatenKota || '',
-    provinsi: d.provinsi || parsedFallback?.provinsi || 'DKI Jakarta',
-    dapilLabel: d.dapilLabel || d.region || undefined,
+    provinsi: d.provinsi || parsedFallback?.provinsi || '',
     tps: d.tps || (isOnlineRegistered ? 'Reg. Online' : 'TPS 001'),
     noHp: d.noHp || d.phone || '-',
     waktuDaftar: d.waktuDaftar || new Date().toLocaleString('id-ID'),
@@ -380,6 +378,9 @@ function mapDocToVoterOcrRecord(
     terdaftarOleh: d.terdaftarOleh || 'Database Cloud',
     diinputOlehRole: d.diinputOlehRole,
     diinputOlehNama: d.diinputOlehNama,
+    createdById: d.createdById || undefined,
+    korcamId: d.korcamId || undefined,
+    korwilId: d.korwilId || undefined,
     registrationSource: d.registrationSource || (inferredOcrVerified ? 'ocr_ktp' : undefined),
     lat: typeof d.lat === 'number' ? d.lat : parsedFallback?.lat,
     lng: typeof d.lng === 'number' ? d.lng : parsedFallback?.lng,
@@ -641,7 +642,7 @@ export function subscribeToCloudB1(
           id: d.id || docSnap.id,
           kecamatan: d.kecamatan || '',
           kelurahan: d.kelurahan || '',
-          dapil: d.dapil || 'DAPIL DKI JAKARTA II',
+          dapil: d.dapil || d.kelurahan || '',
           waktuUpload: d.waktuUpload || '',
           koordinatorNama: d.koordinatorNama || '',
           suaraPaslon1: Number(d.suaraPaslon1) || 0,
@@ -693,6 +694,7 @@ export function subscribeToCloudUserAccounts(
           nik: d.nik || undefined,
           jabatan: d.jabatan || '',
           wilayah: d.wilayah || '',
+          provinsi: d.provinsi || undefined,
           kota: d.kota || undefined,
           kecamatan: d.kecamatan || undefined,
           kelurahan: d.kelurahan || undefined,
@@ -713,6 +715,14 @@ export function subscribeToCloudUserAccounts(
           korcamNama: d.korcamNama || undefined,
           kaderList: Array.isArray(d.kaderList) ? d.kaderList : undefined,
           kaderIds: Array.isArray(d.kaderIds) ? d.kaderIds : undefined,
+          latitude: typeof d.latitude === 'number' ? d.latitude : null,
+          longitude: typeof d.longitude === 'number' ? d.longitude : null,
+          accuracy: typeof d.accuracy === 'number' ? d.accuracy : null,
+          lastLocationUpdate: d.lastLocationUpdate ?? undefined,
+          gpsState:
+            d.gpsState === 'online' || d.gpsState === 'background' || d.gpsState === 'offline'
+              ? d.gpsState
+              : undefined,
         });
       });
 
@@ -749,6 +759,7 @@ export async function authenticateCloudUser(
         nik: d.nik || undefined,
         jabatan: d.jabatan || '',
         wilayah: d.wilayah || '',
+        provinsi: d.provinsi || undefined,
         kota: d.kota || undefined,
         kecamatan: d.kecamatan || undefined,
         kelurahan: d.kelurahan || undefined,
@@ -769,6 +780,14 @@ export async function authenticateCloudUser(
         korcamNama: d.korcamNama || undefined,
         kaderList: Array.isArray(d.kaderList) ? d.kaderList : undefined,
         kaderIds: Array.isArray(d.kaderIds) ? d.kaderIds : undefined,
+        latitude: typeof d.latitude === 'number' ? d.latitude : null,
+        longitude: typeof d.longitude === 'number' ? d.longitude : null,
+        accuracy: typeof d.accuracy === 'number' ? d.accuracy : null,
+        lastLocationUpdate: d.lastLocationUpdate ?? undefined,
+        gpsState:
+          d.gpsState === 'online' || d.gpsState === 'background' || d.gpsState === 'offline'
+            ? d.gpsState
+            : undefined,
       });
     });
 

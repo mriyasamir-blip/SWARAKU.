@@ -244,11 +244,11 @@ export const PetaSuaraScreen: React.FC<PetaSuaraScreenProps> = ({
               Monitoring Peta Suara
             </span>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-50 border border-cyan-200 text-cyan-800">
-              Dapil Terpadu
+              Wilayah Dinamis
             </span>
           </div>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            Pemetaan suara pendukung berjenjang: Kab, Kec, Desa/Kelurahan hingga TPS
+            Pemetaan suara konstituen berjenjang: Provinsi, Kota/Kab, Kecamatan hingga Kelurahan/Desa
           </p>
         </div>
 
@@ -274,7 +274,7 @@ export const PetaSuaraScreen: React.FC<PetaSuaraScreenProps> = ({
             </div>
             <div>
               <span className="text-[10px] font-black uppercase tracking-wider text-cyan-300 block">
-                NAVIGASI BASIS DAPIL
+                NAVIGASI BASIS WILAYAH
               </span>
               <h2 className="text-base font-black text-white leading-tight">
                 Peta Penguasaan Suara Kandidat
@@ -282,12 +282,12 @@ export const PetaSuaraScreen: React.FC<PetaSuaraScreenProps> = ({
             </div>
           </div>
           <span className="text-[10px] font-mono bg-white/10 px-2 py-0.5 rounded-md text-slate-300">
-            DAPIL DKI II
+            SE-INDONESIA
           </span>
         </div>
 
         <p className="text-xs text-slate-300 leading-relaxed font-normal">
-          Tidak semua kandidat mengenal seluruh wilayah dapilnya. Fitur ini membantu kandidat dan tim sukses memetakan persebaran suara pendukung hingga tingkat TPS, menampilkan kelurahan yang sudah memiliki basis pendukung solid maupun wilayah yang belum tergarap sama sekali.
+          Pemetaan persebaran suara konstituen secara dinamis per Provinsi, Kota/Kabupaten, Kecamatan, hingga Kelurahan/Desa berdasarkan data lapangan aktual.
         </p>
 
         {/* 3 Status Visual Indicators */}

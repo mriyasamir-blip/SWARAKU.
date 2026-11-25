@@ -62,6 +62,14 @@ import {
   isTrackedRole,
   markLocationOffline,
 } from './services/locationService';
+import {
+  updateUserGpsStateInFirestore,
+} from './services/geolocationTrackerService';
+import { useLocationTracker } from './hooks/useLocationTracker';
+import {
+  resolveAreaProvinsi,
+  resolveVoterCreatorHierarchy,
+} from './utils/hierarchyAccess';
 import { GpsTrackerModal } from './components/GpsTrackerModal';
 import type {
   AspirationDoc,
@@ -188,6 +196,9 @@ export default function App() {
   // Staff Session (Kader, Tim Sukses, Admin, Super Admin)
   const [staffUser, setStaffUser] = useState<UserAccount | null>(() => readSavedStaffSession());
   const [userAccounts, setUserAccounts] = useState<UserAccount[]>([]);
+
+  // Global Live Location Tracking Service (otomatis aktif saat Korcam / Relawan login)
+  const locationTracker = useLocationTracker(staffUser, userAccounts);
 
   // Operational Campaign Data for Admin & Superadmin Modules (Firestore-synced, preserves legacy OCR cache)
   const [voterOcrRecords, setVoterOcrRecords] = useState<VoterOcrRecord[]>(() => {
@@ -611,8 +622,11 @@ export default function App() {
   };
 
   const handleStaffLogout = async () => {
-    if (staffUser && isTrackedRole(staffUser.role)) {
-      await markLocationOffline(staffUser.id || staffUser.username).catch(() => {});
+    if (staffUser) {
+      await updateUserGpsStateInFirestore(staffUser, 'offline').catch(() => {});
+      if (isTrackedRole(staffUser.role)) {
+        await markLocationOffline(staffUser.id || staffUser.username).catch(() => {});
+      }
     }
     localStorage.removeItem(STAFF_SESSION_KEY);
     setStaffUser(null);
@@ -842,9 +856,11 @@ export default function App() {
     isuPrioritas: string;
   }) => {
     const cleanNik = voterData.nik.replace(/\D/g, '');
-    const kelurahan = voterData.tps || staffUser?.kelurahan || 'Cilandak Barat';
-    const kecamatan = staffUser?.kecamatan || 'Cilandak';
-    const kota = staffUser?.kota || 'Jakarta Selatan';
+    const kelurahan = voterData.tps || staffUser?.kelurahan || '';
+    const kecamatan = staffUser?.kecamatan || '';
+    const kota = staffUser?.kota || '';
+    const provinsi = resolveAreaProvinsi(staffUser?.provinsi, kota);
+    const hierarchyMeta = resolveVoterCreatorHierarchy(staffUser, userAccounts);
     const record: VoterOcrRecord = {
       id: `v-${cleanNik || Date.now()}`,
       nik: cleanNik,
@@ -860,7 +876,7 @@ export default function App() {
       kelurahan,
       kecamatan,
       kabupatenKota: kota,
-      provinsi: 'DKI Jakarta',
+      provinsi,
       tps: kelurahan,
       noHp: voterData.noHp || '-',
       waktuDaftar: new Date().toLocaleString('id-ID'),
@@ -874,6 +890,7 @@ export default function App() {
           ? 'relawan'
           : 'kader',
       diinputOlehNama: staffUser?.nama,
+      ...hierarchyMeta,
     };
     handleSaveVoterOcr(record);
     handleAwardPoints(10).catch(() => {});
@@ -1077,6 +1094,7 @@ export default function App() {
           onResetDataToZero={handleResetDataToZero}
           onTriggerCloudSync={handleTriggerCloudSync}
           onOpenWebsiteMode={() => switchDisplayMode('website')}
+          locationTracker={locationTracker}
         />
         {toastMessage && (
           <div className="fixed bottom-20 lg:bottom-6 right-4 left-4 sm:left-auto sm:max-w-sm z-50 rounded-2xl bg-slate-900 text-white px-4 py-3 shadow-xl flex items-start justify-between gap-3 text-xs font-medium">
@@ -1094,7 +1112,13 @@ export default function App() {
             </button>
           </div>
         )}
-        <GpsTrackerModal user={staffUser} userAccounts={userAccounts} />
+        <GpsTrackerModal
+          user={staffUser}
+          userAccounts={userAccounts}
+          permissionDenied={locationTracker.permissionDenied}
+          errorMessage={locationTracker.errorMessage}
+          onRetryPermission={locationTracker.forceRefreshLocation}
+        />
         <OfflineIndicator />
       </>
     );

@@ -114,7 +114,7 @@ export const VoterBerandaView: React.FC<VoterBerandaViewProps> = ({
             </h2>
           </div>
           <span className="text-xs font-semibold text-slate-500">
-            Dapil: {voter.region}
+            Wilayah: {voter.region}
           </span>
         </div>
 
@@ -752,7 +752,7 @@ export const VoterProfileView: React.FC<VoterProfileViewProps> = ({
 
             <div className="space-y-1.5">
               <label className="block text-xs font-bold text-slate-700">
-                Daerah / Dapil
+                Kelurahan / Wilayah
               </label>
               <input
                 type="text"
