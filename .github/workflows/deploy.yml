@@ -24,7 +24,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
         run: |
@@ -36,7 +36,7 @@ jobs:
 
       - name: Build project
         env:
-          VITE_BASE_PATH: './'
+          VITE_BASE_PATH: '/'
           VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
           VITE_USE_FIREBASE_EMULATOR: 'false'
         run: npm run build
@@ -46,3 +46,6 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
+          cname: swaraku.online
+          force_orphan: true
+          enable_jekyll: false

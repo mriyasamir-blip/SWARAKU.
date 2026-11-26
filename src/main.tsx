@@ -71,6 +71,26 @@ console.error = (...args: unknown[]) => {
   }
 };
 
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let hasReloadedForUpdate = false;
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController && !hasReloadedForUpdate) {
+      hasReloadedForUpdate = true;
+      window.location.reload();
+    }
+  });
+
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      registrations.forEach((reg) => {
+        reg.update().catch(() => {});
+      });
+    });
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
