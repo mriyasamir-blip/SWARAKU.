@@ -44,12 +44,16 @@ export function shouldAutoTrackGps(role?: string | null): boolean {
 }
 
 export function normalizeAreaText(value?: string | null): string {
-  return String(value || '')
+  const raw = String(value || '')
     .trim()
     .toLowerCase()
     .replace(/^(provinsi|prov\.?|kota|kabupaten|kab\.?|kecamatan|kec\.?|kelurahan|kel\.?|desa)\s+/i, '')
     .replace(/\s+/g, ' ')
     .trim();
+  if (!raw || raw === '-' || raw === 'nasional' || raw === 'indonesia' || raw === 'seluruh wilayah') {
+    return '';
+  }
+  return raw;
 }
 
 export function isAreaMatch(a?: string | null, b?: string | null): boolean {
@@ -59,11 +63,60 @@ export function isAreaMatch(a?: string | null, b?: string | null): boolean {
   return na === nb || na.includes(nb) || nb.includes(na);
 }
 
+export function normalizeExactName(value?: string | null): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+export function isExactNameMatch(a?: string | null, b?: string | null): boolean {
+  const na = normalizeExactName(a);
+  const nb = normalizeExactName(b);
+  if (!na || !nb) return false;
+  return na === nb;
+}
+
 export function isNameMatch(a?: string | null, b?: string | null): boolean {
-  const na = String(a || '').trim().toLowerCase();
-  const nb = String(b || '').trim().toLowerCase();
+  const na = normalizeExactName(a);
+  const nb = normalizeExactName(b);
   if (!na || !nb) return false;
   return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+/**
+ * Extract pure inputter name from `terdaftarOleh` labels like "Relawan Budi" or "Korcam Andi".
+ */
+export function extractCleanPenginputName(raw?: string | null): string {
+  return String(raw || '')
+    .trim()
+    .replace(/^(relawan|korcam|korwil|kader|tim\s*sukses|admin|super\s*admin|petugas)\s*[:\-–]?\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Resolve display name of the person who inputted a voter record.
+ */
+export function resolvePenginputName(voter: VoterOcrRecord): string {
+  const direct = String(voter.diinputOlehNama || '').trim();
+  if (direct && direct !== '-') return direct;
+  const fallback = extractCleanPenginputName(voter.terdaftarOleh);
+  if (fallback && fallback !== '-') return fallback;
+  return String(voter.terdaftarOleh || 'Petugas Lapangan').trim();
+}
+
+/**
+ * Format wilayah input string: "Kota / Kecamatan / Kelurahan" cleanly.
+ */
+export function formatWilayahInput(voter: VoterOcrRecord): string {
+  const parts = [
+    String(voter.kabupatenKota || '').trim(),
+    String(voter.kecamatan || '').trim(),
+    String(voter.kelurahan || '').trim(),
+  ].filter((p) => p && p !== '-');
+  if (parts.length === 0) return 'Wilayah belum tercatat';
+  return parts.join(' / ');
 }
 
 /**
@@ -96,7 +149,6 @@ export function resolveVoterProvinsi(voter: VoterOcrRecord): string {
 export function isFieldInputtedVoter(voter: VoterOcrRecord): boolean {
   if (!voter || !voter.nama) return false;
   const namaLower = String(voter.nama).trim().toLowerCase();
-  // Exclude dummy/sample placeholders
   if (
     namaLower.includes('dummy') ||
     namaLower.includes('contoh') ||
@@ -105,7 +157,6 @@ export function isFieldInputtedVoter(voter: VoterOcrRecord): boolean {
   ) {
     return false;
   }
-  // Keep voters inputted by Korwil, Korcam, Relawan, or Admin/Staff (or OCR KTP / lapangan / command_regist)
   if (voter.diinputOlehRole === 'voter') return false;
   if (voter.registrationSource === 'google_sso' || voter.registrationSource === 'manual_signup') {
     return false;
@@ -114,7 +165,20 @@ export function isFieldInputtedVoter(voter: VoterOcrRecord): boolean {
 }
 
 /**
- * Resolve all Korcam IDs & names under a Korwil (by direct ID relation OR Provinsi/Kota territory).
+ * Resolve the primary city/region coverage string of a Korwil or user.
+ */
+export function resolveUserKotaScope(user?: UserAccount | null): string {
+  if (!user) return '';
+  if (normalizeAreaText(user.kota)) return String(user.kota || '').trim();
+  // Extract first segment if wilayah is like "Jakarta Utara • Penjaringan" or "Kota Jakarta Utara"
+  const rawWilayah = String(user.wilayah || '').trim();
+  if (!rawWilayah) return '';
+  const firstSegment = rawWilayah.split(/[•,/|]/)[0]?.trim() || '';
+  return normalizeAreaText(firstSegment) ? firstSegment : '';
+}
+
+/**
+ * Resolve all Korcam IDs & names under a Korwil (strictly within Korwil's Kota/Wilayah coverage).
  */
 export function getKorcamIdsUnderKorwil(
   korwil: UserAccount,
@@ -123,35 +187,35 @@ export function getKorcamIdsUnderKorwil(
   const ids = new Set<string>();
   const names = new Set<string>();
 
-  if (Array.isArray(korwil.kaderIds)) {
-    korwil.kaderIds.forEach((id) => id && ids.add(id));
-  }
-  if (Array.isArray(korwil.kaderList)) {
-    korwil.kaderList.forEach((n) => n && names.add(n.trim().toLowerCase()));
-  }
-
-  const korwilKota = korwil.kota || korwil.wilayah || '';
+  const korwilKota = resolveUserKotaScope(korwil);
   const korwilProv = resolveUserProvinsi(korwil);
 
   allUsers.forEach((u) => {
     if (!isKorcamRole(u.role)) return;
+
+    const uKota = resolveUserKotaScope(u);
+    const uProv = resolveUserProvinsi(u);
+
+    // If both Korwil and target Korcam have a Kota/Wilayah, they MUST match strictly
+    if (korwilKota && uKota) {
+      if (isAreaMatch(korwilKota, uKota)) {
+        ids.add(u.id);
+        if (u.nama) names.add(normalizeExactName(u.nama));
+      }
+      return;
+    }
+
     const directLink =
       (u.timSuksesId && u.timSuksesId === korwil.id) ||
-      (u.timSuksesNama && isNameMatch(u.timSuksesNama, korwil.nama)) ||
-      (u.didaftarkanOlehTimSukses && isNameMatch(u.didaftarkanOlehTimSukses, korwil.nama)) ||
-      ids.has(u.id) ||
-      names.has(u.nama.trim().toLowerCase());
+      (u.timSuksesNama && isExactNameMatch(u.timSuksesNama, korwil.nama)) ||
+      (u.didaftarkanOlehTimSukses && isExactNameMatch(u.didaftarkanOlehTimSukses, korwil.nama)) ||
+      (Array.isArray(korwil.kaderIds) && korwil.kaderIds.includes(u.id));
 
-    const uKota = u.kota || u.wilayah || '';
-    const uProv = resolveUserProvinsi(u);
-    const sameKota = Boolean(korwilKota && uKota && isAreaMatch(korwilKota, uKota));
-    const sameProv = Boolean(
-      !korwilKota && korwilProv && uProv && isAreaMatch(korwilProv, uProv)
-    );
+    const sameProv = Boolean(!korwilKota && korwilProv && uProv && isAreaMatch(korwilProv, uProv));
 
-    if (directLink || sameKota || sameProv) {
+    if (directLink || sameProv) {
       ids.add(u.id);
-      if (u.nama) names.add(u.nama.trim().toLowerCase());
+      if (u.nama) names.add(normalizeExactName(u.nama));
     }
   });
 
@@ -159,82 +223,92 @@ export function getKorcamIdsUnderKorwil(
 }
 
 /**
- * Check whether a target field user (Korcam or Relawan) is visible to the logged-in viewer
- * on the "Monitoring Relawan" dashboard.
+ * Strict territorial check: Does a target account (Korcam or Relawan) belong inside viewer's management scope?
+ * Includes ALL statuses (Aktif, Pending, Ditolak, Nonaktif) for Kelola Relawan & Kelola Korcam dan Relawan.
  */
-export function canViewerMonitorTarget(
+export function isAccountInViewerScope(
   viewer: UserAccount | null | undefined,
   target: UserAccount,
   allUsers: UserAccount[]
 ): boolean {
   if (!viewer || !target) return false;
-  if (target.status === 'Nonaktif') return false;
+  if (target.id === viewer.id) return false;
 
-  // Monitoring Relawan tracks field team: Korcam + Relawan
-  const targetIsKorcam = isKorcamRole(target.role);
-  const targetIsRelawan = isRelawanRole(target.role);
-  if (!targetIsKorcam && !targetIsRelawan) return false;
-
-  // 1. Zuper Admin, Super Admin, Admin -> Full Access (all Korcam & Relawan)
+  // 1. Zuper Admin, Super Admin, Admin -> Full access
   if (isFullAccessRole(viewer.role)) {
     return true;
   }
 
-  // 2. Relawan -> Blocked from Monitoring Relawan
+  // 2. Relawan -> Cannot manage other accounts
   if (isRelawanRole(viewer.role)) {
     return false;
   }
 
-  // 3. Korwil -> Korcam & Relawan under their territory or team ID link
-  if (isKorwilRole(viewer.role)) {
-    const korcamsUnderMe = getKorcamIdsUnderKorwil(viewer, allUsers);
-    const viewerKota = viewer.kota || viewer.wilayah || '';
-    const viewerProv = resolveUserProvinsi(viewer);
-    const targetKota = target.kota || target.wilayah || '';
-    const targetProv = resolveUserProvinsi(target);
+  const targetIsKorcam = isKorcamRole(target.role);
+  const targetIsRelawan = isRelawanRole(target.role);
 
-    if (targetIsKorcam) {
-      if (korcamsUnderMe.ids.has(target.id)) return true;
-      if (target.nama && korcamsUnderMe.names.has(target.nama.trim().toLowerCase())) return true;
+  // 3. Korwil -> ONLY Korcam & Relawan inside Korwil's Kota/Wilayah coverage
+  if (isKorwilRole(viewer.role)) {
+    if (!targetIsKorcam && !targetIsRelawan) return false;
+
+    const viewerKota = resolveUserKotaScope(viewer);
+    const targetKota = resolveUserKotaScope(target);
+
+    // Strict territorial boundary: if both have Kota/Wilayah, they MUST match (no cross-region leakage)
+    if (viewerKota && targetKota) {
+      return isAreaMatch(viewerKota, targetKota);
     }
 
-    // Relawan directly linked to this Korwil or to a Korcam under this Korwil
+    // If target lacks Kota metadata, fall back to Provinsi or direct hierarchy link
+    const korcamsUnderMe = getKorcamIdsUnderKorwil(viewer, allUsers);
+    if (targetIsKorcam && korcamsUnderMe.ids.has(target.id)) return true;
+
     if (
       (target.timSuksesId && target.timSuksesId === viewer.id) ||
-      (target.timSuksesNama && isNameMatch(target.timSuksesNama, viewer.nama)) ||
-      (target.didaftarkanOlehTimSukses && isNameMatch(target.didaftarkanOlehTimSukses, viewer.nama)) ||
+      (target.timSuksesNama && isExactNameMatch(target.timSuksesNama, viewer.nama)) ||
+      (target.didaftarkanOlehTimSukses && isExactNameMatch(target.didaftarkanOlehTimSukses, viewer.nama)) ||
       (target.korcamId && korcamsUnderMe.ids.has(target.korcamId)) ||
-      (target.korcamNama && korcamsUnderMe.names.has(target.korcamNama.trim().toLowerCase()))
+      (target.korcamNama && korcamsUnderMe.names.has(normalizeExactName(target.korcamNama)))
     ) {
       return true;
     }
 
-    // Territory match (Kota-Kabupaten or Provinsi)
-    if (viewerKota && targetKota && isAreaMatch(viewerKota, targetKota)) return true;
-    if (!viewerKota && viewerProv && targetProv && isAreaMatch(viewerProv, targetProv)) return true;
+    const viewerProv = resolveUserProvinsi(viewer);
+    const targetProv = resolveUserProvinsi(target);
+    if (!viewerKota && viewerProv && targetProv && isAreaMatch(viewerProv, targetProv)) {
+      return true;
+    }
+
     return false;
   }
 
-  // 4. Korcam -> ONLY Relawan under their Kecamatan/Kota or team ID link
+  // 4. Korcam -> ONLY Relawan inside Korcam's Kecamatan
   if (isKorcamRole(viewer.role)) {
     if (!targetIsRelawan) return false;
 
-    // Direct relation by Korcam ID or Name
-    if (target.korcamId && target.korcamId === viewer.id) return true;
-    if (target.korcamNama && isNameMatch(target.korcamNama, viewer.nama)) return true;
+    const viewerKec = String(viewer.kecamatan || '').trim();
+    const viewerKota = resolveUserKotaScope(viewer);
+    const targetKec = String(target.kecamatan || '').trim();
+    const targetKota = resolveUserKotaScope(target);
 
-    // Territory match by Kecamatan (preferred) or Kota if viewer has no Kecamatan set
-    const viewerKec = viewer.kecamatan || '';
-    const viewerKota = viewer.kota || '';
-    const targetKec = target.kecamatan || '';
-    const targetKota = target.kota || '';
-
-    if (viewerKec && targetKec && isAreaMatch(viewerKec, targetKec)) {
-      if (!viewerKota || !targetKota || isAreaMatch(viewerKota, targetKota)) {
-        return true;
-      }
+    // Strict Kecamatan boundary: if both Korcam and Relawan have Kecamatan, they MUST match
+    if (normalizeAreaText(viewerKec) && normalizeAreaText(targetKec)) {
+      const kecMatch = isAreaMatch(viewerKec, targetKec);
+      const kotaMatch = !viewerKota || !targetKota || isAreaMatch(viewerKota, targetKota);
+      return kecMatch && kotaMatch;
     }
-    if (!viewerKec && viewerKota && targetKota && isAreaMatch(viewerKota, targetKota)) {
+
+    // If Relawan has a different Kota explicitly, never match
+    if (viewerKota && targetKota && !isAreaMatch(viewerKota, targetKota)) {
+      return false;
+    }
+
+    // Fallback when target lacks kecamatan field: direct Korcam link
+    if (target.korcamId && target.korcamId === viewer.id) return true;
+    if (target.korcamNama && isExactNameMatch(target.korcamNama, viewer.nama)) return true;
+
+    // Fallback if Korcam itself has no kecamatan set: match by Kota
+    if (!normalizeAreaText(viewerKec) && viewerKota && targetKota && isAreaMatch(viewerKota, targetKota)) {
       return true;
     }
 
@@ -245,111 +319,190 @@ export function canViewerMonitorTarget(
 }
 
 /**
- * Filter Voters/Konstituen strictly by role & territorial hierarchy for "Peta Suara".
+ * Filter managed accounts (all statuses: Aktif, Pending, Ditolak, Nonaktif) strictly by viewer's role & territory.
+ */
+export function filterManagedAccountsForUser(
+  viewer: UserAccount | null | undefined,
+  allUsers: UserAccount[]
+): UserAccount[] {
+  if (!viewer) return [];
+  if (isFullAccessRole(viewer.role)) return allUsers;
+  return allUsers.filter((target) => isAccountInViewerScope(viewer, target, allUsers));
+}
+
+/**
+ * Check whether a target field user (Korcam or Relawan) is visible to the logged-in viewer
+ * on the "Monitoring Relawan" live map dashboard (ONLY Aktif accounts).
+ */
+export function canViewerMonitorTarget(
+  viewer: UserAccount | null | undefined,
+  target: UserAccount,
+  allUsers: UserAccount[]
+): boolean {
+  if (!viewer || !target) return false;
+  // Exclude Pending, Ditolak, and Nonaktif from active Live GPS Monitoring
+  if (target.status && target.status !== 'Aktif') return false;
+
+  const targetIsKorcam = isKorcamRole(target.role);
+  const targetIsRelawan = isRelawanRole(target.role);
+  if (!targetIsKorcam && !targetIsRelawan) return false;
+
+  if (isFullAccessRole(viewer.role)) {
+    return true;
+  }
+
+  return isAccountInViewerScope(viewer, target, allUsers);
+}
+
+/**
+ * Check if a voter was strictly inputted by a specific Relawan account.
+ */
+export function isVoterInputtedByRelawan(viewer: UserAccount, voter: VoterOcrRecord): boolean {
+  // If createdById is recorded, strictly compare IDs so different relawan with similar names never collide
+  if (voter.createdById) {
+    return voter.createdById === viewer.id;
+  }
+  if (voter.diinputOlehNama && isExactNameMatch(voter.diinputOlehNama, viewer.nama)) {
+    return true;
+  }
+  if (voter.terdaftarOleh) {
+    const cleanTerdaftar = extractCleanPenginputName(voter.terdaftarOleh);
+    if (isExactNameMatch(cleanTerdaftar, viewer.nama) || isExactNameMatch(voter.terdaftarOleh, viewer.nama)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Global Role-Based Voter/Konstituen Filter (used across Dashboard, Database Konstituen, & Peta Suara):
+ * - Admin / Super Admin / Zuper Admin: all field voters across Indonesia.
+ * - Korwil: strictly voters inside Korwil's Kota/Wilayah coverage (no cross-region leakage).
+ * - Korcam: strictly voters inside Korcam's Kecamatan (e.g. Penjaringan only).
+ * - Relawan: strictly ONLY voters inputted by that Relawan themselves.
+ */
+export function filterScopedVotersForUser(
+  viewer: UserAccount | null | undefined,
+  voters: VoterOcrRecord[],
+  allUsers: UserAccount[]
+): VoterOcrRecord[] {
+  const cleanFieldVoters = voters.filter(isFieldInputtedVoter);
+  if (!viewer) return cleanFieldVoters;
+
+  // 1. Zuper Admin, Super Admin, Admin -> Full Access
+  if (isFullAccessRole(viewer.role)) {
+    return cleanFieldVoters;
+  }
+
+  // 2. Relawan -> STRICTLY ONLY voters inputted by this Relawan themselves
+  if (isRelawanRole(viewer.role)) {
+    return cleanFieldVoters.filter((v) => isVoterInputtedByRelawan(viewer, v));
+  }
+
+  // 3. Korcam -> STRICTLY voters inside Korcam's Kecamatan (no data from other Kecamatan)
+  if (isKorcamRole(viewer.role)) {
+    const viewerKec = String(viewer.kecamatan || '').trim();
+    const viewerKota = resolveUserKotaScope(viewer);
+
+    const myRelawan = filterManagedAccountsForUser(viewer, allUsers);
+    const allowedCreatorIds = new Set<string>([viewer.id, ...myRelawan.map((u) => u.id)]);
+    const allowedCreatorNames = new Set<string>([
+      normalizeExactName(viewer.nama),
+      ...myRelawan.map((u) => normalizeExactName(u.nama)),
+    ]);
+
+    return cleanFieldVoters.filter((v) => {
+      const voterKec = String(v.kecamatan || '').trim();
+      const voterKota = String(v.kabupatenKota || '').trim();
+
+      // Primary strict boundary: if Korcam has Kecamatan AND voter has Kecamatan, MUST match Kecamatan (+ Kota if present)
+      if (normalizeAreaText(viewerKec) && normalizeAreaText(voterKec)) {
+        const kecMatch = isAreaMatch(viewerKec, voterKec);
+        const kotaMatch = !viewerKota || !normalizeAreaText(voterKota) || isAreaMatch(viewerKota, voterKota);
+        return kecMatch && kotaMatch;
+      }
+
+      // If voter explicitly belongs to a different Kota than Korcam, reject
+      if (viewerKota && normalizeAreaText(voterKota) && !isAreaMatch(viewerKota, voterKota)) {
+        return false;
+      }
+
+      // Fallback when voter lacks kecamatan or Korcam lacks kecamatan: creator/team match
+      if (v.korcamId && v.korcamId === viewer.id) return true;
+      if (v.createdById && allowedCreatorIds.has(v.createdById)) return true;
+      if (v.diinputOlehNama && allowedCreatorNames.has(normalizeExactName(v.diinputOlehNama))) return true;
+      if (v.terdaftarOleh) {
+        const cleanName = normalizeExactName(extractCleanPenginputName(v.terdaftarOleh));
+        if (cleanName && allowedCreatorNames.has(cleanName)) return true;
+      }
+
+      // Fallback if Korcam only has Kota configured (no kecamatan)
+      if (!normalizeAreaText(viewerKec) && viewerKota && normalizeAreaText(voterKota)) {
+        return isAreaMatch(viewerKota, voterKota);
+      }
+
+      return false;
+    });
+  }
+
+  // 4. Korwil -> STRICTLY voters inside Korwil's Kota/Wilayah coverage (no data from other Kota/Wilayah)
+  if (isKorwilRole(viewer.role)) {
+    const viewerKota = resolveUserKotaScope(viewer);
+    const viewerProv = resolveUserProvinsi(viewer);
+
+    const myTeam = filterManagedAccountsForUser(viewer, allUsers);
+    const korcamsUnderMe = getKorcamIdsUnderKorwil(viewer, allUsers);
+    const allowedCreatorIds = new Set<string>([
+      viewer.id,
+      ...Array.from(korcamsUnderMe.ids),
+      ...myTeam.map((u) => u.id),
+    ]);
+    const allowedCreatorNames = new Set<string>([
+      normalizeExactName(viewer.nama),
+      ...Array.from(korcamsUnderMe.names),
+      ...myTeam.map((u) => normalizeExactName(u.nama)),
+    ]);
+
+    return cleanFieldVoters.filter((v) => {
+      const voterKota = String(v.kabupatenKota || '').trim();
+
+      // Primary strict boundary: if Korwil has Kota/Wilayah AND voter has kabupatenKota, MUST match strictly
+      if (viewerKota && normalizeAreaText(voterKota)) {
+        return isAreaMatch(viewerKota, voterKota);
+      }
+
+      // Fallback when voter lacks kabupatenKota: creator/team match
+      if (v.korwilId && v.korwilId === viewer.id) return true;
+      if (v.korcamId && korcamsUnderMe.ids.has(v.korcamId)) return true;
+      if (v.createdById && allowedCreatorIds.has(v.createdById)) return true;
+      if (v.diinputOlehNama && allowedCreatorNames.has(normalizeExactName(v.diinputOlehNama))) return true;
+      if (v.terdaftarOleh) {
+        const cleanName = normalizeExactName(extractCleanPenginputName(v.terdaftarOleh));
+        if (cleanName && allowedCreatorNames.has(cleanName)) return true;
+      }
+
+      // Fallback if Korwil is Provinsi-level (no Kota set)
+      if (!viewerKota && viewerProv) {
+        const vProv = resolveAreaProvinsi(v.provinsi, v.kabupatenKota);
+        if (vProv && isAreaMatch(viewerProv, vProv)) return true;
+      }
+
+      return false;
+    });
+  }
+
+  return [];
+}
+
+/**
+ * Alias preserved for Peta Suara module — enforces the exact same global role & territorial scoping.
  */
 export function filterScopedVotersForPetaSuara(
   viewer: UserAccount | null | undefined,
   voters: VoterOcrRecord[],
   allUsers: UserAccount[]
 ): VoterOcrRecord[] {
-  // Always exclude dummy / sample / non-field voters first
-  const cleanFieldVoters = voters.filter(isFieldInputtedVoter);
-  if (!viewer) return cleanFieldVoters;
-
-  // 1. Zuper Admin, Super Admin, Admin -> Full Access to all field voters across Indonesia
-  if (isFullAccessRole(viewer.role)) {
-    return cleanFieldVoters;
-  }
-
-  // 2. Relawan -> ONLY voters inputted by this Relawan themselves
-  if (isRelawanRole(viewer.role)) {
-    return cleanFieldVoters.filter((v) => {
-      if (v.createdById && v.createdById === viewer.id) return true;
-      if (v.diinputOlehNama && isNameMatch(v.diinputOlehNama, viewer.nama)) return true;
-      if (v.terdaftarOleh && isNameMatch(v.terdaftarOleh, viewer.nama)) return true;
-      return false;
-    });
-  }
-
-  // 3. Korcam -> Voters inputted by this Korcam OR by Relawan under their territory/team
-  if (isKorcamRole(viewer.role)) {
-    const myTeamUsers = allUsers.filter((u) => canViewerMonitorTarget(viewer, u, allUsers));
-    const allowedCreatorIds = new Set<string>([viewer.id, ...myTeamUsers.map((u) => u.id)]);
-    const allowedCreatorNames = new Set<string>([
-      viewer.nama.trim().toLowerCase(),
-      ...myTeamUsers.map((u) => u.nama.trim().toLowerCase()),
-    ]);
-
-    const viewerKec = viewer.kecamatan || '';
-    const viewerKota = viewer.kota || '';
-
-    return cleanFieldVoters.filter((v) => {
-      if (v.korcamId && v.korcamId === viewer.id) return true;
-      if (v.createdById && allowedCreatorIds.has(v.createdById)) return true;
-      if (v.diinputOlehNama && allowedCreatorNames.has(v.diinputOlehNama.trim().toLowerCase())) {
-        return true;
-      }
-      if (v.terdaftarOleh) {
-        const tLower = v.terdaftarOleh.trim().toLowerCase();
-        for (const allowedName of allowedCreatorNames) {
-          if (allowedName && tLower.includes(allowedName)) return true;
-        }
-      }
-      // Fallback territorial scope for historical voters without createdById
-      if (!v.createdById && !v.korcamId && viewerKec && v.kecamatan) {
-        const kecMatch = isAreaMatch(viewerKec, v.kecamatan);
-        const kotaMatch = !viewerKota || !v.kabupatenKota || isAreaMatch(viewerKota, v.kabupatenKota);
-        if (kecMatch && kotaMatch) return true;
-      }
-      return false;
-    });
-  }
-
-  // 4. Korwil -> Voters inputted by this Korwil OR by Korcam & Relawan under their territory/team
-  if (isKorwilRole(viewer.role)) {
-    const myTeamUsers = allUsers.filter((u) => canViewerMonitorTarget(viewer, u, allUsers));
-    const korcamsUnderMe = getKorcamIdsUnderKorwil(viewer, allUsers);
-
-    const allowedCreatorIds = new Set<string>([
-      viewer.id,
-      ...Array.from(korcamsUnderMe.ids),
-      ...myTeamUsers.map((u) => u.id),
-    ]);
-    const allowedCreatorNames = new Set<string>([
-      viewer.nama.trim().toLowerCase(),
-      ...Array.from(korcamsUnderMe.names),
-      ...myTeamUsers.map((u) => u.nama.trim().toLowerCase()),
-    ]);
-
-    const viewerKota = viewer.kota || viewer.wilayah || '';
-    const viewerProv = resolveUserProvinsi(viewer);
-
-    return cleanFieldVoters.filter((v) => {
-      if (v.korwilId && v.korwilId === viewer.id) return true;
-      if (v.korcamId && korcamsUnderMe.ids.has(v.korcamId)) return true;
-      if (v.createdById && allowedCreatorIds.has(v.createdById)) return true;
-      if (v.diinputOlehNama && allowedCreatorNames.has(v.diinputOlehNama.trim().toLowerCase())) {
-        return true;
-      }
-      if (v.terdaftarOleh) {
-        const tLower = v.terdaftarOleh.trim().toLowerCase();
-        for (const allowedName of allowedCreatorNames) {
-          if (allowedName && tLower.includes(allowedName)) return true;
-        }
-      }
-      // Fallback territorial scope for historical voters without creator relation IDs
-      if (!v.createdById && !v.korwilId) {
-        if (viewerKota && v.kabupatenKota && isAreaMatch(viewerKota, v.kabupatenKota)) return true;
-        if (!viewerKota && viewerProv) {
-          const vProv = resolveAreaProvinsi(v.provinsi, v.kabupatenKota);
-          if (vProv && isAreaMatch(viewerProv, vProv)) return true;
-        }
-      }
-      return false;
-    });
-  }
-
-  return [];
+  return filterScopedVotersForUser(viewer, voters, allUsers);
 }
 
 /**

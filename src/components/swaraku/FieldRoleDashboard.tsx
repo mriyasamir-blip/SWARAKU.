@@ -30,6 +30,8 @@ interface FieldRoleDashboardProps {
   staffUser: UserAccount;
   voterCount: number;
   relawanCount: number;
+  korcamCount?: number;
+  pendingTeamCount?: number;
   c1Records: FormC1Upload[];
   b1Records: FormB1Upload[];
   surveyCount: number;
@@ -61,6 +63,8 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
   staffUser,
   voterCount,
   relawanCount,
+  korcamCount = 0,
+  pendingTeamCount = 0,
   c1Records,
   b1Records,
   surveyCount,
@@ -322,21 +326,30 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
         <button
           type="button"
           onClick={() =>
-            onNavigateTab(isKorcam ? 'kelola_relawan' : 'monitoring_kader')
+            onNavigateTab(isKorcam ? 'kelola_relawan' : 'kelola_korcam_relawan')
           }
           className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left transition-colors cursor-pointer"
         >
           <div className="flex items-center justify-between text-slate-500 mb-1.5">
             <span className="text-xs font-semibold">
-              {isKorcam ? 'Relawan Aktif' : 'Korcam & Relawan'}
+              {isKorcam ? 'Total Relawan' : 'Korcam & Relawan'}
             </span>
             <Users className="w-4 h-4 text-indigo-600" />
           </div>
-          <p className="text-2xl font-black text-slate-900 tabular-nums">
-            {(isKorcam ? relawanCount : (staffUser.kaderList?.length || 0) + relawanCount).toLocaleString('id-ID')}
-          </p>
+          <div className="flex items-baseline gap-2">
+            <p className="text-2xl font-black text-slate-900 tabular-nums">
+              {(isKorcam ? relawanCount : korcamCount + relawanCount).toLocaleString('id-ID')}
+            </p>
+            {pendingTeamCount > 0 && (
+              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                {pendingTeamCount} Pending
+              </span>
+            )}
+          </div>
           <p className="text-[11px] text-slate-500 mt-1 truncate">
-            {isKorcam ? 'Klik untuk Kelola User Relawan' : 'Aktif di Monitoring Relawan'}
+            {isKorcam
+              ? 'Klik untuk Kelola Relawan'
+              : `${korcamCount} Korcam · ${relawanCount} Relawan`}
           </p>
         </button>
 
@@ -393,23 +406,23 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
           {isKorwil ? (
             <button
               type="button"
-              onClick={() => onNavigateTab('peta_suara')}
-              className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-slate-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group min-h-[100px]"
+              onClick={() => onNavigateTab('kelola_korcam_relawan')}
+              className="p-4 bg-white hover:bg-slate-50 rounded-2xl border border-emerald-200 text-left flex items-start justify-between gap-3 transition-colors cursor-pointer group min-h-[100px]"
             >
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
-                  <Compass className="w-5 h-5" />
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
+                  <Users className="w-5 h-5" />
                 </div>
                 <div>
                   <h4 className="text-sm font-extrabold text-slate-900">
-                    Peta Suara (Google Maps)
+                    Kelola Korcam &amp; Relawan
                   </h4>
                   <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Pantau sebaran titik Voter &amp; Korwil per Kelurahan di Google Maps.
+                    Aktivasi pendaftar baru, kelola status Korcam &amp; Relawan di wilayah Anda.
                   </p>
                 </div>
               </div>
-              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-teal-700 shrink-0 mt-1" />
+              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-700 shrink-0 mt-1" />
             </button>
           ) : (
             <button
@@ -423,10 +436,10 @@ export const FieldRoleDashboard: React.FC<FieldRoleDashboardProps> = ({
                 </div>
                 <div>
                   <h4 className="text-sm font-extrabold text-slate-900">
-                    Kelola User Relawan
+                    Kelola Relawan
                   </h4>
                   <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    Tambah akun Relawan sebanyak yang dibutuhkan &amp; aktifkan login langsung.
+                    Aktivasi pendaftar Relawan baru &amp; kelola status Relawan di kecamatan Anda.
                   </p>
                 </div>
               </div>

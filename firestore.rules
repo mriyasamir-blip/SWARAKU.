@@ -109,7 +109,7 @@ service cloud.firestore {
         && (!('noHp' in data) || (data.noHp is string && data.noHp.size() <= 30))
         && (!('fotoUrl' in data) || (data.fotoUrl is string && data.fotoUrl.size() <= 350000))
         && (!('password' in data) || (data.password is string && data.password.size() <= 120))
-        && (!('status' in data) || (data.status in ['Aktif', 'Nonaktif']))
+        && (!('status' in data) || (data.status in ['Aktif', 'Pending', 'Ditolak', 'Nonaktif']))
         && (!('dibuatPada' in data) || (data.dibuatPada is string && data.dibuatPada.size() <= 80))
         && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 80))
         && (!('timSuksesId' in data) || (data.timSuksesId is string && data.timSuksesId.size() <= 128))

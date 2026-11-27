@@ -637,7 +637,7 @@ export const MonitoringPetaSuaraScreen: React.FC<MonitoringPetaSuaraScreenProps>
                 <th className="py-3 px-4">Nama Konstituen</th>
                 <th className="py-3 px-4">Kelurahan / Kecamatan</th>
                 <th className="py-3 px-4">Kota/Kab &amp; Provinsi</th>
-                <th className="py-3 px-4">Diinput Oleh</th>
+                <th className="py-3 px-4">Nama Penginput &amp; Wilayah Input</th>
                 <th className="py-3 px-4 text-right">Peta</th>
               </tr>
             </thead>
@@ -652,6 +652,10 @@ export const MonitoringPetaSuaraScreen: React.FC<MonitoringPetaSuaraScreenProps>
                 filteredVoters.slice(0, 100).map((voter) => {
                   const prov = resolveVoterProvinsi(voter);
                   const isFocused = focusedVoter?.id === voter.id;
+                  const wilayahInputText =
+                    [voter.kabupatenKota, voter.kecamatan, voter.kelurahan]
+                      .filter((p) => p && p !== '-')
+                      .join(' / ') || '-';
                   return (
                     <tr
                       key={voter.id}
@@ -679,9 +683,12 @@ export const MonitoringPetaSuaraScreen: React.FC<MonitoringPetaSuaraScreenProps>
                         <p className="text-[11px] text-slate-500">{prov}</p>
                       </td>
                       <td className="py-3 px-4">
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-800">
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                           <span>{voter.diinputOlehNama || voter.terdaftarOleh || '-'}</span>
+                        </span>
+                        <span className="block text-[10px] font-semibold text-cyan-800 mt-0.5">
+                          {wilayahInputText}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right">

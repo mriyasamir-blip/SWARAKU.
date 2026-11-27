@@ -28,13 +28,13 @@ import {
   X,
   ChevronRight,
   AlertTriangle,
-  Globe,
   Navigation,
   UserPlus,
   QrCode,
   Gift,
 } from 'lucide-react';
 import type {
+  AccountStatus,
   AspirasiItem,
   DptVoterRecord,
   ElectabilitySurveySubmission,
@@ -78,7 +78,8 @@ import { formatWilayahLabel } from '../../data/wilayahIndonesia';
 import type { LocationTrackerHookResult } from '../../hooks/useLocationTracker';
 import {
   canAccessMonitoringRelawan,
-  filterScopedVotersForPetaSuara,
+  filterManagedAccountsForUser,
+  filterScopedVotersForUser,
   resolveAreaProvinsi,
   resolveVoterCreatorHierarchy,
 } from '../../utils/hierarchyAccess';
@@ -90,6 +91,7 @@ export type StaffTab =
   | 'peta_suara'
   | 'database_voters'
   | 'kelola_relawan'
+  | 'kelola_korcam_relawan'
   | 'operasi_lapangan'
   | 'aspirasi'
   | 'monitoring_kader'
@@ -124,6 +126,7 @@ interface StaffPortalAppProps {
   onUpdateUser: (user: UserAccount) => Promise<boolean | void>;
   onDeleteUser: (userId: string) => Promise<boolean | void>;
   onToggleUserStatus: (userId: string) => Promise<boolean | void>;
+  onChangeUserStatus: (userId: string, nextStatus: AccountStatus) => Promise<boolean | void>;
   onRefreshUsers: () => Promise<void>;
   onConnectGoogleAdmin: () => Promise<void>;
   onAwardPoints: (delta: number) => Promise<void> | void;
@@ -156,7 +159,6 @@ interface StaffPortalAppProps {
   onCheckinCoblos: (photoUrl?: string) => void;
   onResetDataToZero: () => void;
   onTriggerCloudSync: () => Promise<void>;
-  onOpenWebsiteMode?: () => void;
   locationTracker?: LocationTrackerHookResult;
 }
 
@@ -258,6 +260,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
   onUpdateUser,
   onDeleteUser,
   onToggleUserStatus,
+  onChangeUserStatus,
   onRefreshUsers,
   onConnectGoogleAdmin,
   onAwardPoints,
@@ -277,7 +280,6 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
   onAddInvitedFriend,
   onResetDataToZero,
   onTriggerCloudSync,
-  onOpenWebsiteMode,
   locationTracker,
 }) => {
   const [activeTab, setActiveTab] = useState<StaffTab>('beranda');
@@ -325,11 +327,18 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
     }
   }, [activeTab, canAccessMonitoringMenu]);
 
-  // Hitung voters sesuai cakupan wilayah user untuk badge Peta Suara
-  const scopedPetaSuaraCount = useMemo(
-    () => filterScopedVotersForPetaSuara(staffUser, voterOcrRecords, userAccounts).length,
+  // Global Role & Territorial Data Scoping (Berlaku pada Dashboard, Database, & Peta Suara)
+  const scopedVoters = useMemo(
+    () => filterScopedVotersForUser(staffUser, voterOcrRecords, userAccounts),
     [staffUser, voterOcrRecords, userAccounts]
   );
+
+  const scopedManagedAccounts = useMemo(
+    () => filterManagedAccountsForUser(staffUser, userAccounts),
+    [staffUser, userAccounts]
+  );
+
+  const scopedPetaSuaraCount = scopedVoters.length;
 
   const relawanCount = useMemo(
     () => userAccounts.filter((u) => u.role === 'relawan').length,
@@ -337,13 +346,19 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
   );
 
   const myRelawanCount = useMemo(() => {
-    if (!isKorcam) return relawanCount;
-    return userAccounts.filter(
-      (u) =>
-        u.role === 'relawan' &&
-        (!u.korcamId || u.korcamId === staffUser.id || u.korcamNama === staffUser.nama)
-    ).length;
-  }, [userAccounts, isKorcam, staffUser.id, staffUser.nama, relawanCount]);
+    if (isAdminOrSuper) return relawanCount;
+    return scopedManagedAccounts.filter((u) => u.role === 'relawan').length;
+  }, [isAdminOrSuper, relawanCount, scopedManagedAccounts]);
+
+  const myKorcamCount = useMemo(
+    () => scopedManagedAccounts.filter((u) => u.role === 'kader').length,
+    [scopedManagedAccounts]
+  );
+
+  const myPendingTeamCount = useMemo(
+    () => scopedManagedAccounts.filter((u) => u.status === 'Pending').length,
+    [scopedManagedAccounts]
+  );
 
   const wilayahDisplay =
     formatWilayahLabel({
@@ -452,19 +467,32 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
 
     items.push({
       id: 'database_voters',
-      label: isRelawan ? 'Database Voter' : 'Database',
+      label: isRelawan ? 'Database Voter Saya' : 'Database',
       shortLabel: 'Database',
       icon: <Database className="w-5 h-5" />,
-      badge: voterOcrRecords.length,
+      badge: scopedVoters.length,
     });
 
     if (isKorcam) {
       items.push({
         id: 'kelola_relawan',
-        label: 'Kelola User Relawan',
+        label: 'Kelola Relawan',
         shortLabel: 'Relawan',
         icon: <UserPlus className="w-5 h-5" />,
-        badge: myRelawanCount,
+        badge: myPendingTeamCount > 0 ? `${myPendingTeamCount} Baru` : myRelawanCount,
+      });
+    }
+
+    if (isKorwil) {
+      items.push({
+        id: 'kelola_korcam_relawan',
+        label: 'Kelola Korcam & Relawan',
+        shortLabel: 'Kelola Tim',
+        icon: <Users className="w-5 h-5" />,
+        badge:
+          myPendingTeamCount > 0
+            ? `${myPendingTeamCount} Baru`
+            : myKorcamCount + myRelawanCount,
       });
     }
 
@@ -540,9 +568,11 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
     isKorcam,
     isRelawan,
     scopedPetaSuaraCount,
-    voterOcrRecords.length,
+    scopedVoters.length,
     events.length,
     myRelawanCount,
+    myKorcamCount,
+    myPendingTeamCount,
     aspirasiList.length,
     userAccounts.length,
   ]);
@@ -783,16 +813,6 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
 
         {/* Footer Actions */}
         <div className="p-4 border-t border-slate-100 space-y-2">
-          {onOpenWebsiteMode && (
-            <button
-              type="button"
-              onClick={onOpenWebsiteMode}
-              className="w-full min-h-[40px] px-4 py-2 rounded-xl text-slate-700 bg-slate-100 hover:bg-slate-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <Globe className="w-4 h-4" />
-              <span>Buka Mode Website</span>
-            </button>
-          )}
           <PWAInstallButton
             variant="outline"
             label="Pasang Aplikasi"
@@ -909,19 +929,6 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             </nav>
 
             <div className="p-4 border-t border-slate-100 space-y-2">
-              {onOpenWebsiteMode && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    onOpenWebsiteMode();
-                  }}
-                  className="w-full min-h-[42px] px-4 py-2 rounded-xl text-slate-700 bg-slate-100 hover:bg-slate-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Globe className="w-4 h-4" />
-                  <span>Buka Mode Website</span>
-                </button>
-              )}
               <button
                 type="button"
                 onClick={onLogout}
@@ -1275,8 +1282,10 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
               {(isKorwil || isKorcam || isRelawan) && (
                 <FieldRoleDashboard
                   staffUser={staffUser}
-                  voterCount={voterOcrRecords.length}
+                  voterCount={scopedVoters.length}
                   relawanCount={myRelawanCount}
+                  korcamCount={myKorcamCount}
+                  pendingTeamCount={myPendingTeamCount}
                   c1Records={c1Records}
                   b1Records={b1Records}
                   surveyCount={surveyList.length}
@@ -1432,12 +1441,13 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             </div>
           )}
 
-          {/* 4. DATABASE (4 Sub-Menus: Daftar Voter, Daftar Relawan, Laporan per Kelurahan, Quick Count) */}
+          {/* 4. DATABASE (Sesuai Pembatasan Akses Wilayah / Inputan Sendiri untuk Relawan) */}
           {activeTab === 'database_voters' && (
             <div className="bg-white rounded-3xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4">
               <DatabaseVotersView
-                voterList={voterOcrRecords}
-                userAccounts={userAccounts}
+                voterList={scopedVoters}
+                userAccounts={isAdminOrSuper ? userAccounts : scopedManagedAccounts}
+                currentUser={staffUser}
                 c1Records={c1Records}
                 b1Records={b1Records}
                 canAddRelawan={isAdminOrSuper || isKorwil || isKorcam}
@@ -1449,7 +1459,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
             </div>
           )}
 
-          {/* 5. KELOLA USER RELAWAN (KHUSUS KORCAM) */}
+          {/* 5. KELOLA RELAWAN (KHUSUS KORCAM — KECAMATAN PENUGASAN) */}
           {activeTab === 'kelola_relawan' && isKorcam && (
             <UserRoleManagementView
               mode="korcam_relawan"
@@ -1459,6 +1469,23 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
               onUpdateUser={onUpdateUser}
               onDeleteUser={onDeleteUser}
               onToggleUserStatus={onToggleUserStatus}
+              onChangeUserStatus={onChangeUserStatus}
+              onRefreshUsers={onRefreshUsers}
+              onAwardPoints={onAwardPoints}
+            />
+          )}
+
+          {/* 5b. KELOLA KORCAM DAN RELAWAN (KHUSUS KORWIL — KOTA / WILAYAH PENUGASAN) */}
+          {activeTab === 'kelola_korcam_relawan' && isKorwil && (
+            <UserRoleManagementView
+              mode="korwil_team"
+              userAccounts={userAccounts}
+              currentUser={staffUser}
+              onAddUser={onAddUser}
+              onUpdateUser={onUpdateUser}
+              onDeleteUser={onDeleteUser}
+              onToggleUserStatus={onToggleUserStatus}
+              onChangeUserStatus={onChangeUserStatus}
               onRefreshUsers={onRefreshUsers}
               onAwardPoints={onAwardPoints}
             />
@@ -1543,6 +1570,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
               onUpdateUser={onUpdateUser}
               onDeleteUser={onDeleteUser}
               onToggleUserStatus={onToggleUserStatus}
+              onChangeUserStatus={onChangeUserStatus}
               onSaveTimSukses={onSaveTimSukses}
               onRefreshUsers={onRefreshUsers}
               onAwardPoints={onAwardPoints}

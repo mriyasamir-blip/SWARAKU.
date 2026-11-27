@@ -23,7 +23,10 @@ import {
   subscribeKaderLocations,
   type KaderLocationRecord,
 } from '../../services/kaderLocationService';
-import { SwarakuMapsProvider } from '../maps/SwarakuMapsProvider';
+import {
+  SwarakuMapsProvider,
+  SwarakuMapsDiagnosticNotice,
+} from '../maps/SwarakuMapsProvider';
 
 interface MonitoringKaderViewProps {
   onNotify?: (msg: string) => void;
@@ -292,23 +295,20 @@ export const MonitoringKaderView: React.FC<MonitoringKaderViewProps> = ({ onNoti
           <div className="w-full h-[340px] sm:h-[400px]">
             <SwarakuMapsProvider
               fallback={
-                <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center bg-slate-50 text-slate-600">
-                  <MapPin className="w-8 h-8 text-slate-400 mb-2" />
-                  <p className="text-sm font-bold text-slate-800">
-                    Peta Google Maps tidak tersedia pada domain ini
-                  </p>
-                  <p className="text-xs text-slate-500 mt-1 max-w-md">
-                    Koordinat GPS asli dari seluruh Kader tetap tersinkronisasi secara real-time di
-                    daftar bawah ini dan dapat dibuka langsung melalui tautan Google Maps.
-                  </p>
+                <div className="w-full h-full flex flex-col justify-center p-4 sm:p-6 overflow-y-auto bg-slate-50">
+                  <SwarakuMapsDiagnosticNotice
+                    title="Peta Google Maps tidak dapat dimuat pada domain ini"
+                    subtitle="Koordinat GPS asli dari seluruh Kader tetap tersinkronisasi secara real-time di daftar bawah ini."
+                  />
                 </div>
               }
             >
               <GoogleMap
                 defaultCenter={mapCenter}
                 defaultZoom={14}
-                mapId="SWARAKU_KADER_MONITORING_MAP"
+                mapId="DEMO_MAP_ID"
                 gestureHandling="greedy"
+                internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
                 className="w-full h-full"
               >
                 <MapFocusController target={selectedRecord} />

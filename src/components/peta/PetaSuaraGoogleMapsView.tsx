@@ -259,7 +259,7 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
           }
         >
           <GoogleMap
-            mapId="swaraku-peta-suara-voters-map"
+            mapId="DEMO_MAP_ID"
             defaultCenter={INDONESIA_CENTER}
             defaultZoom={5}
             mapTypeId={mapTypeId}
@@ -360,9 +360,15 @@ export const PetaSuaraGoogleMapsView: React.FC<PetaSuaraGoogleMapsViewProps> = (
                       <p className="text-[10px] text-slate-500 font-mono">{v.nikMasked}</p>
                       <p className="text-[10px] text-slate-600 flex items-center gap-1 mt-0.5">
                         <UserCheck className="w-3 h-3 text-emerald-600 shrink-0" />
-                        <span className="truncate">
-                          Input: {v.diinputOlehNama || v.terdaftarOleh || '-'}
+                        <span className="truncate font-semibold">
+                          Penginput: {v.diinputOlehNama || v.terdaftarOleh || '-'}
                         </span>
+                      </p>
+                      <p className="text-[10px] text-cyan-800 truncate mt-0.5">
+                        Wilayah:{' '}
+                        {[v.kabupatenKota, v.kecamatan, v.kelurahan]
+                          .filter((p) => p && p !== '-')
+                          .join(' / ') || '-'}
                       </p>
                     </div>
                   ))}

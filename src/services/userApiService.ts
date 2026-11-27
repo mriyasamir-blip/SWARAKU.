@@ -1,4 +1,4 @@
-import { UserAccount, UserRole } from '../types/vore';
+import { AccountStatus, UserAccount, UserRole } from '../types/vore';
 import { getActiveScriptUrl, isScriptUrlConfigured } from '../config/apiConfig';
 import {
   collection,
@@ -12,6 +12,8 @@ import {
 } from 'firebase/firestore';
 import { firestore } from '../lib/firebase';
 import { PRESET_ACCOUNTS } from '../data/accountsData';
+import { formatWilayahLabel, getProvinsiByKota } from '../data/wilayahIndonesia';
+import { isAreaMatch, isKorcamRole, isKorwilRole } from '../utils/hierarchyAccess';
 
 const FIRESTORE_USERS_COLLECTION = 'user_accounts';
 
@@ -249,6 +251,244 @@ const LEGACY_USERNAME_ALIAS: Record<string, string> = {
   'kader@swaraku.com': 'acc-kader',
 };
 
+export function normalizeIndonesianPhone(raw?: string | null): string {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('0062')) return `62${digits.slice(4)}`;
+  if (digits.startsWith('62')) return digits;
+  if (digits.startsWith('0')) return `62${digits.slice(1)}`;
+  if (digits.startsWith('8')) return `62${digits}`;
+  return digits;
+}
+
+export function normalizeFullName(raw?: string | null): string {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+export function normalizeNik(raw?: string | null): string {
+  return String(raw || '').replace(/\D/g, '');
+}
+
+export function getAccountStatusRejectionMessage(user: UserAccount): string | null {
+  const status = user.status || 'Aktif';
+  if (status === 'Pending') {
+    if (user.role === 'relawan') {
+      return 'Akun Anda masih berstatus Menunggu Aktivasi (Pending). Silakan tunggu aktivasi dari Korcam di wilayah penugasan Anda.';
+    }
+    if (user.role === 'kader') {
+      return 'Akun Anda masih berstatus Menunggu Aktivasi (Pending). Silakan tunggu aktivasi dari Korwil di wilayah penugasan Anda.';
+    }
+    return 'Akun Anda masih berstatus Menunggu Aktivasi (Pending). Silakan tunggu aktivasi dari koordinator wilayah Anda.';
+  }
+  if (status === 'Ditolak') {
+    return 'Pendaftaran akun Anda ditolak oleh koordinator wilayah.';
+  }
+  if (status === 'Nonaktif') {
+    return 'Akun Anda sedang dinonaktifkan, silakan hubungi koordinator Anda.';
+  }
+  return null;
+}
+
+export interface DuplicateCheckCandidate {
+  nama?: string;
+  username?: string;
+  email?: string;
+  noHp?: string;
+  nik?: string;
+}
+
+export function checkAccountDuplicates(
+  candidate: DuplicateCheckCandidate,
+  existingUsers: UserAccount[],
+  excludeUserId?: string
+): { hasDuplicate: boolean; duplicateFields: string[]; message: string } {
+  const cNama = normalizeFullName(candidate.nama);
+  const cUsername = String(candidate.username || '').trim().toLowerCase();
+  const cEmail = String(candidate.email || '').trim().toLowerCase();
+  const cPhone = normalizeIndonesianPhone(candidate.noHp);
+  const cNik = normalizeNik(candidate.nik);
+
+  const dupSet = new Set<string>();
+
+  for (const acc of existingUsers) {
+    if (!acc) continue;
+    if (excludeUserId && acc.id === excludeUserId) continue;
+
+    if (cNama && normalizeFullName(acc.nama) === cNama) {
+      dupSet.add('Nama Lengkap');
+    }
+    if (cUsername && String(acc.username || '').trim().toLowerCase() === cUsername) {
+      dupSet.add('Username Login');
+    }
+    if (cEmail && String(acc.email || '').trim().toLowerCase() === cEmail) {
+      dupSet.add('Email');
+    }
+    if (cPhone && cPhone.length >= 8) {
+      const existingPhone = normalizeIndonesianPhone(acc.noHp);
+      if (existingPhone && existingPhone === cPhone) {
+        dupSet.add('Nomor WhatsApp / HP');
+      }
+    }
+    if (cNik && cNik.length === 16) {
+      const existingNik = normalizeNik(acc.nik);
+      if (existingNik && existingNik === cNik) {
+        dupSet.add('NIK');
+      }
+    }
+  }
+
+  const duplicateFields = Array.from(dupSet);
+  if (duplicateFields.length > 0) {
+    return {
+      hasDuplicate: true,
+      duplicateFields,
+      message: `Gagal mendaftar: ${duplicateFields.join(' / ')} sudah terdaftar dan tidak dapat digunakan untuk mendaftar ulang.`,
+    };
+  }
+
+  return { hasDuplicate: false, duplicateFields: [], message: '' };
+}
+
+export interface SignUpAccountPayload {
+  role: 'relawan' | 'kader';
+  nama: string;
+  username: string;
+  email: string;
+  noHp: string;
+  password: string;
+  nik: string;
+  kota: string;
+  kecamatan: string;
+  kelurahan: string;
+}
+
+/**
+ * 2b. Pendaftaran mandiri (Sign Up) Relawan & Korcam dengan validasi Anti-Duplikasi global
+ * (Nama Lengkap, Username, Email, Nomor WA/HP, NIK 16 digit) & status awal 'Pending'.
+ */
+export async function registerAccountWithDuplicateCheck(
+  payload: SignUpAccountPayload
+): Promise<{ success: boolean; user?: UserAccount; duplicateFields?: string[]; message: string }> {
+  const nama = payload.nama.trim().replace(/\s+/g, ' ');
+  const username = payload.username.trim().toLowerCase();
+  const email = payload.email.trim().toLowerCase();
+  const noHpRaw = payload.noHp.trim();
+  const normalizedPhone = normalizeIndonesianPhone(noHpRaw);
+  const password = payload.password.trim();
+  const nik = normalizeNik(payload.nik);
+  const kota = payload.kota.trim();
+  const kecamatan = payload.kecamatan.trim();
+  const kelurahan = payload.kelurahan.trim();
+
+  if (!nama || nama.length < 3 || nama.length > 120) {
+    return { success: false, message: 'Nama Lengkap wajib diisi (minimal 3 karakter).' };
+  }
+  if (!username || username.length < 3 || username.length > 80 || /\s/.test(username)) {
+    return { success: false, message: 'Username Login wajib diisi tanpa spasi (minimal 3 karakter).' };
+  }
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 150) {
+    return { success: false, message: 'Format alamat Email tidak valid.' };
+  }
+  if (!normalizedPhone || normalizedPhone.length < 10 || normalizedPhone.length > 16) {
+    return { success: false, message: 'Nomor WhatsApp / HP tidak valid (minimal 10 digit).' };
+  }
+  if (!password || password.length < 6 || password.length > 120) {
+    return { success: false, message: 'Password wajib diisi minimal 6 karakter.' };
+  }
+  if (nik.length !== 16) {
+    return { success: false, message: 'NIK wajib terdiri dari tepat 16 digit angka.' };
+  }
+  if (!kota || !kecamatan || !kelurahan) {
+    return {
+      success: false,
+      message: 'Wilayah Penugasan (Kota/Kabupaten, Kecamatan, dan Kelurahan) wajib dipilih lengkap.',
+    };
+  }
+
+  // Ambil seluruh akun terbaru dari Firestore + preset untuk validasi anti-duplikasi menyeluruh
+  const allAccounts = await fetchUsersFromCloud();
+  const dupCheck = checkAccountDuplicates(
+    { nama, username, email, noHp: noHpRaw, nik },
+    allAccounts
+  );
+  if (dupCheck.hasDuplicate) {
+    return {
+      success: false,
+      duplicateFields: dupCheck.duplicateFields,
+      message: dupCheck.message,
+    };
+  }
+
+  const provinsi = getProvinsiByKota(kota);
+  const wilayah = formatWilayahLabel({ kota, kecamatan, kelurahan });
+
+  // Cari koordinator induk berdasarkan wilayah agar otomatis terklaster rapi
+  const matchedKorwil = allAccounts.find(
+    (u) =>
+      isKorwilRole(u.role) &&
+      (u.status || 'Aktif') === 'Aktif' &&
+      isAreaMatch(u.kota || u.wilayah, kota)
+  );
+  const matchedKorcam =
+    payload.role === 'relawan'
+      ? allAccounts.find(
+          (u) =>
+            isKorcamRole(u.role) &&
+            (u.status || 'Aktif') === 'Aktif' &&
+            isAreaMatch(u.kecamatan, kecamatan) &&
+            (!u.kota || isAreaMatch(u.kota, kota))
+        )
+      : undefined;
+
+  const newUser: UserAccount = {
+    id: `acc-${payload.role}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    role: payload.role,
+    nama,
+    username,
+    email,
+    nik,
+    noHp: noHpRaw.slice(0, 30),
+    password,
+    jabatan: payload.role === 'relawan' ? 'Relawan Lapangan' : 'Koordinator Kecamatan (Korcam)',
+    wilayah: wilayah.slice(0, 160),
+    provinsi: provinsi.slice(0, 120),
+    kota: kota.slice(0, 120),
+    kecamatan: kecamatan.slice(0, 120),
+    kelurahan: kelurahan.slice(0, 120),
+    status: 'Pending',
+    points: 0,
+    dibuatPada: new Date().toLocaleDateString('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }),
+    ...(matchedKorwil
+      ? { timSuksesId: matchedKorwil.id, timSuksesNama: matchedKorwil.nama }
+      : {}),
+    ...(matchedKorcam
+      ? { korcamId: matchedKorcam.id, korcamNama: matchedKorcam.nama }
+      : {}),
+  };
+
+  const saved = await createUserOnCloud(newUser);
+  if (!saved.success) {
+    return {
+      success: false,
+      message: saved.message || 'Gagal menyimpan pendaftaran ke database.',
+    };
+  }
+
+  const approverLabel = payload.role === 'relawan' ? 'Korcam' : 'Korwil';
+  return {
+    success: true,
+    user: newUser,
+    message: `Pendaftaran berhasil! Akun Anda berstatus Menunggu Aktivasi (Pending). Silakan tunggu aktivasi dari ${approverLabel} di wilayah ${kecamatan}, ${kota}.`,
+  };
+}
+
 /**
  * 3. Validasi Login secara langsung ke Cloud Database (Cross-Device) dengan Whitelist ketat.
  */
@@ -276,10 +516,11 @@ export async function loginUserOnCloud(
     raw: UserAccount
   ): { success: boolean; user?: UserAccount; message?: string } => {
     const targetUser = normalizeUserAccount(raw);
-    if (targetUser.status === 'Nonaktif') {
+    const statusRejection = getAccountStatusRejectionMessage(targetUser);
+    if (statusRejection) {
       return {
         success: false,
-        message: 'Akun Anda sedang dinonaktifkan. Silakan hubungi Admin atau Koordinator terkait.',
+        message: statusRejection,
       };
     }
 
@@ -391,10 +632,11 @@ export async function loginUserByGoogleEmailOnCloud(
     raw: UserAccount
   ): { success: boolean; user?: UserAccount; message?: string } => {
     const target = normalizeUserAccount(raw);
-    if (target.status === 'Nonaktif') {
+    const statusRejection = getAccountStatusRejectionMessage(target);
+    if (statusRejection) {
       return {
         success: false,
-        message: 'Akun Anda sedang dinonaktifkan. Silakan hubungi Admin atau Koordinator terkait.',
+        message: statusRejection,
       };
     }
     if (!allowedRoles.includes(target.role)) {
@@ -605,7 +847,37 @@ export async function deleteUserOnCloud(userId: string): Promise<boolean> {
 }
 
 /**
- * 7. Ubah status user Aktif/Nonaktif di server
+ * 7. Ubah status user langsung (Aktif / Pending / Ditolak / Nonaktif) di Firestore.
+ */
+export async function updateUserStatusOnCloud(
+  userId: string,
+  nextStatus: AccountStatus
+): Promise<boolean> {
+  if (!userId) return false;
+  if (isScriptUrlConfigured()) {
+    try {
+      await fetchGoogleScript('updateUser', { user: { id: userId, status: nextStatus } });
+    } catch (e) {
+      console.warn('[UserApi] Update status Google Script error:', e);
+    }
+  }
+
+  try {
+    const docRef = doc(firestore, FIRESTORE_USERS_COLLECTION, userId);
+    await setDoc(
+      docRef,
+      { status: nextStatus, updatedAt: new Date().toISOString() },
+      { merge: true }
+    );
+    return true;
+  } catch (e) {
+    console.error('[UserApi] Update status Firestore error:', e);
+    return false;
+  }
+}
+
+/**
+ * 8. Ubah status user Aktif/Nonaktif di server
  */
 export async function toggleUserStatusOnCloud(userId: string): Promise<boolean> {
   if (isScriptUrlConfigured()) {
@@ -621,7 +893,7 @@ export async function toggleUserStatusOnCloud(userId: string): Promise<boolean> 
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       const cur = snap.data() as UserAccount;
-      const nextStatus = cur.status === 'Nonaktif' ? 'Aktif' : 'Nonaktif';
+      const nextStatus: AccountStatus = cur.status === 'Aktif' ? 'Nonaktif' : 'Aktif';
       await setDoc(docRef, { status: nextStatus, updatedAt: new Date().toISOString() }, { merge: true });
       return true;
     }

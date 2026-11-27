@@ -693,7 +693,7 @@ export const MonitoringMapView: React.FC<MonitoringMapViewProps> = ({
             }
           >
             <GoogleMap
-              mapId="swaraku-monitoring-relawan-map"
+              mapId="DEMO_MAP_ID"
               defaultCenter={INDONESIA_OVERVIEW_CENTER}
               defaultZoom={5}
               gestureHandling="greedy"

@@ -9,7 +9,6 @@ import {
   LogOut,
   CheckCircle2,
   X,
-  Globe,
 } from 'lucide-react';
 import { auth } from './lib/firebase';
 import {
@@ -37,11 +36,15 @@ import {
   deleteUserOnCloud,
   fetchUserProfileById,
   fetchUsersFromCloud,
+  getAccountStatusRejectionMessage,
   loginUserByGoogleEmailOnCloud,
   loginUserOnCloud,
+  registerAccountWithDuplicateCheck,
   toggleUserStatusOnCloud,
   updateUserOnCloud,
   updateUserPhotoOnCloud,
+  updateUserStatusOnCloud,
+  type SignUpAccountPayload,
 } from './services/userApiService';
 import {
   LOCAL_CACHE_KEYS,
@@ -81,6 +84,7 @@ import type {
   VoterTab,
 } from './types/swaraku';
 import type {
+  AccountStatus,
   AspirasiItem,
   DptVoterRecord,
   ElectabilitySurveySubmission,
@@ -285,7 +289,7 @@ export default function App() {
     fetchUserProfileById(saved.id)
       .then((fresh) => {
         if (fresh) {
-          if (fresh.status === 'Nonaktif') {
+          if (fresh.status && fresh.status !== 'Aktif') {
             localStorage.removeItem(STAFF_SESSION_KEY);
             setStaffUser(null);
             return;
@@ -399,10 +403,13 @@ export default function App() {
         setUserAccounts(cloudList);
         const updatedMe = cloudList.find((u) => u.id === staffUser.id);
         if (updatedMe) {
-          if (updatedMe.status === 'Nonaktif') {
+          if (updatedMe.status && updatedMe.status !== 'Aktif') {
             localStorage.removeItem(STAFF_SESSION_KEY);
             setStaffUser(null);
-            notify('Akun Anda telah dinonaktifkan oleh Super Admin.');
+            notify(
+              getAccountStatusRejectionMessage(updatedMe) ||
+                'Akun Anda sedang dinonaktifkan, silakan hubungi koordinator Anda.'
+            );
           } else {
             setStaffUser(updatedMe);
             if (typeof updatedMe.points === 'number') {
@@ -700,6 +707,37 @@ export default function App() {
       notify('Status akun berhasil diperbarui.');
     }
     return ok;
+  };
+
+  const handleChangeStaffStatus = async (
+    userId: string,
+    nextStatus: AccountStatus
+  ): Promise<boolean> => {
+    const ok = await updateUserStatusOnCloud(userId, nextStatus);
+    if (ok) {
+      const fresh = await fetchUsersFromCloud();
+      setUserAccounts(fresh);
+      const msg =
+        nextStatus === 'Aktif'
+          ? 'Akun berhasil diaktifkan dan kini dapat login.'
+          : nextStatus === 'Ditolak'
+          ? 'Pendaftaran akun telah ditolak.'
+          : nextStatus === 'Nonaktif'
+          ? 'Akun berhasil dinonaktifkan.'
+          : 'Status akun diubah menjadi Pending.';
+      notify(msg);
+    } else {
+      notify('Gagal memperbarui status akun ke database.');
+    }
+    return ok;
+  };
+
+  const handleSignUpAccount = async (payload: SignUpAccountPayload) => {
+    const res = await registerAccountWithDuplicateCheck(payload);
+    if (res.success && res.user) {
+      setUserAccounts((prev) => [res.user!, ...prev.filter((u) => u.id !== res.user!.id)]);
+    }
+    return res;
   };
 
   const handleRefreshStaffUsers = async () => {
@@ -1073,6 +1111,7 @@ export default function App() {
           onUpdateUser={handleUpdateStaffUser}
           onDeleteUser={handleDeleteStaffUser}
           onToggleUserStatus={handleToggleStaffStatus}
+          onChangeUserStatus={handleChangeStaffStatus}
           onRefreshUsers={handleRefreshStaffUsers}
           onConnectGoogleAdmin={handleGoogleLogin}
           onAwardPoints={handleAwardPoints}
@@ -1093,7 +1132,6 @@ export default function App() {
           onCheckinCoblos={handleCheckinCoblos}
           onResetDataToZero={handleResetDataToZero}
           onTriggerCloudSync={handleTriggerCloudSync}
-          onOpenWebsiteMode={() => switchDisplayMode('website')}
           locationTracker={locationTracker}
         />
         {toastMessage && (
@@ -1144,10 +1182,10 @@ export default function App() {
           onTimSupportGoogleLogin={handleTimSupportGoogleLogin}
           onRelawanLogin={handleRelawanLogin}
           onRelawanGoogleLogin={handleRelawanGoogleLogin}
+          onSignUpAccount={handleSignUpAccount}
           isSigningIn={isSigningIn}
           authError={authError}
           initialPortalTab={preferredPortalTab}
-          onSwitchToWebsite={() => switchDisplayMode('website')}
         />
         <OfflineIndicator />
       </>
@@ -1165,10 +1203,10 @@ export default function App() {
             onTimSupportGoogleLogin={handleTimSupportGoogleLogin}
             onRelawanLogin={handleRelawanLogin}
             onRelawanGoogleLogin={handleRelawanGoogleLogin}
+            onSignUpAccount={handleSignUpAccount}
             isSigningIn={isSigningIn}
             authError={authError}
             initialPortalTab={preferredPortalTab}
-            onSwitchToWebsite={() => switchDisplayMode('website')}
           />
           <OfflineIndicator />
         </>
@@ -1246,14 +1284,6 @@ export default function App() {
 
         {/* Sidebar Footer Actions */}
         <div className="p-4 border-t border-slate-100 space-y-2.5">
-          <button
-            type="button"
-            onClick={() => switchDisplayMode('website')}
-            className="w-full min-h-[42px] px-4 py-2 rounded-xl text-slate-700 bg-slate-100 hover:bg-slate-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <Globe className="w-4 h-4" />
-            <span>Buka Mode Website</span>
-          </button>
           <PWAInstallButton variant="outline" label="Pasang Aplikasi" className="w-full justify-center min-h-[42px]" />
           <button
             type="button"
@@ -1273,15 +1303,6 @@ export default function App() {
           <span className="font-extrabold text-base text-slate-900 truncate">Swaraku</span>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => switchDisplayMode('website')}
-            className="px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
-            title="Buka Mode Website"
-          >
-            <Globe className="w-3.5 h-3.5" />
-            <span>Web</span>
-          </button>
           <span className="text-xs font-extrabold font-mono tabular-nums text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg">
             {voterProfile.points.toLocaleString('id-ID')} Poin
           </span>

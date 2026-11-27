@@ -9,6 +9,11 @@ import {
 import { SwarakuMapsProvider, SwarakuMapsDiagnosticNotice } from '../maps/SwarakuMapsProvider';
 import { lookupSmartCoordinates } from '../../utils/geocoding';
 import {
+  formatWilayahInput,
+  isRelawanRole,
+  resolvePenginputName,
+} from '../../utils/hierarchyAccess';
+import {
   Search,
   Users,
   CheckCircle2,
@@ -47,6 +52,7 @@ const MapCameraPanHandler: React.FC<{
 interface DatabaseVotersViewProps {
   voterList: VoterOcrRecord[];
   userAccounts?: UserAccount[];
+  currentUser?: UserAccount | null;
   c1Records?: FormC1Upload[];
   b1Records?: FormB1Upload[];
   canAddRelawan?: boolean;
@@ -65,6 +71,7 @@ type DatabaseSubTab =
 export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
   voterList,
   userAccounts = [],
+  currentUser,
   c1Records = [],
   b1Records = [],
   canAddRelawan = false,
@@ -73,6 +80,7 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
   onTriggerCloudSync,
   isSyncingCloud,
 }) => {
+  const isRelawanViewer = isRelawanRole(currentUser?.role);
   const [activeSubTab, setActiveSubTab] = useState<DatabaseSubTab>('daftar_voter');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedKota, setSelectedKota] = useState<string>('Semua');
@@ -435,18 +443,20 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
           <span>Daftar Voter ({filteredVoters.length})</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveSubTab('daftar_relawan')}
-          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-            activeSubTab === 'daftar_relawan'
-              ? 'bg-white text-cyan-900 shadow-xs'
-              : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <UserCheck className="w-4 h-4 text-amber-600" />
-          <span>Daftar Relawan ({totalRelawanCount})</span>
-        </button>
+        {!isRelawanViewer && (
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('daftar_relawan')}
+            className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+              activeSubTab === 'daftar_relawan'
+                ? 'bg-white text-cyan-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <UserCheck className="w-4 h-4 text-amber-600" />
+            <span>Daftar Relawan ({totalRelawanCount})</span>
+          </button>
+        )}
 
         <button
           type="button"
@@ -609,7 +619,7 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
                     <th className="py-3 px-4">Kecamatan</th>
                     <th className="py-3 px-4">Kota / Kabupaten</th>
                     <th className="py-3 px-4">Alamat Lengkap</th>
-                    <th className="py-3 px-4">Penginput</th>
+                    <th className="py-3 px-4">Nama Penginput &amp; Wilayah Input</th>
                     <th className="py-3 px-4 text-center">Detail &amp; Peta</th>
                   </tr>
                 </thead>
@@ -688,10 +698,13 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
                             <p className="text-slate-700 line-clamp-2">{voter.alamat || '-'}</p>
                           </td>
                           <td className="py-3 px-4">
-                            <span className="font-bold text-slate-800 block">
-                              {voter.terdaftarOleh || voter.diinputOlehNama || '-'}
+                            <span className="font-bold text-slate-900 block">
+                              {resolvePenginputName(voter)}
                             </span>
-                            <span className="text-[10px] text-slate-400 font-mono">
+                            <span className="text-[10px] font-semibold text-cyan-800 bg-cyan-50 border border-cyan-200 px-1.5 py-0.5 rounded inline-block mt-0.5">
+                              {formatWilayahInput(voter)}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
                               {voter.waktuDaftar || '-'}
                             </span>
                           </td>
@@ -827,8 +840,12 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
                       <td className="py-3 px-4 text-center">
                         <span
                           className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                            rel.status === 'Nonaktif'
+                            rel.status === 'Pending'
+                              ? 'bg-amber-100 text-amber-800'
+                              : rel.status === 'Ditolak'
                               ? 'bg-rose-100 text-rose-700'
+                              : rel.status === 'Nonaktif'
+                              ? 'bg-slate-200 text-slate-700'
                               : 'bg-emerald-100 text-emerald-700'
                           }`}
                         >
@@ -1048,6 +1065,7 @@ export const DatabaseVotersView: React.FC<DatabaseVotersViewProps> = ({
                   defaultCenter={{ lat: mapModalVoter.resolvedLat, lng: mapModalVoter.resolvedLng }}
                   defaultZoom={16}
                   gestureHandling="greedy"
+                  internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
                   style={{ width: '100%', height: '100%' }}
                 >
                   <MapCameraPanHandler

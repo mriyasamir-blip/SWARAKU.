@@ -190,6 +190,7 @@ export type AdminModuleTab =
   | 'manajemen_user';
 
 export type GpsTrackingState = 'online' | 'background' | 'offline';
+export type AccountStatus = 'Aktif' | 'Pending' | 'Ditolak' | 'Nonaktif';
 
 export interface UserAccount {
   id: string;
@@ -211,7 +212,7 @@ export interface UserAccount {
   noHp?: string;
   fotoUrl?: string;
   password?: string;
-  status?: 'Aktif' | 'Nonaktif';
+  status?: AccountStatus;
   dibuatPada?: string;
   updatedAt?: string;
   // Relasi Korwil (Tim Sukses), Korcam (Kader), & Relawan Binaan

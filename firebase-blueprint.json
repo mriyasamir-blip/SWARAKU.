@@ -63,7 +63,7 @@
         "noHp": { "type": "string", "maxLength": 30 },
         "fotoUrl": { "type": "string", "maxLength": 350000 },
         "password": { "type": "string", "maxLength": 120 },
-        "status": { "type": "string", "enum": ["Aktif", "Nonaktif"] },
+        "status": { "type": "string", "enum": ["Aktif", "Pending", "Ditolak", "Nonaktif"] },
         "dibuatPada": { "type": "string", "maxLength": 80 },
         "updatedAt": { "type": "string", "maxLength": 80 },
         "timSuksesId": { "type": "string", "maxLength": 128 },

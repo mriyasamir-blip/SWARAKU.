@@ -196,21 +196,33 @@ export const VoterDetailModal: React.FC<VoterDetailModalProps> = ({ voter, onClo
             </span>
           </div>
 
-          <div className="sm:col-span-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <span className="text-[11px] text-emerald-700 font-semibold block">
-                Diinput Oleh
-              </span>
-              <span className="font-bold text-slate-900">
-                {voter.terdaftarOleh || voter.diinputOlehNama || '-'}
-              </span>
+          <div className="sm:col-span-2 p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span className="text-[11px] text-emerald-700 font-semibold block">
+                  Nama Penginput
+                </span>
+                <span className="font-bold text-slate-900">
+                  {voter.diinputOlehNama || voter.terdaftarOleh || '-'}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-[11px] text-emerald-700 font-semibold block">
+                  Tanggal Pendaftaran
+                </span>
+                <span className="text-[11px] font-mono font-bold text-slate-800">
+                  {voter.waktuDaftar || '-'}
+                </span>
+              </div>
             </div>
-            <div className="text-right">
+            <div className="pt-2 border-t border-emerald-200/80">
               <span className="text-[11px] text-emerald-700 font-semibold block">
-                Tanggal Pendaftaran
+                Wilayah Input (Kota / Kecamatan / Kelurahan)
               </span>
-              <span className="text-[11px] font-mono font-bold text-slate-800">
-                {voter.waktuDaftar || '-'}
+              <span className="text-xs font-bold text-slate-900">
+                {[voter.kabupatenKota, voter.kecamatan, voter.kelurahan]
+                  .filter((p) => p && p !== '-')
+                  .join(' / ') || '-'}
               </span>
             </div>
           </div>

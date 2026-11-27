@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { UserAccount, UserRole } from '../../types/vore';
+import { AccountStatus, UserAccount, UserRole } from '../../types/vore';
 import { TimSuksesWilayahRecord } from '../../data/petaSuaraData';
 import { lookupSmartCoordinates } from '../../utils/geocoding';
 import { WilayahSelector, type WilayahValue } from '../common/WilayahSelector';
 import { formatWilayahLabel } from '../../data/wilayahIndonesia';
+import { filterManagedAccountsForUser } from '../../utils/hierarchyAccess';
+import { checkAccountDuplicates } from '../../services/userApiService';
 import {
   Users,
   UserPlus,
@@ -28,16 +30,23 @@ import {
   Check,
   RefreshCw,
   Award,
+  Clock,
+  Ban,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface UserRoleManagementViewProps {
   userAccounts: UserAccount[];
   currentUser: UserAccount;
-  mode?: 'full' | 'korcam_relawan';
+  mode?: 'full' | 'korcam_relawan' | 'korwil_team';
   onAddUser: (user: UserAccount) => Promise<boolean | void> | void;
   onUpdateUser?: (user: UserAccount) => Promise<boolean | void> | void;
   onDeleteUser: (userId: string) => Promise<boolean | void> | void;
   onToggleUserStatus: (userId: string) => Promise<boolean | void> | void;
+  onChangeUserStatus?: (
+    userId: string,
+    nextStatus: AccountStatus
+  ) => Promise<boolean | void> | void;
   onSaveTimSukses?: (ts: TimSuksesWilayahRecord) => void;
   onRefreshUsers?: () => Promise<void>;
   onAwardPoints?: (delta: number) => Promise<void> | void;
@@ -53,20 +62,34 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
   onUpdateUser,
   onDeleteUser,
   onToggleUserStatus,
+  onChangeUserStatus,
   onSaveTimSukses,
   onRefreshUsers,
   onAwardPoints,
 }) => {
   const isKorcamRelawanMode = mode === 'korcam_relawan';
+  const isKorwilTeamMode = mode === 'korwil_team';
 
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | UserRole>(
     isKorcamRelawanMode ? 'relawan' : 'all'
   );
+  const [statusFilter, setStatusFilter] = useState<'all' | AccountStatus>('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isRefreshingUsers, setIsRefreshingUsers] = useState(false);
+
+  // Status Action State & Feedback
+  const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
+  const [confirmStatusAction, setConfirmStatusAction] = useState<{
+    user: UserAccount;
+    nextStatus: 'Ditolak' | 'Nonaktif';
+  } | null>(null);
+  const [statusFeedback, setStatusFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   // Edit Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -85,7 +108,7 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
     kelurahan: '',
   });
   const [editNoHp, setEditNoHp] = useState('');
-  const [editStatus, setEditStatus] = useState<'Aktif' | 'Nonaktif'>('Aktif');
+  const [editStatus, setEditStatus] = useState<AccountStatus>('Aktif');
   const [editError, setEditError] = useState<string | null>(null);
 
   // Reset Password Modal State
@@ -98,7 +121,7 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
 
   // Add Form State
   const [formRole, setFormRole] = useState<CreatableRole>(
-    isKorcamRelawanMode ? 'relawan' : 'tim_sukses'
+    isKorcamRelawanMode ? 'relawan' : isKorwilTeamMode ? 'kader' : 'tim_sukses'
   );
   const [formNama, setFormNama] = useState('');
   const [formUsername, setFormUsername] = useState('');
@@ -130,38 +153,73 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
     korcams: UserAccount[];
   } | null>(null);
 
-  // Scoped base list (for Korcam mode, only Relawan under this Korcam or unassigned Relawan)
+  // Strict territorial scoping across ALL statuses (Aktif, Pending, Nonaktif, Ditolak)
   const scopedUsers = useMemo(() => {
-    if (!isKorcamRelawanMode) return userAccounts;
-    return userAccounts.filter(
-      (u) =>
-        u.role === 'relawan' &&
-        (!u.korcamId ||
-          u.korcamId === currentUser.id ||
-          u.korcamNama === currentUser.nama)
-    );
-  }, [userAccounts, isKorcamRelawanMode, currentUser.id, currentUser.nama]);
+    if (isKorcamRelawanMode || isKorwilTeamMode) {
+      return filterManagedAccountsForUser(currentUser, userAccounts);
+    }
+    return userAccounts;
+  }, [userAccounts, isKorcamRelawanMode, isKorwilTeamMode, currentUser]);
 
-  // Statistics
+  const getEffectiveStatus = (u: UserAccount): AccountStatus => u.status || 'Aktif';
+
+  // Statistics (Global & Breakdown per Role + Status)
   const totalUsers = scopedUsers.length;
   const superAdminCount = scopedUsers.filter((u) => u.role === 'super_admin').length;
   const adminCount = scopedUsers.filter((u) => u.role === 'admin').length;
   const korwilCount = scopedUsers.filter((u) => u.role === 'tim_sukses').length;
-  const korcamCount = scopedUsers.filter((u) => u.role === 'kader').length;
-  const relawanCount = scopedUsers.filter((u) => u.role === 'relawan').length;
-  const activeCount = scopedUsers.filter((u) => u.status !== 'Nonaktif').length;
+  const korcamUsers = useMemo(() => scopedUsers.filter((u) => u.role === 'kader'), [scopedUsers]);
+  const relawanUsers = useMemo(() => scopedUsers.filter((u) => u.role === 'relawan'), [scopedUsers]);
+  const korcamCount = korcamUsers.length;
+  const relawanCount = relawanUsers.length;
 
-  // Filtered List
+  const korcamStats = useMemo(
+    () => ({
+      total: korcamUsers.length,
+      aktif: korcamUsers.filter((u) => getEffectiveStatus(u) === 'Aktif').length,
+      pending: korcamUsers.filter((u) => getEffectiveStatus(u) === 'Pending').length,
+      nonaktif: korcamUsers.filter((u) => getEffectiveStatus(u) === 'Nonaktif').length,
+      ditolak: korcamUsers.filter((u) => getEffectiveStatus(u) === 'Ditolak').length,
+    }),
+    [korcamUsers]
+  );
+
+  const relawanStats = useMemo(
+    () => ({
+      total: relawanUsers.length,
+      aktif: relawanUsers.filter((u) => getEffectiveStatus(u) === 'Aktif').length,
+      pending: relawanUsers.filter((u) => getEffectiveStatus(u) === 'Pending').length,
+      nonaktif: relawanUsers.filter((u) => getEffectiveStatus(u) === 'Nonaktif').length,
+      ditolak: relawanUsers.filter((u) => getEffectiveStatus(u) === 'Ditolak').length,
+    }),
+    [relawanUsers]
+  );
+
+  const statusCounts = useMemo(
+    () => ({
+      all: scopedUsers.length,
+      Pending: scopedUsers.filter((u) => getEffectiveStatus(u) === 'Pending').length,
+      Aktif: scopedUsers.filter((u) => getEffectiveStatus(u) === 'Aktif').length,
+      Nonaktif: scopedUsers.filter((u) => getEffectiveStatus(u) === 'Nonaktif').length,
+      Ditolak: scopedUsers.filter((u) => getEffectiveStatus(u) === 'Ditolak').length,
+    }),
+    [scopedUsers]
+  );
+
+  // Filtered List (Pending accounts surfaced at top for rapid coordinator action)
   const filteredUsers = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    return scopedUsers.filter((user) => {
+    const list = scopedUsers.filter((user) => {
       const matchesRole =
         isKorcamRelawanMode || roleFilter === 'all' || user.role === roleFilter;
+      const matchesStatus =
+        statusFilter === 'all' || getEffectiveStatus(user) === statusFilter;
       const matchesSearch =
         !q ||
         user.nama.toLowerCase().includes(q) ||
         user.username.toLowerCase().includes(q) ||
         (user.email && user.email.toLowerCase().includes(q)) ||
+        (user.nik && user.nik.includes(q)) ||
         (user.wilayah && user.wilayah.toLowerCase().includes(q)) ||
         (user.kota && user.kota.toLowerCase().includes(q)) ||
         (user.kecamatan && user.kecamatan.toLowerCase().includes(q)) ||
@@ -170,9 +228,64 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
         (user.noHp && user.noHp.includes(q)) ||
         (user.timSuksesNama && user.timSuksesNama.toLowerCase().includes(q)) ||
         (user.korcamNama && user.korcamNama.toLowerCase().includes(q));
-      return matchesRole && matchesSearch;
+      return matchesRole && matchesStatus && matchesSearch;
     });
-  }, [scopedUsers, isKorcamRelawanMode, roleFilter, searchQuery]);
+
+    const statusOrder: Record<AccountStatus, number> = {
+      Pending: 0,
+      Aktif: 1,
+      Nonaktif: 2,
+      Ditolak: 3,
+    };
+    return [...list].sort(
+      (a, b) => statusOrder[getEffectiveStatus(a)] - statusOrder[getEffectiveStatus(b)]
+    );
+  }, [scopedUsers, isKorcamRelawanMode, roleFilter, statusFilter, searchQuery]);
+
+  const executeStatusChange = async (user: UserAccount, nextStatus: AccountStatus) => {
+    setStatusBusyId(user.id);
+    setStatusFeedback(null);
+    try {
+      if (onChangeUserStatus) {
+        const res = await onChangeUserStatus(user.id, nextStatus);
+        if (res === false) {
+          setStatusFeedback({
+            type: 'error',
+            message: `Gagal memperbarui status akun ${user.nama}.`,
+          });
+          return;
+        }
+      } else if (onUpdateUser) {
+        await onUpdateUser({ ...user, status: nextStatus });
+      } else {
+        await onToggleUserStatus(user.id);
+      }
+
+      const actionLabel =
+        nextStatus === 'Aktif'
+          ? getEffectiveStatus(user) === 'Nonaktif'
+            ? 'diaktifkan kembali'
+            : 'diaktivasi dan kini dapat login'
+          : nextStatus === 'Ditolak'
+          ? 'ditolak pendaftarannya'
+          : nextStatus === 'Nonaktif'
+          ? 'dinonaktifkan'
+          : 'diubah ke Pending';
+
+      setStatusFeedback({
+        type: 'success',
+        message: `Akun ${user.nama} berhasil ${actionLabel}.`,
+      });
+    } catch (err) {
+      setStatusFeedback({
+        type: 'error',
+        message:
+          err instanceof Error ? err.message : `Gagal memperbarui status akun ${user.nama}.`,
+      });
+    } finally {
+      setStatusBusyId(null);
+    }
+  };
 
   const handleAddKorcamRow = () => {
     const newId = `kc-item-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -248,6 +361,10 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
   const handleOpenAddModal = (defaultRole?: CreatableRole) => {
     const targetRole: CreatableRole = isKorcamRelawanMode
       ? 'relawan'
+      : isKorwilTeamMode
+      ? defaultRole === 'relawan'
+        ? 'relawan'
+        : 'kader'
       : defaultRole || 'tim_sukses';
     applyRoleDefaults(targetRole);
     setFormNama('');
@@ -275,20 +392,26 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
     const cleanUsername = formUsername.trim().toLowerCase().replace(/\s+/g, '');
     const cleanEmail = (formEmail.trim() || `${cleanUsername}@swaraku.com`).toLowerCase();
 
-    const isDuplicate = userAccounts.some(
-      (u) =>
-        u.username.toLowerCase() === cleanUsername ||
-        (u.email && u.email.toLowerCase() === cleanEmail)
+    const dupCheck = checkAccountDuplicates(
+      {
+        nama: formNama.trim(),
+        username: cleanUsername,
+        email: cleanEmail,
+        noHp: formNoHp.trim(),
+      },
+      userAccounts
     );
 
-    if (isDuplicate) {
-      setFormError(
-        `Username "${cleanUsername}" atau email "${cleanEmail}" sudah terdaftar. Gunakan yang lain.`
-      );
+    if (dupCheck.hasDuplicate) {
+      setFormError(dupCheck.message);
       return;
     }
 
-    const effectiveRole: CreatableRole = isKorcamRelawanMode ? 'relawan' : formRole;
+    const effectiveRole: CreatableRole = isKorcamRelawanMode
+      ? 'relawan'
+      : isKorwilTeamMode && formRole !== 'kader' && formRole !== 'relawan'
+      ? 'kader'
+      : formRole;
     const validKorcams =
       effectiveRole === 'tim_sukses'
         ? korcamInputs.filter((k) => k.nama.trim().length > 0)
@@ -646,32 +769,69 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Inline Status Action Feedback */}
+      {statusFeedback && (
+        <div
+          className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 text-xs font-bold ${
+            statusFeedback.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-rose-50 border-rose-200 text-rose-900'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {statusFeedback.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <span>{statusFeedback.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStatusFeedback(null)}
+            className="text-slate-400 hover:text-slate-700 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Top Banner */}
       <div className="p-6 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl border border-indigo-700/50 shadow-md space-y-4 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
               <span className="text-[10px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2.5 py-0.5 rounded-full font-mono">
-                {isKorcamRelawanMode ? 'KHUSUS KORCAM' : 'ADMIN & SUPERADMIN'}
+                {isKorcamRelawanMode
+                  ? 'KHUSUS KORCAM'
+                  : isKorwilTeamMode
+                  ? 'KHUSUS KORWIL'
+                  : 'ADMIN & SUPERADMIN'}
               </span>
               <span className="text-xs text-slate-300 font-bold flex items-center gap-1">
                 <Sparkles className="w-3.5 h-3.5 text-amber-300" />
                 <span>
                   {isKorcamRelawanMode
-                    ? 'Manajemen Relawan Tanpa Batas · Auto Whitelist Login'
+                    ? `Kecamatan ${currentUser.kecamatan || currentUser.wilayah}`
+                    : isKorwilTeamMode
+                    ? `Wilayah ${currentUser.kota || currentUser.wilayah}`
                     : 'Manajemen Hak Akses Korwil, Korcam, Relawan & Admin'}
                 </span>
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
               {isKorcamRelawanMode
-                ? 'Kelola User Relawan Wilayah Anda'
+                ? 'Kelola Relawan'
+                : isKorwilTeamMode
+                ? 'Kelola Korcam dan Relawan'
                 : 'Kelola Role & User Akun (Korwil, Korcam & Relawan)'}
             </h1>
             <p className="text-xs text-slate-300 max-w-2xl mt-1 leading-relaxed">
               {isKorcamRelawanMode
-                ? 'Tambahkan akun Relawan sebanyak yang dibutuhkan di Kelurahan/Kecamatan Anda. Akun yang dibuat langsung aktif di halaman Login Relawan (manual & SSO Google), tersinkron ke Monitoring Relawan, dan memberikan +25 Poin otomatis.'
+                ? 'Kelola seluruh Relawan di kecamatan penugasan Anda. Aktivasi atau tolak pendaftar mandiri (Pending), nonaktifkan atau aktifkan kembali akun secara langsung di aplikasi.'
+                : isKorwilTeamMode
+                ? 'Kelola seluruh akun Korcam dan Relawan dalam wilayah cakupan Kota/Wilayah Anda. Aktivasi, tolak, atau kelola status akun secara langsung tanpa email.'
                 : 'Kelola seluruh akun terdaftar (Whitelist) untuk Korwil, Korcam, Relawan, dan Admin. Daftarkan email Google untuk akses SSO Tim Support & Relawan serta atur struktur wilayah Kota → Kecamatan → Kelurahan.'}
             </p>
           </div>
@@ -707,6 +867,25 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 <UserPlus className="w-4 h-4" />
                 <span>+ Tambah Relawan (+25 Poin)</span>
               </button>
+            ) : isKorwilTeamMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddModal('kader')}
+                  className="px-3 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer"
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>+ Korcam</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddModal('relawan')}
+                  className="px-3 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>+ Relawan</span>
+                </button>
+              </>
             ) : (
               <>
                 <button
@@ -740,30 +919,116 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
 
         {/* Quick KPI Stat Counter */}
         {isKorcamRelawanMode ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 border-t border-white/10 text-xs">
-            <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
-              <span className="text-[10px] text-amber-300 block font-mono">Total Relawan Binaan</span>
-              <span className="text-xl font-black text-white font-mono mt-0.5 block">
-                {relawanCount}
-              </span>
-              <span className="text-[10px] text-slate-300">Tanpa batas jumlah akun</span>
+          <div className="space-y-3 pt-2 border-t border-white/10 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
+                <span className="text-[10px] text-amber-300 block font-mono uppercase">
+                  Total Jumlah Relawan
+                </span>
+                <span className="text-2xl font-black text-white font-mono mt-0.5 block">
+                  {relawanStats.total}
+                </span>
+                <span className="text-[10px] text-slate-300">
+                  Kec. {currentUser.kecamatan || '-'}
+                </span>
+              </div>
+              <div className="p-3 bg-emerald-500/15 rounded-2xl border border-emerald-400/30">
+                <span className="text-[10px] text-emerald-300 block font-mono uppercase">
+                  Relawan Aktif
+                </span>
+                <span className="text-2xl font-black text-emerald-300 font-mono mt-0.5 block">
+                  {relawanStats.aktif}
+                </span>
+                <span className="text-[10px] text-emerald-200/80">Dapat login &amp; bertugas</span>
+              </div>
+              <div className="p-3 bg-amber-500/15 rounded-2xl border border-amber-400/30">
+                <span className="text-[10px] text-amber-300 block font-mono uppercase">
+                  Menunggu Aktivasi
+                </span>
+                <span className="text-2xl font-black text-amber-300 font-mono mt-0.5 block">
+                  {relawanStats.pending}
+                </span>
+                <span className="text-[10px] text-amber-200/80">Pendaftar baru (Pending)</span>
+              </div>
+              <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
+                <span className="text-[10px] text-rose-300 block font-mono uppercase">
+                  Nonaktif / Ditolak
+                </span>
+                <span className="text-2xl font-black text-rose-300 font-mono mt-0.5 block">
+                  {relawanStats.nonaktif + relawanStats.ditolak}
+                </span>
+                <span className="text-[10px] text-slate-300">
+                  {relawanStats.nonaktif} Nonaktif · {relawanStats.ditolak} Ditolak
+                </span>
+              </div>
             </div>
-            <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
-              <span className="text-[10px] text-emerald-300 block font-mono">Status Aktif Login</span>
-              <span className="text-xl font-black text-emerald-300 font-mono mt-0.5 block">
-                {activeCount}
-              </span>
-              <span className="text-[10px] text-slate-300">Terverifikasi di Whitelist</span>
+          </div>
+        ) : isKorwilTeamMode ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 pt-2 border-t border-white/10 text-xs">
+            {/* Ringkasan Korcam */}
+            <div className="p-4 bg-white/5 rounded-2xl border border-emerald-400/25 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+                  <UserCheck className="w-4 h-4" />
+                  <span>Total Jumlah Korcam</span>
+                </span>
+                <span className="text-2xl font-black text-white font-mono">
+                  {korcamStats.total}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="p-2 rounded-xl bg-emerald-500/15 border border-emerald-400/25">
+                  <span className="block text-[10px] text-emerald-200">Aktif</span>
+                  <span className="text-base font-black text-emerald-300 font-mono">
+                    {korcamStats.aktif}
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-400/25">
+                  <span className="block text-[10px] text-amber-200">Pending</span>
+                  <span className="text-base font-black text-amber-300 font-mono">
+                    {korcamStats.pending}
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-rose-500/15 border border-rose-400/25">
+                  <span className="block text-[10px] text-rose-200">Nonaktif</span>
+                  <span className="text-base font-black text-rose-300 font-mono">
+                    {korcamStats.nonaktif}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="p-3 bg-white/5 rounded-2xl border border-white/10 col-span-2 sm:col-span-1">
-              <span className="text-[10px] text-cyan-300 block font-mono">Wilayah Tugas Korcam</span>
-              <span className="text-sm font-black text-white mt-1 block truncate">
-                {formatWilayahLabel({
-                  kota: currentUser.kota || '',
-                  kecamatan: currentUser.kecamatan || '',
-                  kelurahan: currentUser.kelurahan || '',
-                }) || currentUser.wilayah}
-              </span>
+
+            {/* Ringkasan Relawan */}
+            <div className="p-4 bg-white/5 rounded-2xl border border-amber-400/25 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                  <Users className="w-4 h-4" />
+                  <span>Total Jumlah Relawan</span>
+                </span>
+                <span className="text-2xl font-black text-white font-mono">
+                  {relawanStats.total}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="p-2 rounded-xl bg-emerald-500/15 border border-emerald-400/25">
+                  <span className="block text-[10px] text-emerald-200">Aktif</span>
+                  <span className="text-base font-black text-emerald-300 font-mono">
+                    {relawanStats.aktif}
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-400/25">
+                  <span className="block text-[10px] text-amber-200">Pending</span>
+                  <span className="text-base font-black text-amber-300 font-mono">
+                    {relawanStats.pending}
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-rose-500/15 border border-rose-400/25">
+                  <span className="block text-[10px] text-rose-200">Nonaktif</span>
+                  <span className="text-base font-black text-rose-300 font-mono">
+                    {relawanStats.nonaktif}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         ) : (
@@ -773,7 +1038,9 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
               <span className="text-xl font-black text-white font-mono mt-0.5 block">
                 {totalUsers}
               </span>
-              <span className="text-[10px] text-teal-300">Whitelist Aktif</span>
+              <span className="text-[10px] text-amber-300">
+                {statusCounts.Pending} Pending Aktivasi
+              </span>
             </div>
             <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
               <span className="text-[10px] text-purple-300 block font-mono">Admin &amp; Super</span>
@@ -796,106 +1063,143 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
               <span className="text-xl font-black text-emerald-300 font-mono mt-0.5 block">
                 {korcamCount}
               </span>
-              <span className="text-[10px] text-slate-300">Koordinator Kecamatan</span>
+              <span className="text-[10px] text-slate-300">
+                {korcamStats.aktif} Aktif · {korcamStats.pending} Pending
+              </span>
             </div>
             <div className="p-3 bg-white/5 rounded-2xl border border-white/10 col-span-2 sm:col-span-1">
               <span className="text-[10px] text-amber-300 block font-mono">Relawan</span>
               <span className="text-xl font-black text-amber-300 font-mono mt-0.5 block">
                 {relawanCount}
               </span>
-              <span className="text-[10px] text-slate-300">Penggerak Lapangan</span>
+              <span className="text-[10px] text-slate-300">
+                {relawanStats.aktif} Aktif · {relawanStats.pending} Pending
+              </span>
             </div>
           </div>
         )}
       </div>
 
-      {/* Control Bar: Search & Role Filters */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-2xs">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-          <input
-            type="text"
-            placeholder="Cari berdasarkan Nama, Username, Email, Kelurahan, Kecamatan, Kota, atau No HP..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:border-cyan-500 font-medium"
-          />
+      {/* Control Bar: Search, Role Filters & Status Filters */}
+      <div className="space-y-3 bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-2xs">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+            <input
+              type="text"
+              placeholder="Cari berdasarkan Nama, Username, Email, NIK, Kelurahan, Kecamatan, Kota, atau No HP..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:border-cyan-500 font-medium"
+            />
+          </div>
+
+          {!isKorcamRelawanMode && (
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+              <button
+                type="button"
+                onClick={() => setRoleFilter('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                  roleFilter === 'all'
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Semua ({totalUsers})
+              </button>
+              {!isKorwilTeamMode && (
+                <button
+                  type="button"
+                  onClick={() => setRoleFilter('tim_sukses')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                    roleFilter === 'tim_sukses'
+                      ? 'bg-cyan-700 text-white'
+                      : 'bg-cyan-50 text-cyan-800 hover:bg-cyan-100 border border-cyan-200'
+                  }`}
+                >
+                  Korwil ({korwilCount})
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setRoleFilter('kader')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                  roleFilter === 'kader'
+                    ? 'bg-emerald-700 text-white'
+                    : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
+                }`}
+              >
+                Korcam ({korcamCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoleFilter('relawan')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                  roleFilter === 'relawan'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+                }`}
+              >
+                Relawan ({relawanCount})
+              </button>
+              {!isKorwilTeamMode && (
+                <button
+                  type="button"
+                  onClick={() => setRoleFilter('admin')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                    roleFilter === 'admin'
+                      ? 'bg-indigo-700 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Admin ({adminCount})
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
-        {!isKorcamRelawanMode && (
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+        {/* Status Filter Strip */}
+        <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-100">
+          <span className="text-[11px] font-bold text-slate-500 mr-1">Filter Status:</span>
+          {(
+            [
+              { key: 'all', label: `Semua (${statusCounts.all})`, activeCls: 'bg-slate-900 text-white', idleCls: 'bg-slate-100 text-slate-600 hover:bg-slate-200' },
+              { key: 'Pending', label: `Menunggu Aktivasi (${statusCounts.Pending})`, activeCls: 'bg-amber-600 text-white', idleCls: 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100' },
+              { key: 'Aktif', label: `Aktif (${statusCounts.Aktif})`, activeCls: 'bg-emerald-600 text-white', idleCls: 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100' },
+              { key: 'Nonaktif', label: `Nonaktif (${statusCounts.Nonaktif})`, activeCls: 'bg-slate-700 text-white', idleCls: 'bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200' },
+              { key: 'Ditolak', label: `Ditolak (${statusCounts.Ditolak})`, activeCls: 'bg-rose-600 text-white', idleCls: 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100' },
+            ] as const
+          ).map((item) => (
             <button
+              key={item.key}
               type="button"
-              onClick={() => setRoleFilter('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
-                roleFilter === 'all'
-                  ? 'bg-slate-900 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              onClick={() => setStatusFilter(item.key)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                statusFilter === item.key ? item.activeCls : item.idleCls
               }`}
             >
-              Semua ({totalUsers})
+              {item.label}
             </button>
-            <button
-              type="button"
-              onClick={() => setRoleFilter('tim_sukses')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
-                roleFilter === 'tim_sukses'
-                  ? 'bg-cyan-700 text-white'
-                  : 'bg-cyan-50 text-cyan-800 hover:bg-cyan-100 border border-cyan-200'
-              }`}
-            >
-              Korwil ({korwilCount})
-            </button>
-            <button
-              type="button"
-              onClick={() => setRoleFilter('kader')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
-                roleFilter === 'kader'
-                  ? 'bg-emerald-700 text-white'
-                  : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
-              }`}
-            >
-              Korcam ({korcamCount})
-            </button>
-            <button
-              type="button"
-              onClick={() => setRoleFilter('relawan')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
-                roleFilter === 'relawan'
-                  ? 'bg-amber-600 text-white'
-                  : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
-              }`}
-            >
-              Relawan ({relawanCount})
-            </button>
-            <button
-              type="button"
-              onClick={() => setRoleFilter('admin')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
-                roleFilter === 'admin'
-                  ? 'bg-indigo-700 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              Admin ({adminCount})
-            </button>
-          </div>
-        )}
+          ))}
+        </div>
       </div>
 
       {/* User Accounts Table */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+        <div className="p-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4 text-cyan-700" />
             <h3 className="text-sm font-black text-slate-900">
               {isKorcamRelawanMode
-                ? `Daftar Akun Relawan Terdaftar (${filteredUsers.length})`
+                ? `Daftar Relawan Kecamatan ${currentUser.kecamatan || ''} (${filteredUsers.length})`
+                : isKorwilTeamMode
+                ? `Daftar Korcam & Relawan Wilayah ${currentUser.kota || currentUser.wilayah} (${filteredUsers.length})`
                 : `Daftar Akun Whitelist SWARAKU (${filteredUsers.length})`}
             </h3>
           </div>
           <span className="text-[11px] text-slate-500 font-medium">
-            Tersinkron ke Login &amp; Monitoring Relawan
+            Kontrol Aktivasi &amp; Status Akun Langsung di Aplikasi
           </span>
         </div>
 
@@ -906,13 +1210,13 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 <th className="p-3.5">Pengguna &amp; Identitas</th>
                 <th className="p-3.5">Role</th>
                 <th className="p-3.5 bg-purple-50/60 text-purple-900 font-bold">
-                  Kredensial Login (Whitelist)
+                  Kredensial Login
                 </th>
                 <th className="p-3.5">Wilayah Tugas (Kota / Kec / Kel)</th>
                 <th className="p-3.5">Kontak WhatsApp</th>
                 <th className="p-3.5 text-center">Poin</th>
-                <th className="p-3.5 text-center">Status</th>
-                <th className="p-3.5 text-center">Aksi</th>
+                <th className="p-3.5 text-center">Status Akun</th>
+                <th className="p-3.5 text-center">Kontrol &amp; Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -920,7 +1224,9 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-slate-400">
                     {isKorcamRelawanMode
-                      ? 'Belum ada akun Relawan terdaftar. Klik "+ Tambah Relawan" untuk menambahkan.'
+                      ? 'Belum ada akun Relawan pada filter ini di kecamatan penugasan Anda.'
+                      : isKorwilTeamMode
+                      ? 'Belum ada akun Korcam atau Relawan pada filter ini di wilayah penugasan Anda.'
                       : 'Tidak ada akun pengguna yang sesuai dengan filter pencarian.'}
                   </td>
                 </tr>
@@ -928,7 +1234,8 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 filteredUsers.map((user) => {
                   const isCurrent = user.id === currentUser.id;
                   const isProtectedSuperAdmin = user.role === 'super_admin';
-                  const isActive = user.status !== 'Nonaktif';
+                  const status = getEffectiveStatus(user);
+                  const isBusy = statusBusyId === user.id;
                   const wilayahLine =
                     formatWilayahLabel({
                       kota: user.kota || '',
@@ -937,7 +1244,12 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                     }) || user.wilayah;
 
                   return (
-                    <tr key={user.id} className="hover:bg-slate-50/70 transition-colors">
+                    <tr
+                      key={user.id}
+                      className={`hover:bg-slate-50/70 transition-colors ${
+                        status === 'Pending' ? 'bg-amber-50/35' : ''
+                      }`}
+                    >
                       {/* Name & Identitas */}
                       <td className="p-3.5">
                         <div className="flex items-center gap-3">
@@ -976,6 +1288,11 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                             <span className="text-[10px] text-slate-500 block">
                               {user.jabatan || '-'}
                             </span>
+                            {user.nik && (
+                              <span className="text-[10px] text-slate-500 font-mono block">
+                                NIK: {user.nik}
+                              </span>
+                            )}
                             {user.korcamNama && (
                               <span className="text-[10px] text-emerald-700 font-semibold block">
                                 Korcam: {user.korcamNama}
@@ -1084,67 +1401,138 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                         </span>
                       </td>
 
-                      {/* Status */}
+                      {/* Status Badge */}
                       <td className="p-3.5 text-center">
-                        <button
-                          type="button"
-                          disabled={isProtectedSuperAdmin}
-                          onClick={() => onToggleUserStatus(user.id)}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
-                            isProtectedSuperAdmin
-                              ? 'bg-purple-100 text-purple-800 cursor-default'
-                              : isActive
-                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 cursor-pointer'
-                              : 'bg-rose-100 text-rose-800 hover:bg-rose-200 cursor-pointer'
-                          }`}
-                        >
-                          {isActive ? (
-                            <>
-                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                              <span>Aktif</span>
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="w-3 h-3 text-rose-600" />
-                              <span>Nonaktif</span>
-                            </>
-                          )}
-                        </button>
+                        {status === 'Aktif' && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 whitespace-nowrap">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            <span>Aktif</span>
+                          </span>
+                        )}
+                        {status === 'Pending' && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 whitespace-nowrap">
+                            <Clock className="w-3 h-3 text-amber-600" />
+                            <span>Pending</span>
+                          </span>
+                        )}
+                        {status === 'Ditolak' && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200 whitespace-nowrap">
+                            <Ban className="w-3 h-3 text-rose-600" />
+                            <span>Ditolak</span>
+                          </span>
+                        )}
+                        {status === 'Nonaktif' && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700 border border-slate-300 whitespace-nowrap">
+                            <XCircle className="w-3 h-3 text-slate-600" />
+                            <span>Nonaktif</span>
+                          </span>
+                        )}
                       </td>
 
-                      {/* Actions */}
+                      {/* Status Control & Actions */}
                       <td className="p-3.5 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditModal(user)}
-                            className="p-1.5 text-cyan-700 hover:text-cyan-950 hover:bg-cyan-50 rounded-lg transition-colors cursor-pointer"
-                            title="Edit Data User"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenResetModal(user)}
-                            className="p-1.5 text-purple-700 hover:text-purple-950 hover:bg-purple-50 rounded-lg transition-colors cursor-pointer"
-                            title="Reset Password"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                          </button>
-                          {isProtectedSuperAdmin || isCurrent ? (
-                            <span className="text-[10px] text-slate-400 font-mono px-1">
-                              Dilindungi
-                            </span>
-                          ) : (
+                        <div className="flex flex-col items-center gap-1.5">
+                          {/* Primary Status Buttons */}
+                          {!isProtectedSuperAdmin && !isCurrent && (
+                            <div className="flex items-center justify-center gap-1 flex-wrap">
+                              {status === 'Pending' && (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() => executeStatusChange(user, 'Aktif')}
+                                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-[10px] inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                  >
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    <span>{isBusy ? '...' : 'Aktivasi'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() =>
+                                      setConfirmStatusAction({ user, nextStatus: 'Ditolak' })
+                                    }
+                                    className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold text-[10px] inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                  >
+                                    <Ban className="w-3 h-3" />
+                                    <span>Tolak</span>
+                                  </button>
+                                </>
+                              )}
+
+                              {status === 'Aktif' && (
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() =>
+                                    setConfirmStatusAction({ user, nextStatus: 'Nonaktif' })
+                                  }
+                                  className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 disabled:opacity-50 text-rose-700 font-bold text-[10px] inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                >
+                                  <XCircle className="w-3 h-3" />
+                                  <span>Nonaktifkan</span>
+                                </button>
+                              )}
+
+                              {status === 'Nonaktif' && (
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => executeStatusChange(user, 'Aktif')}
+                                  className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-[10px] inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                >
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>{isBusy ? '...' : 'Aktifkan Kembali'}</span>
+                                </button>
+                              )}
+
+                              {status === 'Ditolak' && (
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => executeStatusChange(user, 'Aktif')}
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 disabled:opacity-50 text-emerald-700 font-bold text-[10px] inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                >
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>{isBusy ? '...' : 'Aktivasi'}</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Secondary Edit/Reset/Delete Row */}
+                          <div className="flex items-center justify-center gap-1">
                             <button
                               type="button"
-                              onClick={() => setConfirmDeleteUser(user)}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                              title="Hapus Akun"
+                              onClick={() => handleOpenEditModal(user)}
+                              className="p-1 text-cyan-700 hover:text-cyan-950 hover:bg-cyan-50 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Data User"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Edit2 className="w-3.5 h-3.5" />
                             </button>
-                          )}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenResetModal(user)}
+                              className="p-1 text-purple-700 hover:text-purple-950 hover:bg-purple-50 rounded-lg transition-colors cursor-pointer"
+                              title="Reset Password"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                            </button>
+                            {isProtectedSuperAdmin || isCurrent ? (
+                              <span className="text-[10px] text-slate-400 font-mono px-1">
+                                Dilindungi
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteUser(user)}
+                                className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                title="Hapus Akun"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -1199,15 +1587,19 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                   <label className="text-xs font-bold text-slate-800 block mb-1.5">
                     Pilih Role Pengguna:
                   </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className={`grid grid-cols-2 ${isKorwilTeamMode ? 'sm:grid-cols-2' : 'sm:grid-cols-4'} gap-2`}>
                     {[
-                      {
-                        role: 'tim_sukses' as CreatableRole,
-                        label: 'Korwil',
-                        sub: 'Koord. Wilayah',
-                        icon: Building2,
-                        activeClass: 'border-cyan-600 bg-cyan-50/70 ring-2 ring-cyan-200',
-                      },
+                      ...(!isKorwilTeamMode
+                        ? [
+                            {
+                              role: 'tim_sukses' as CreatableRole,
+                              label: 'Korwil',
+                              sub: 'Koord. Wilayah',
+                              icon: Building2,
+                              activeClass: 'border-cyan-600 bg-cyan-50/70 ring-2 ring-cyan-200',
+                            },
+                          ]
+                        : []),
                       {
                         role: 'kader' as CreatableRole,
                         label: 'Korcam',
@@ -1222,13 +1614,17 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                         icon: Users,
                         activeClass: 'border-amber-600 bg-amber-50/70 ring-2 ring-amber-200',
                       },
-                      {
-                        role: 'admin' as CreatableRole,
-                        label: 'Admin',
-                        sub: 'Operasional',
-                        icon: Shield,
-                        activeClass: 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-200',
-                      },
+                      ...(!isKorwilTeamMode
+                        ? [
+                            {
+                              role: 'admin' as CreatableRole,
+                              label: 'Admin',
+                              sub: 'Operasional',
+                              icon: Shield,
+                              activeClass: 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-200',
+                            },
+                          ]
+                        : []),
                     ].map((opt) => {
                       const Icon = opt.icon;
                       const active = formRole === opt.role;
@@ -1557,11 +1953,31 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                   <input
                     type="radio"
                     name="editStatus"
+                    checked={editStatus === 'Pending'}
+                    onChange={() => setEditStatus('Pending')}
+                    className="accent-amber-600"
+                  />
+                  <span className="text-amber-700 font-bold">Pending</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                  <input
+                    type="radio"
+                    name="editStatus"
                     checked={editStatus === 'Nonaktif'}
                     onChange={() => setEditStatus('Nonaktif')}
+                    className="accent-slate-600"
+                  />
+                  <span className="text-slate-700 font-bold">Nonaktif</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                  <input
+                    type="radio"
+                    name="editStatus"
+                    checked={editStatus === 'Ditolak'}
+                    onChange={() => setEditStatus('Ditolak')}
                     className="accent-rose-600"
                   />
-                  <span className="text-rose-700 font-bold">Nonaktif</span>
+                  <span className="text-rose-700 font-bold">Ditolak</span>
                 </label>
               </div>
 
@@ -1792,6 +2208,71 @@ export const UserRoleManagementView: React.FC<UserRoleManagementViewProps> = ({
                 className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs cursor-pointer"
               >
                 Selesai
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Konfirmasi Tolak / Nonaktifkan Akun */}
+      {confirmStatusAction && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl border border-slate-200">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  {confirmStatusAction.nextStatus === 'Ditolak'
+                    ? 'Tolak Pendaftaran Akun?'
+                    : 'Nonaktifkan Akun Ini?'}
+                </h3>
+                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                  {confirmStatusAction.nextStatus === 'Ditolak' ? (
+                    <>
+                      Pendaftaran akun{' '}
+                      <span className="font-bold text-slate-900">
+                        {confirmStatusAction.user.nama}
+                      </span>{' '}
+                      (@{confirmStatusAction.user.username}) akan ditolak. Pengguna tidak dapat
+                      login dan akan melihat pesan penolakan dari koordinator wilayah.
+                    </>
+                  ) : (
+                    <>
+                      Akun{' '}
+                      <span className="font-bold text-slate-900">
+                        {confirmStatusAction.user.nama}
+                      </span>{' '}
+                      (@{confirmStatusAction.user.username}) akan dinonaktifkan sementara dan
+                      tidak dapat mengakses aplikasi hingga diaktifkan kembali.
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={statusBusyId === confirmStatusAction.user.id}
+                onClick={() => setConfirmStatusAction(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={statusBusyId === confirmStatusAction.user.id}
+                onClick={async () => {
+                  const target = confirmStatusAction;
+                  setConfirmStatusAction(null);
+                  await executeStatusChange(target.user, target.nextStatus);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 text-white text-xs font-bold cursor-pointer"
+              >
+                {confirmStatusAction.nextStatus === 'Ditolak'
+                  ? 'Ya, Tolak Pendaftaran'
+                  : 'Ya, Nonaktifkan'}
               </button>
             </div>
           </div>

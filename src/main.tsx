@@ -19,6 +19,7 @@ interface GlobalMapsErrorState {
   code: MapsErrorCode;
   rawMessage: string;
   hostname: string;
+  origin: string;
 }
 
 declare global {
@@ -28,11 +29,26 @@ declare global {
   }
 }
 
+const NON_QUOTA_CONFIG_ERRORS = new Set<MapsErrorCode>([
+  'referer_not_allowed',
+  'api_not_activated',
+  'invalid_key',
+  'expired_key',
+  'no_api_keys',
+  'project_error',
+]);
+
 function recordMapsError(code: MapsErrorCode, rawMessage: string) {
+  const existing = window.__SWARAKU_MAPS_ERROR__;
+  // Jangan timpa error spesifik (misalnya referer_not_allowed) dengan auth_failure generik
+  if (code === 'auth_failure' && existing && existing.code !== 'auth_failure') {
+    return;
+  }
   const detail: GlobalMapsErrorState = {
     code,
     rawMessage,
     hostname: typeof window !== 'undefined' ? window.location.hostname : '',
+    origin: typeof window !== 'undefined' ? window.location.origin : '',
   };
   window.__SWARAKU_MAPS_ERROR__ = detail;
   window.dispatchEvent(new CustomEvent('gmp-map-error', { detail }));
@@ -40,8 +56,11 @@ function recordMapsError(code: MapsErrorCode, rawMessage: string) {
 
 // Google Maps Platform Client-Side Quota & Auth Failure Listener (Demo/GHP Key Case A)
 window.gm_authFailure = () => {
-  window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+  const existingCode = window.__SWARAKU_MAPS_ERROR__?.code;
   recordMapsError('auth_failure', 'gm_authFailure');
+  if (!existingCode || !NON_QUOTA_CONFIG_ERRORS.has(existingCode)) {
+    window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+  }
 };
 
 const origConsoleError = console.error;
