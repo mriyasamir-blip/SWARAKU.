@@ -53,7 +53,7 @@ import { UserRoleManagementView } from '../admin/UserRoleManagementView';
 import { MonitoringMapView } from '../MonitoringMapView';
 import { SuperadminView } from './SuperadminView';
 import { EventLocationMap } from '../maps/EventLocationMap';
-import { PWAInstallButton } from '../pwa/PWAInstallButton';
+import { RealtimeClockBanner } from '../common/RealtimeClockBanner';
 import { isSuperAdminEmail } from '../../services/swarakuFirestore';
 import { AspirasiScreen } from '../mobile/screens/AspirasiScreen';
 import { MonitoringPetaSuaraScreen } from '../mobile/screens/MonitoringPetaSuaraScreen';
@@ -812,12 +812,7 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
         </nav>
 
         {/* Footer Actions */}
-        <div className="p-4 border-t border-slate-100 space-y-2">
-          <PWAInstallButton
-            variant="outline"
-            label="Pasang Aplikasi"
-            className="w-full justify-center min-h-[40px]"
-          />
+        <div className="p-4 border-t border-slate-100">
           <button
             type="button"
             onClick={onLogout}
@@ -870,7 +865,6 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
           >
             {roleMeta.label}
           </span>
-          <PWAInstallButton variant="compact" label="App" />
         </div>
       </header>
 
@@ -949,6 +943,9 @@ export const StaffPortalApp: React.FC<StaffPortalAppProps> = ({
           {/* 1. BERANDA */}
           {activeTab === 'beranda' && (
             <div className="space-y-6">
+              {/* Tanggal & Jam Real-Time */}
+              <RealtimeClockBanner />
+
               {/* Identity Hero Card */}
               <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-4 min-w-0">

@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
 import { VoterProfile, UserAccount } from '../../../types/vore';
-import { PWAInstallButton } from '../../pwa/PWAInstallButton';
 import {
   ShieldCheck,
   Lock,
@@ -10,7 +9,6 @@ import {
   Settings,
   Eye,
   EyeOff,
-  Smartphone,
   UserPlus,
   LogOut,
   Building2,
@@ -583,20 +581,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             {privacyConsentActive ? 'Aktif (Diberikan)' : 'Dicabut'}
           </button>
         </div>
-      </div>
-
-      {/* Instalasi Aplikasi PWA */}
-      <div className="p-4 bg-white rounded-3xl border border-slate-200/80 shadow-xs flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-10 h-10 rounded-2xl bg-cyan-50 text-cyan-700 flex items-center justify-center shrink-0 border border-cyan-100">
-            <Smartphone className="w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="text-xs font-bold text-slate-900">SWARAKU Apps (PWA)</h4>
-            <p className="text-[11px] text-slate-500">Pasang aplikasi di layar utama perangkat</p>
-          </div>
-        </div>
-        <PWAInstallButton label="Download App" />
       </div>
 
       {/* Tombol Keluar / Logout Akun */}

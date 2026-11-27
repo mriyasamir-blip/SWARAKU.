@@ -25,7 +25,7 @@ import type {
   VoterDoc,
 } from '../../types/swaraku';
 import { EventLocationMap } from '../maps/EventLocationMap';
-import { PWAInstallButton } from '../pwa/PWAInstallButton';
+import { RealtimeClockBanner } from '../common/RealtimeClockBanner';
 
 // ==========================================
 // 1. BERANDA: KANTONG POIN, INFO CALEG & KATALOG REWARD
@@ -75,6 +75,9 @@ export const VoterBerandaView: React.FC<VoterBerandaViewProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Tanggal & Jam Real-Time */}
+      <RealtimeClockBanner />
+
       {/* Kantong Poin Hero Card */}
       <section className="rounded-3xl bg-gradient-to-br from-blue-700 via-blue-800 to-slate-900 text-white p-6 sm:p-7 shadow-md">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -817,8 +820,7 @@ export const VoterProfileView: React.FC<VoterProfileViewProps> = ({
         </form>
       </section>
 
-      <section className="rounded-2xl bg-white border border-slate-200 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <PWAInstallButton variant="outline" label="Pasang / Cek Status PWA" />
+      <section className="rounded-2xl bg-white border border-slate-200 p-5 flex justify-end">
         <button
           type="button"
           onClick={() => onLogout()}

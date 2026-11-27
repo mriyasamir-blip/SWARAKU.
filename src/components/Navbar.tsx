@@ -19,7 +19,6 @@ import {
   Globe,
   RefreshCw,
 } from 'lucide-react';
-import { PWAInstallButton } from './pwa/PWAInstallButton';
 import { SwarakuLogo } from './common/SwarakuLogo';
 
 interface NavbarProps {
@@ -193,12 +192,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )
             )}
-
-            {/* Install Button with callback to set device */}
-            <PWAInstallButton
-              label="Download App"
-              onSelectDevice={(os) => onDeviceOSChange(os)}
-            />
 
             {/* Tombol Kembali ke Halaman Website */}
             {onOpenWebsite && (
@@ -381,9 +374,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span>Halaman Website</span>
             </button>
           )}
-
-          {/* In-App PWA Install / Download Button */}
-          <PWAInstallButton label="Download App" />
 
           {/* Mobile role select trigger */}
           <div className="flex md:hidden">

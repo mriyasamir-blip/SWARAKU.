@@ -113,7 +113,6 @@ import {
   VoterReferralView,
 } from './components/swaraku/VoterDashboardViews';
 import { StaffPortalApp } from './components/swaraku/StaffPortalApp';
-import { PWAInstallButton } from './components/pwa/PWAInstallButton';
 import { OfflineIndicator } from './components/pwa/OfflineIndicator';
 
 type DisplayMode = 'website' | 'apps';
@@ -1283,8 +1282,7 @@ export default function App() {
         </nav>
 
         {/* Sidebar Footer Actions */}
-        <div className="p-4 border-t border-slate-100 space-y-2.5">
-          <PWAInstallButton variant="outline" label="Pasang Aplikasi" className="w-full justify-center min-h-[42px]" />
+        <div className="p-4 border-t border-slate-100">
           <button
             type="button"
             onClick={handleLogout}
@@ -1306,7 +1304,6 @@ export default function App() {
           <span className="text-xs font-extrabold font-mono tabular-nums text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg">
             {voterProfile.points.toLocaleString('id-ID')} Poin
           </span>
-          <PWAInstallButton variant="compact" label="App" />
         </div>
       </header>
 

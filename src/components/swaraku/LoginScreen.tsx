@@ -688,7 +688,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       d="M12 24c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-2.1-6.7-5l-3.7 2.9C3.5 21.4 7.4 24 12 24z"
                     />
                   </svg>
-                  <span>{busy ? 'Memverifikasi Akun...' : 'Masuk dengan SSO / Akun Google'}</span>
+                  <span>{busy ? 'Memverifikasi Akun...' : 'Masuk dengan Akun Google'}</span>
                 </button>
 
                 <div className="relative flex items-center py-0.5">
@@ -786,7 +786,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             {portalTab === 'relawan' && (
               <div className="space-y-4">
                 <div className="rounded-2xl bg-blue-50 border border-blue-200 p-3 text-xs text-blue-900 leading-relaxed">
-                  Masuk menggunakan akun <span className="font-bold">Relawan</span> yang telah terdaftar dan aktif (via SSO Google atau login manual).
+                  Masuk menggunakan akun <span className="font-bold">Relawan</span> yang telah terdaftar dan aktif (via Akun Google atau login manual).
                 </div>
 
                 {/* Google SSO Button untuk Relawan */}
@@ -818,7 +818,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       d="M12 24c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-2.1-6.7-5l-3.7 2.9C3.5 21.4 7.4 24 12 24z"
                     />
                   </svg>
-                  <span>{busy ? 'Memverifikasi Akun...' : 'Masuk dengan SSO / Akun Google'}</span>
+                  <span>{busy ? 'Memverifikasi Akun...' : 'Masuk dengan Akun Google'}</span>
                 </button>
 
                 <div className="relative flex items-center py-0.5">
