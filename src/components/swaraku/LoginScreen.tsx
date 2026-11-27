@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   LogIn,
   ShieldCheck,
-  Smartphone,
   AlertCircle,
   Users,
   Shield,
@@ -18,7 +17,6 @@ import {
   CheckCircle2,
   ArrowLeft,
 } from 'lucide-react';
-import { PWAInstallButton } from '../pwa/PWAInstallButton';
 import { WilayahSelector, type WilayahValue } from '../common/WilayahSelector';
 import type { SignUpAccountPayload } from '../../services/userApiService';
 
@@ -916,28 +914,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           </>
         )}
 
-        {/* Trust & PWA Install */}
-        <div className="pt-4 border-t border-slate-100 space-y-3">
+        {/* Trust */}
+        <div className="pt-4 border-t border-slate-100">
           <div className="flex items-start gap-2.5 text-xs text-slate-600">
             <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
             <span>
               Akses diverifikasi melalui Whitelist Cloud Database. Hanya akun berstatus Aktif yang dapat masuk.
             </span>
-          </div>
-
-          <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3.5 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <Smartphone className="w-5 h-5 text-blue-700 shrink-0" />
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-slate-900 truncate">
-                  Pasang Aplikasi Swaraku
-                </p>
-                <p className="text-[11px] text-slate-500 truncate">
-                  Tersedia untuk Android, iPhone &amp; Desktop
-                </p>
-              </div>
-            </div>
-            <PWAInstallButton variant="outline" label="Install App" />
           </div>
         </div>
       </div>
